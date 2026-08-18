@@ -1,0 +1,2 @@
+ALTER TABLE "listings" DROP CONSTRAINT "listing_paths_nonempty";--> statement-breakpoint
+ALTER TABLE "listings" ADD CONSTRAINT "listing_paths_nonempty" CHECK (coalesce(array_length("listings"."fulfillment_paths", 1), 0) >= 1);

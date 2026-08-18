@@ -1,0 +1,67 @@
+﻿# Entire local backing infrastructure for CollectTT.
+# Nothing here requires a vendor account. `docker compose up -d` and you can develop.
+#
+#   postgres -> database + Graphile Worker job queue + LISTEN/NOTIFY backplane
+#   minio    -> S3-compatible object storage standing in for Cloudflare R2
+#
+# Production equivalents (from end of Phase 0) are Render Postgres and Cloudflare R2.
+# Both are reached through the same client code; only credentials differ.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: collecttt-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: collecttt
+      POSTGRES_PASSWORD: collecttt_dev
+      POSTGRES_DB: collecttt
+    ports:
+      # Host port 5434 deliberately: many machines already run a native Postgres on
+      # 5432, and silently connecting to the wrong server is a miserable hour.
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U collecttt -d collecttt"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: collecttt-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: collecttt
+      MINIO_ROOT_PASSWORD: collecttt_dev
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console -> http://localhost:9001
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: creates the images bucket so the app has somewhere to upload on first run.
+  minio-init:
+    image: minio/mc:latest
+    container_name: collecttt-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 collecttt collecttt_dev &&
+      mc mb --ignore-existing local/collecttt-images &&
+      mc anonymous set download local/collecttt-images &&
+      echo 'bucket collecttt-images ready'
+      "
+
+volumes:
+  postgres_data:
+  minio_data:
