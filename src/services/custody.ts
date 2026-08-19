@@ -13,7 +13,7 @@
  *   the holding just re-links to the new transaction attempt.
  */
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx, DbOrTx } from '../db/client';
 import { custodyHoldings, relayStores, relayStoreStaff } from '../db/schema/custody';
@@ -510,7 +510,7 @@ export async function storeBoard(tx: DbOrTx, storeId: string): Promise<StoreBoar
     const names = await tx
       .select({ id: profiles.userId, name: profiles.displayName })
       .from(profiles)
-      .where(sql`${profiles.userId} = any(${buyerIds})`);
+      .where(inArray(profiles.userId, buyerIds));
     for (const n of names) buyerNames.set(n.id, n.name);
   }
 

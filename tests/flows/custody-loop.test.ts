@@ -678,4 +678,68 @@ describe('custody notification strings', () => {
     await db.delete(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
     await db.delete(relayStores).where(eq(relayStores.id, isolatedStoreId));
   });
+
+  it('board resolves buyer names for one buyer and for two buyers on the same board', async () => {
+    const { storeBoard } = await import('../../src/services/custody');
+    const { transactions } = await import('../../src/db/schema/transactions');
+    const { claims } = await import('../../src/db/schema/listings');
+
+    // Isolated store: storeBoard's buyerIds/buyerNames lookup batches across every
+    // buyer-linked holding currently on the board, so a dedicated store lets this test
+    // control exactly how many distinct buyers are present for each assertion below,
+    // rather than depending on what sibling tests happened to leave on the shared store.
+    const isolatedStore = await db
+      .insert(relayStores)
+      .values({ name: `Buyers ${SUFFIX}`, area: 'San Fernando', acceptsSizeClasses: ['small'] })
+      .returning({ id: relayStores.id });
+    const isolatedStoreId = isolatedStore[0]!.id;
+
+    const listingA = await makeRelayListing();
+    const claimA = await claimListing({
+      listingId: listingA,
+      claimantId: buyerA,
+      fulfillmentPath: 'relay',
+      relayStoreId: isolatedStoreId,
+    });
+    if (claimA.transactionId === undefined) throw new Error('expected an immediate claim');
+    const claimATransactionId = claimA.transactionId;
+    const heldA = await db.select().from(custodyHoldings).where(eq(custodyHoldings.listingId, listingA));
+    const holdingAId = heldA[0]!.id;
+
+    // Exactly one buyer-linked holding on this board: exercises the arity that used to
+    // fail with "malformed array literal".
+    const boardOneBuyer = await storeBoard(db, isolatedStoreId);
+    const rowOneBuyer = boardOneBuyer.find((r) => r.holdingId === holdingAId);
+    expect(rowOneBuyer?.buyerName).toBe(buyerA);
+
+    const listingB = await makeRelayListing();
+    const claimB = await claimListing({
+      listingId: listingB,
+      claimantId: buyerB,
+      fulfillmentPath: 'relay',
+      relayStoreId: isolatedStoreId,
+    });
+    if (claimB.transactionId === undefined) throw new Error('expected an immediate claim');
+    const claimBTransactionId = claimB.transactionId;
+    const heldB = await db.select().from(custodyHoldings).where(eq(custodyHoldings.listingId, listingB));
+    const holdingBId = heldB[0]!.id;
+
+    // Two distinct buyer-linked holdings: exercises the arity that used to fail with
+    // "op ANY/ALL (array) requires array on right side".
+    const boardTwoBuyers = await storeBoard(db, isolatedStoreId);
+    const rowA = boardTwoBuyers.find((r) => r.holdingId === holdingAId);
+    const rowB = boardTwoBuyers.find((r) => r.holdingId === holdingBId);
+    expect(rowA?.buyerName).toBe(buyerA);
+    expect(rowB?.buyerName).toBe(buyerB);
+
+    // Clean up: transactions and claims both reference the store (on delete restrict),
+    // and transactions.claimId references claims (also restrict), so transactions go
+    // first, then claims, then the holdings, then the store.
+    await db.delete(transactions).where(eq(transactions.id, claimATransactionId));
+    await db.delete(transactions).where(eq(transactions.id, claimBTransactionId));
+    await db.delete(claims).where(eq(claims.relayStoreId, isolatedStoreId));
+    await db.delete(custodyHoldings).where(eq(custodyHoldings.id, holdingAId));
+    await db.delete(custodyHoldings).where(eq(custodyHoldings.id, holdingBId));
+    await db.delete(relayStores).where(eq(relayStores.id, isolatedStoreId));
+  });
 });
