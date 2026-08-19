@@ -15,7 +15,7 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 
-import type { Tx } from '../db/client';
+import type { Tx, DbOrTx } from '../db/client';
 import { custodyHoldings, relayStores, relayStoreStaff } from '../db/schema/custody';
 import { transactions, transactionEvents } from '../db/schema/transactions';
 import { listings } from '../db/schema/listings';
@@ -467,6 +467,9 @@ export interface StoreBoardRow {
   overstayFlaggedAt: Date | null;
   transactionId: string | null;
   daysHeld: number | null;
+  dropoffCode: string;
+  /** The seller's phone, falling back to their email — same string as the eviction notice. */
+  ownerContact: string;
 }
 
 /**
@@ -474,12 +477,14 @@ export interface StoreBoardRow {
  * because their pain is abuse (bulky items, indefinite storage, no idea what is paid),
  * not a missing fee.
  */
-export async function storeBoard(tx: Tx, storeId: string): Promise<StoreBoardRow[]> {
+export async function storeBoard(tx: DbOrTx, storeId: string): Promise<StoreBoardRow[]> {
   const rows = await tx
     .select({
       h: custodyHoldings,
       listingTitle: listings.title,
       sellerName: profiles.displayName,
+      sellerPhone: profiles.phoneE164,
+      sellerEmail: users.email,
       paymentState: transactions.paymentState,
       buyerId: transactions.buyerId,
       transactionId: transactions.id,
@@ -487,6 +492,7 @@ export async function storeBoard(tx: Tx, storeId: string): Promise<StoreBoardRow
     .from(custodyHoldings)
     .innerJoin(listings, eq(listings.id, custodyHoldings.listingId))
     .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
+    .leftJoin(users, eq(users.id, listings.sellerId))
     .leftJoin(transactions, eq(transactions.id, custodyHoldings.currentTransactionId))
     .where(eq(custodyHoldings.storeId, storeId))
     .orderBy(sql`
@@ -526,12 +532,41 @@ export async function storeBoard(tx: Tx, storeId: string): Promise<StoreBoardRow
       r.h.droppedOffAt === null
         ? null
         : Math.floor((now - r.h.droppedOffAt.getTime()) / (24 * 60 * 60 * 1000)),
+    dropoffCode: r.h.dropoffCode,
+    ownerContact: r.sellerPhone ?? r.sellerEmail ?? NO_CONTACT,
   }));
+}
+
+/**
+ * The counter lookup. Scoped to THIS store and to items actually expected, so an
+ * unknown code produces a refusal a clerk can act on rather than a row they should
+ * never have seen.
+ */
+export async function findHoldingByCode(
+  tx: DbOrTx,
+  storeId: string,
+  code: string,
+): Promise<{ holdingId: string; listingTitle: string } | null> {
+  const rows = await tx
+    .select({ id: custodyHoldings.id, listingTitle: listings.title })
+    .from(custodyHoldings)
+    .innerJoin(listings, eq(listings.id, custodyHoldings.listingId))
+    .where(
+      and(
+        eq(custodyHoldings.storeId, storeId),
+        eq(custodyHoldings.state, 'awaiting_dropoff'),
+        sql`upper(${custodyHoldings.dropoffCode}) = upper(${code.trim()})`,
+      ),
+    )
+    .limit(1);
+
+  const row = rows[0];
+  return row === undefined ? null : { holdingId: row.id, listingTitle: row.listingTitle };
 }
 
 /** Stores this user may act for. An empty array means they are not store staff. */
 export async function storesForStaff(
-  tx: Tx,
+  tx: DbOrTx,
   userId: string,
 ): Promise<Array<{ id: string; name: string; role: string }>> {
   return tx

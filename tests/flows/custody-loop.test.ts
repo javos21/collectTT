@@ -608,4 +608,27 @@ describe('custody notification strings', () => {
     row = await db.select().from(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
     expect(row[0]!.overstayFlaggedAt!.getTime()).toBe(firstFlag);
   });
+
+  it('finds a holding by code, scoped to the store', async () => {
+    const { findHoldingByCode } = await import('../../src/services/custody');
+
+    const listingId = await makeRelayListing();
+    await claimListing({ listingId, claimantId: buyerA, fulfillmentPath: 'relay', relayStoreId: storeId });
+    const held = await db.select().from(custodyHoldings).where(eq(custodyHoldings.listingId, listingId));
+    const code = held[0]!.dropoffCode;
+
+    const found = await findHoldingByCode(db, storeId, code.toLowerCase());
+    expect(found?.holdingId).toBe(held[0]!.id);
+
+    // An unknown code is a refusal, not an error.
+    expect(await findHoldingByCode(db, storeId, 'CT-ZZZZ')).toBeNull();
+
+    // Another store cannot see it.
+    const otherStore = await db
+      .insert(relayStores)
+      .values({ name: `Other ${SUFFIX}`, area: 'San Fernando', acceptsSizeClasses: ['small'] })
+      .returning({ id: relayStores.id });
+    expect(await findHoldingByCode(db, otherStore[0]!.id, code)).toBeNull();
+    await db.delete(relayStores).where(eq(relayStores.id, otherStore[0]!.id));
+  });
 });
