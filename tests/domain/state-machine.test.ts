@@ -40,6 +40,7 @@ import {
   canComplete,
   shouldAutoComplete,
   usesCustodyTrack,
+  fallbackFulfillmentPath,
   initialCustodyState,
   validateTransaction,
   REASON_TO_STATE,
@@ -251,6 +252,23 @@ describe('fulfillment paths against both tracks', () => {
   it('exactly two paths use the custody track', () => {
     const custodyPaths = FULFILLMENT_PATHS.filter(usesCustodyTrack);
     expect(new Set(custodyPaths)).toEqual(new Set(['relay', 'full_service']));
+  });
+
+  it('the pre-Phase-2 fallback never picks a path that needs a store', () => {
+    // ★ The §6.1 defect: taking paths[0] positionally hands a relay-only listing
+    //   `path='relay', storeId=null`, which openOrRelinkHolding refuses — a failing
+    //   worker job in auctionClose and in promotion.
+    expect(fallbackFulfillmentPath(['relay', 'cash_meetup'])).toBe('cash_meetup');
+    expect(fallbackFulfillmentPath(['full_service', 'remote_ship'])).toBe('remote_ship');
+
+    // Unchanged wherever a non-custody path is declared at all, in declaration order.
+    expect(fallbackFulfillmentPath(['remote_ship', 'relay'])).toBe('remote_ship');
+    expect(fallbackFulfillmentPath(['cash_meetup'])).toBe('cash_meetup');
+
+    // A listing that offers ONLY custody paths has no store-free option — the old
+    // behaviour is kept rather than inventing a path the seller never agreed to.
+    expect(fallbackFulfillmentPath(['relay'])).toBe('relay');
+    expect(fallbackFulfillmentPath([])).toBe('cash_meetup');
   });
 
   it('P2P paths start — and stay — outside the custody track', () => {

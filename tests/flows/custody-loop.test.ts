@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 
 import { db, pool } from '../../src/db/client';
 import { users } from '../../src/db/schema/auth';
@@ -46,7 +46,12 @@ const seller = `c_seller_${SUFFIX}`;
 const buyerA = `c_buyerA_${SUFFIX}`;
 const buyerB = `c_buyerB_${SUFFIX}`;
 const clerk = `c_clerk_${SUFFIX}`;
-const everyone = [seller, buyerA, buyerB, clerk];
+/** A seller WITH a phone on file — the branch of `ownerContact` the email fallback hides. */
+const phoneSeller = `c_phoneseller_${SUFFIX}`;
+const everyone = [seller, buyerA, buyerB, clerk, phoneSeller];
+
+/** Unique per run: profiles.phone_e164 carries a partial unique index. */
+const SELLER_PHONE = `+1868${String(parseInt(SUFFIX, 16) % 10_000_000).padStart(7, '0')}`;
 
 let storeId: string;
 
@@ -94,6 +99,11 @@ beforeAll(async () => {
     .returning({ id: relayStores.id });
   storeId = stores[0]!.id;
   await db.insert(relayStoreStaff).values({ storeId, userId: clerk, role: 'staff' });
+
+  await db
+    .update(profiles)
+    .set({ phoneE164: SELLER_PHONE })
+    .where(eq(profiles.userId, phoneSeller));
 });
 
 afterAll(async () => {
@@ -104,7 +114,7 @@ afterAll(async () => {
   const ids = await db
     .select({ id: listings.id })
     .from(listings)
-    .where(eq(listings.sellerId, seller));
+    .where(inArray(listings.sellerId, everyone));
   const listingIds = ids.map((l) => l.id);
 
   if (listingIds.length > 0) {
@@ -542,7 +552,9 @@ describe('custody notification strings', () => {
 
   it('renders the collection deadline after payment extends the shelf clock, not the tight unpaid one', async () => {
     const { notifications } = await import('../../src/db/schema/notifications');
-    const { markReceived, onPaymentConfirmed } = await import('../../src/services/custody');
+    const { markReceived, onPaymentConfirmed, authorizeRelease } = await import(
+      '../../src/services/custody'
+    );
     const { transactions: transactionsTable } = await import('../../src/db/schema/transactions');
 
     const listingId = await makeRelayListing();
@@ -569,6 +581,12 @@ describe('custody notification strings', () => {
       await onPaymentConfirmed(tx, claim.transactionId!);
     });
 
+    // ★ The clerk clears it. `custody_ready_for_pickup` has exactly ONE producer, and
+    //   this is it — see src/db/atomic/authorize-release.ts.
+    await db.transaction(async (tx) => {
+      await authorizeRelease({ tx, holdingId: held[0]!.id, actorUserId: clerk, actorRole: 'store' });
+    });
+
     const holdingAfter = await db
       .select()
       .from(custodyHoldings)
@@ -587,6 +605,65 @@ describe('custody notification strings', () => {
     // holding, not a value computed before recomputeShelfClock ran.
     const expiresAtText = holdingAfter[0]!.custodyExpiresAt!.toLocaleString('en-TT');
     expect(ready!.body).toContain(expiresAtText);
+  });
+
+  it('sends the released buyer exactly ONE ready-to-collect notice, naming the real store and a real date', async () => {
+    const { notifications } = await import('../../src/db/schema/notifications');
+    const { markReceived, authorizeRelease } = await import('../../src/services/custody');
+    const { markPaid, confirmPayment } = await import('../../src/services/transactions');
+
+    const listingId = await makeRelayListing();
+    const claim = await claimListing({
+      listingId,
+      claimantId: buyerA,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+    const txId = claim.transactionId!;
+    const held = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.listingId, listingId));
+    const holdingId = held[0]!.id;
+
+    await db.transaction(async (tx) => {
+      await markReceived({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+    await db.transaction(async (tx) => {
+      await markPaid(tx, txId, buyerA);
+      await confirmPayment(tx, txId, seller);
+    });
+    await db.transaction(async (tx) => {
+      await authorizeRelease({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    const holdingAfter = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.id, holdingId));
+
+    // Scoped to THIS deal: the fixture buyers are reused across tests.
+    const inbox = await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, buyerA));
+    const ready = inbox.filter(
+      (n) => n.eventType === 'custody_ready_for_pickup' && n.linkUrl === `/deals/${txId}`,
+    );
+
+    // ★ ONE. Before this fix, confirmPayment fired the event under `custody_ready:…`
+    //   and the release authorization fired it again under `release_authorized:…`, so
+    //   the buyer got two — and the second, degraded one arrived last.
+    expect(ready).toHaveLength(1);
+
+    const notice = ready[0]!;
+    // The template reads `storeName` for its TITLE. A missing key rendered the literal
+    // "Ready to collect at ." / "at the store" rather than the shop's name.
+    expect(notice.title).toContain(`Test Relay ${SUFFIX}`);
+    expect(notice.title).not.toContain('the store');
+    // ...and `expiresAt` for its BODY. A missing key rendered `Collect "…" by .`
+    expect(notice.body).not.toMatch(/by \.$/);
+    expect(notice.body).toContain(holdingAfter[0]!.custodyExpiresAt!.toLocaleString('en-TT'));
   });
 
   it('flags an overstayed item and no-ops when the clock has moved', async () => {
@@ -704,6 +781,56 @@ describe('custody notification strings', () => {
     await db.delete(relayStores).where(eq(relayStores.id, isolatedStoreId));
   });
 
+  it('shows the seller PHONE, identically, on the board and in the eviction notice', async () => {
+    const { storeBoard } = await import('../../src/services/custody');
+    const { markReceived } = await import('../../src/services/custody');
+    const { custodyOverstay } = await import('../../src/jobs/tasks/custody-overstay');
+    const { notifications } = await import('../../src/db/schema/notifications');
+    const helpers = {
+      logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} },
+    } as never;
+
+    // ★ R3's whole stated risk is that the board's contact string and the eviction
+    //   notification's can drift apart. They are produced by two different queries,
+    //   and until now only the EMAIL fallback branch had ever executed — the phone
+    //   branch, which is the one a clerk actually dials, was never covered on either
+    //   side. This fixture seller has a phone, and both sides are asserted.
+    const title = `Phone owner ${SUFFIX}`;
+    const listingId = await makeRelayListing({ sellerId: phoneSeller, title });
+    await claimListing({
+      listingId,
+      claimantId: buyerA,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+    const held = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.listingId, listingId));
+    const holdingId = held[0]!.id;
+
+    await db.transaction(async (tx) => {
+      await markReceived({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    const board = await storeBoard(db, storeId);
+    expect(board.find((r) => r.holdingId === holdingId)?.ownerContact).toBe(SELLER_PHONE);
+
+    // The other side of the same fact: the store's eviction prompt.
+    await db
+      .update(custodyHoldings)
+      .set({ custodyExpiresAt: sql`now() - interval '1 hour'` })
+      .where(eq(custodyHoldings.id, holdingId));
+    await custodyOverstay({ holdingId }, helpers);
+
+    const inbox = await db.select().from(notifications).where(eq(notifications.userId, clerk));
+    const evicted = inbox.find(
+      (n) => n.eventType === 'custody_overstay_store' && n.title.includes(title),
+    );
+    expect(evicted).toBeDefined();
+    expect(evicted!.body).toContain(SELLER_PHONE);
+  });
+
   it('board resolves buyer names for one buyer and for two buyers on the same board', async () => {
     const { storeBoard } = await import('../../src/services/custody');
     const { transactions } = await import('../../src/db/schema/transactions');
@@ -769,6 +896,68 @@ describe('custody notification strings', () => {
   });
 });
 
+describe('a deactivated store does not brick the jobs that depend on it', () => {
+  it('auction:close ends the auction with no sale instead of failing forever', async () => {
+    const { auctionClose } = await import('../../src/jobs/tasks/auction-close');
+    const { bids } = await import('../../src/db/schema/listings');
+    const { transactions } = await import('../../src/db/schema/transactions');
+    const helpers = {
+      logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} },
+    } as never;
+
+    // ★ Deactivating a store is the spec's DESIGNATED way to take a shop offline
+    //   (§3.1) — the documented operation, not an exotic state. Before this fix,
+    //   loadStore's CustodyConflictError propagated out of openTransaction and failed
+    //   the JOB, which graphile-worker retried to exhaustion: the listing stayed
+    //   `active` past its endsAt with no winner and nobody told.
+    const dying = await db
+      .insert(relayStores)
+      .values({ name: `Closing ${SUFFIX}`, area: 'Arima', acceptsSizeClasses: ['small'] })
+      .returning({ id: relayStores.id });
+    const dyingStoreId = dying[0]!.id;
+
+    const listingId = await makeRelayListing({
+      saleType: 'auction',
+      priceCents: null,
+      startBidCents: 5_000,
+      endsAt: new Date(Date.now() - 60_000),
+    });
+    const placed = await db
+      .insert(bids)
+      .values({
+        listingId,
+        bidderId: buyerA,
+        amountCents: 9_000,
+        fulfillmentPath: 'relay',
+        relayStoreId: dyingStoreId,
+        status: 'active',
+      })
+      .returning({ id: bids.id });
+
+    await db.update(relayStores).set({ active: false }).where(eq(relayStores.id, dyingStoreId));
+
+    // The job must RESOLVE, not throw.
+    await expect(auctionClose({ listingId }, helpers)).resolves.toBeUndefined();
+
+    const after = await db.select().from(listings).where(eq(listings.id, listingId));
+    expect(after[0]!.status).toBe('ended_no_sale');
+    expect(after[0]!.resolvedAt).not.toBeNull();
+
+    // The savepoint rolled the half-made sale back: no transaction, and the ladder is
+    // untouched — nothing claims this bid won an auction that never completed.
+    const opened = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.listingId, listingId));
+    expect(opened).toHaveLength(0);
+    const bidAfter = await db.select().from(bids).where(eq(bids.id, placed[0]!.id));
+    expect(bidAfter[0]!.status).toBe('active');
+
+    await db.delete(bids).where(eq(bids.listingId, listingId));
+    await db.delete(relayStores).where(eq(relayStores.id, dyingStoreId));
+  });
+});
+
 describe('the full custody loop', () => {
   it('runs the full loop: drop-off -> pay -> release -> collect -> complete', async () => {
     const { markReceived, authorizeRelease, markPickedUp } = await import(
@@ -814,8 +1003,28 @@ describe('the full custody loop', () => {
     expect(stillHeld[0]!.state).toBe('at_relay');
     expect(stillHeld[0]!.releaseAuthorizedAt).toBeNull();
 
+    // ★ THE REALISTIC NEAR-MISS: the buyer has SAID they paid, and is standing at the
+    //   counter saying so. `buyer_marked_paid` is not `confirmed`, and the gate keys on
+    //   `confirmed` — the seller's word, not the buyer's. This is the refusal the
+    //   escrow guarantee actually rests on.
     await db.transaction(async (tx) => {
       await markPaid(tx, txId, buyerA);
+    });
+
+    await expect(
+      db.transaction(async (tx) => {
+        await authorizeRelease({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+      }),
+    ).rejects.toThrow(/payment has not been confirmed/i);
+
+    const stillUnreleased = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.id, holdingId));
+    expect(stillUnreleased[0]!.state).toBe('at_relay');
+    expect(stillUnreleased[0]!.releaseAuthorizedAt).toBeNull();
+
+    await db.transaction(async (tx) => {
       await confirmPayment(tx, txId, seller);
     });
 

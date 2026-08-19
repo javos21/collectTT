@@ -30,6 +30,7 @@ import {
   assertCustodyTransition,
   canActorTransitionCustody,
   isLiveCustodyState,
+  IllegalCustodyTransitionError,
   type CustodyState,
 } from '../domain/states/custody';
 import type { ActorRole } from '../domain/states/actors';
@@ -55,6 +56,35 @@ function isDropoffCodeCollision(error: unknown): boolean {
 export class CustodyError extends Error {}
 export class CustodyForbiddenError extends CustodyError {}
 export class CustodyConflictError extends CustodyError {}
+
+/**
+ * ★ ONE clerk-facing sentence for every refused custody transition.
+ *
+ * `assertCustodyTransition` speaks the state machine's own language — "Illegal custody
+ * transition: picked_up -> release_authorized" — and on a busy counter with two
+ * terminals and a stale board that is the MOST LIKELY refusal, not an exotic one. The
+ * board promises "a refusal a clerk can act on, not a stack trace", so every counter
+ * action funnels its shape check through here and gets the same sentence the
+ * authorize-release fallback already produces when state changes mid-flight.
+ *
+ * `action` completes "it cannot be ___ from here."
+ */
+export function assertCustodyTransitionForCounter(
+  from: CustodyState,
+  to: CustodyState,
+  action: string,
+): void {
+  try {
+    assertCustodyTransition(from, to);
+  } catch (error) {
+    if (error instanceof IllegalCustodyTransitionError) {
+      throw new CustodyConflictError(
+        `This item is "${from.replace(/_/g, ' ')}" — it cannot be ${action} from here.`,
+      );
+    }
+    throw error;
+  }
+}
 
 // ════════════════════════════════════════════════════════ opening a holding
 
@@ -170,7 +200,7 @@ export async function markReceived(input: StoreActionInput): Promise<void> {
   const holding = await loadHolding(input.tx, input.holdingId);
   await assertStoreAuthority(input.tx, holding, input.actorUserId, input.actorRole);
   assertActor('awaiting_dropoff', 'at_relay', input.actorRole ?? 'store');
-  assertCustodyTransition(holding.state, 'at_relay');
+  assertCustodyTransitionForCounter(holding.state, 'at_relay', 'received');
 
   const updated = await input.tx
     .update(custodyHoldings)
@@ -228,7 +258,7 @@ export async function markPickedUp(input: StoreActionInput): Promise<void> {
   const holding = await loadHolding(input.tx, input.holdingId);
   await assertStoreAuthority(input.tx, holding, input.actorUserId, input.actorRole);
   assertActor('release_authorized', 'picked_up', input.actorRole ?? 'store');
-  assertCustodyTransition(holding.state, 'picked_up');
+  assertCustodyTransitionForCounter(holding.state, 'picked_up', 'collected');
 
   const updated = await input.tx
     .update(custodyHoldings)
@@ -271,7 +301,7 @@ export async function returnToSeller(input: StoreActionInput & { reason?: string
   if (actorRole === 'store') {
     await assertStoreAuthority(input.tx, holding, input.actorUserId, actorRole);
   }
-  assertCustodyTransition(holding.state, 'returned_to_seller');
+  assertCustodyTransitionForCounter(holding.state, 'returned_to_seller', 'returned to the seller');
 
   const updated = await input.tx
     .update(custodyHoldings)
@@ -384,32 +414,21 @@ export async function recomputeShelfClock(tx: Tx, holdingId: string): Promise<Da
 }
 
 /**
- * Payment just settled. Extend the shelf clock and, if the item is already on the
- * shelf, tell the buyer it is collectable. Called from `confirmPayment`.
+ * Payment just settled. Extend the shelf clock. Called from `confirmPayment`.
+ *
+ * ★ IT DOES NOT NOTIFY. `custody_ready_for_pickup` is sent from exactly ONE place —
+ *   the release authorization in src/db/atomic/authorize-release.ts — because that is
+ *   the truthful "cleared for collection" moment: the store board deliberately splits
+ *   "on the shelf, paid" from "ready for collection", and a buyer told to come and
+ *   collect before a clerk has cleared the item is being told something the counter
+ *   will not honour. Two producers of the same event also meant two inboxes entries
+ *   under two different idempotency keys, which no dedupe could ever collapse.
  */
 export async function onPaymentConfirmed(tx: Tx, transactionId: string): Promise<void> {
   const holding = await liveHoldingForTransaction(tx, transactionId);
   if (holding === undefined) return;
 
   await recomputeShelfClock(tx, holding.id);
-
-  if (holding.state !== 'at_relay') return;
-
-  const ctx = await holdingContext(tx, holding.id);
-  if (ctx === null || ctx.buyerId === null) return;
-
-  await notify({
-    tx,
-    userId: ctx.buyerId,
-    event: 'custody_ready_for_pickup',
-    data: {
-      listingTitle: ctx.listingTitle,
-      storeName: ctx.storeName,
-      expiresAt: ctx.custodyExpiresAt?.toLocaleString('en-TT') ?? 'the collection deadline',
-    },
-    linkUrl: `/deals/${transactionId}`,
-    idempotencyKey: `custody_ready:${holding.id}:${transactionId}`,
-  });
 }
 
 /**
@@ -751,7 +770,7 @@ async function afterCustodyChange(
   });
 }
 
-interface HoldingContext {
+export interface HoldingContext {
   listingId: string;
   listingTitle: string;
   sellerId: string;
@@ -778,7 +797,7 @@ const NO_CONTACT = 'no contact on file';
  * `transactionId` are null while a holding sits on the shelf between attempts —
  * callers that address the buyer must check.
  */
-async function holdingContext(tx: Tx, holdingId: string): Promise<HoldingContext | null> {
+export async function holdingContext(tx: Tx, holdingId: string): Promise<HoldingContext | null> {
   const rows = await tx
     .select({
       listingId: listings.id,

@@ -29,6 +29,7 @@ import {
   onPaymentConfirmed,
   onTransactionTerminated,
   returnToSeller,
+  CustodyConflictError,
 } from './custody';
 import {
   assertPaymentTransition,
@@ -40,6 +41,7 @@ import {
   REASON_TO_STATE,
   statusAfterFailedAttempt,
   usesCustodyTrack,
+  fallbackFulfillmentPath,
   type ActorRole,
   type FulfillmentPath,
   type TerminationReason,
@@ -659,68 +661,87 @@ export async function promoteNextCandidate(
     );
   const excluded = new Set(failed.map((f) => f.buyerId));
 
-  const candidate =
-    listing.saleType === 'straight_sale'
-      ? await nextFromClaimStack(tx, listingId, excluded)
-      : await nextFromBidLadder(tx, listingId, excluded);
+  // ★ A promotion runs inside a JOB. Custody can refuse to open — the nominated store
+  //   was deactivated (the spec's designated way to take a shop offline), or it no
+  //   longer accepts this size. That refusal must not fail the job: a retried-to-death
+  //   promotion strands the listing with no open attempt and nobody notified. So each
+  //   candidate is attempted in its own SAVEPOINT, and a custody refusal moves to the
+  //   next candidate instead of propagating. Anything else still throws.
+  for (;;) {
+    const candidate =
+      listing.saleType === 'straight_sale'
+        ? await nextFromClaimStack(tx, listingId, excluded)
+        : await nextFromBidLadder(tx, listingId, excluded);
 
-  if (candidate === null) {
-    await resolveListingAfterFailure(tx, listingId, listing.autoRelistOnRenege);
-    return { promoted: false };
+    if (candidate === null) {
+      await resolveListingAfterFailure(tx, listingId, listing.autoRelistOnRenege);
+      return { promoted: false };
+    }
+
+    try {
+      const transactionId = await tx.transaction(async (sp) => {
+        if (candidate.claimId !== undefined) {
+          await sp.update(claims).set({ status: 'active' }).where(eq(claims.id, candidate.claimId));
+        }
+
+        const opened = await openTransaction({
+          tx: sp,
+          listingId,
+          sellerId: listing.sellerId,
+          buyerId: candidate.buyerId,
+          amountCents: candidate.amountCents,
+          fulfillmentPath: candidate.fulfillmentPath,
+          source: listing.saleType === 'straight_sale' ? 'claim_promotion' : 'auction_runner_up',
+          claimId: candidate.claimId ?? null,
+          winningBidId: candidate.bidId ?? null,
+          listingTitle: listing.title,
+          relayStoreId: candidate.relayStoreId ?? null,
+        });
+
+        if (candidate.claimId !== undefined) {
+          await sp
+            .update(claims)
+            .set({ transactionId: opened.id })
+            .where(eq(claims.id, candidate.claimId));
+        }
+
+        // A promoted candidate gets a distinct, louder notification than a first
+        // claimer: they were not expecting this, and their clock is already running.
+        await notify({
+          tx: sp,
+          userId: candidate.buyerId,
+          event: 'claim_promoted_buyer',
+          data: {
+            listingTitle: listing.title,
+            deadline: (await load(sp, opened.id)).paymentDeadlineAt.toLocaleString('en-TT'),
+          },
+          linkUrl: `/deals/${opened.id}`,
+          idempotencyKey: `promoted:${opened.id}`,
+        });
+
+        await recordTransition(sp, {
+          transactionId: opened.id,
+          track: 'overall',
+          from: '(promotion)',
+          to: 'open',
+          actorRole: 'system',
+          reason: `promoted after ${failedTransactionId} failed`,
+        });
+
+        return opened.id;
+      });
+
+      return { promoted: true, transactionId };
+    } catch (error) {
+      if (!(error instanceof CustodyConflictError)) throw error;
+      // Everything this candidate wrote has been rolled back to the savepoint.
+      console.warn(
+        `[promote] listing ${listingId}: candidate ${candidate.buyerId} could not take ` +
+          `custody (${error.message}) — trying the next one`,
+      );
+      excluded.add(candidate.buyerId);
+    }
   }
-
-  if (candidate.claimId !== undefined) {
-    await tx
-      .update(claims)
-      .set({ status: 'active' })
-      .where(eq(claims.id, candidate.claimId));
-  }
-
-  const opened = await openTransaction({
-    tx,
-    listingId,
-    sellerId: listing.sellerId,
-    buyerId: candidate.buyerId,
-    amountCents: candidate.amountCents,
-    fulfillmentPath: candidate.fulfillmentPath,
-    source: listing.saleType === 'straight_sale' ? 'claim_promotion' : 'auction_runner_up',
-    claimId: candidate.claimId ?? null,
-    winningBidId: candidate.bidId ?? null,
-    listingTitle: listing.title,
-    relayStoreId: candidate.relayStoreId ?? null,
-  });
-
-  if (candidate.claimId !== undefined) {
-    await tx
-      .update(claims)
-      .set({ transactionId: opened.id })
-      .where(eq(claims.id, candidate.claimId));
-  }
-
-  // A promoted candidate gets a distinct, louder notification than a first claimer:
-  // they were not expecting this, and their clock is already running.
-  await notify({
-    tx,
-    userId: candidate.buyerId,
-    event: 'claim_promoted_buyer',
-    data: {
-      listingTitle: listing.title,
-      deadline: (await load(tx, opened.id)).paymentDeadlineAt.toLocaleString('en-TT'),
-    },
-    linkUrl: `/deals/${opened.id}`,
-    idempotencyKey: `promoted:${opened.id}`,
-  });
-
-  await recordTransition(tx, {
-    transactionId: opened.id,
-    track: 'overall',
-    from: '(promotion)',
-    to: 'open',
-    actorRole: 'system',
-    reason: `promoted after ${failedTransactionId} failed`,
-  });
-
-  return { promoted: true, transactionId: opened.id };
 }
 
 interface Candidate {
@@ -792,8 +813,9 @@ async function nextFromBidLadder(
       buyerId: row.bidderId,
       amountCents: row.amountCents,
       // ★ The bidder's OWN choice, mirroring how the claim stack has always worked.
-      //   Falls back to the listing's first path only for bids placed before Phase 2.
-      fulfillmentPath: (row.fulfillmentPath ?? listing.paths[0] ?? 'cash_meetup') as FulfillmentPath,
+      //   Falls back to the first store-free declared path only for bids placed before
+      //   Phase 2, which carry neither a path nor a store — see fallbackFulfillmentPath.
+      fulfillmentPath: row.fulfillmentPath ?? fallbackFulfillmentPath(listing.paths),
       relayStoreId: row.relayStoreId,
       bidId: row.id,
     };

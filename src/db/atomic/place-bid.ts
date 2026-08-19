@@ -27,7 +27,7 @@ import { assertFulfillmentEligible } from '../../services/fulfillment-eligibilit
 import { notify } from '../../notifications/dispatch';
 import { enqueue } from '../../jobs/enqueue';
 import { bidIncrement, formatMoney, minimumNextBid } from '../../domain/money';
-import type { FulfillmentPath } from '../../domain/states/transaction';
+import { fallbackFulfillmentPath, type FulfillmentPath } from '../../domain/states/transaction';
 
 export interface BidResult {
   bidId: string;
@@ -46,7 +46,7 @@ export async function placeBid(opts: {
   /**
    * ★ The bidder's own settlement choice, recorded on the bid the way the claim stack
    *   has always recorded it. Optional: a bid without one falls back to the listing's
-   *   first declared path when the ladder is walked.
+   *   first store-free declared path when the ladder is walked.
    */
   fulfillmentPath?: FulfillmentPath;
   /** Which relay store the bidder will collect from. Required when path === 'relay'. */
@@ -222,11 +222,10 @@ export async function placeBid(opts: {
         sellerId: listing.sellerId,
         buyerId: opts.bidderId,
         amountCents: opts.amountCents,
-        // ★ The buyer's OWN choice. Falls back to the listing's first declared path
-        //   only when the bid carried none.
-        fulfillmentPath: (opts.fulfillmentPath ??
-          listing.fulfillmentPaths[0] ??
-          'cash_meetup') as FulfillmentPath,
+        // ★ The buyer's OWN choice. Falls back to the first declared path that needs
+        //   no store only when the bid carried none — see fallbackFulfillmentPath.
+        fulfillmentPath:
+          opts.fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
         source: 'auction_win',
         winningBidId: bid.id,
         listingTitle: listing.title,

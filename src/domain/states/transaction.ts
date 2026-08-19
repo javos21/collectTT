@@ -43,6 +43,24 @@ export function usesCustodyTrack(path: FulfillmentPath): boolean {
   return (CUSTODY_PATHS as readonly FulfillmentPath[]).includes(path);
 }
 
+/**
+ * ★ The fallback path for a bid or claim that carries none of its own.
+ *
+ * Pre-Phase-2 bids have neither `fulfillment_path` nor `relay_store_id`, so something
+ * has to stand in. Taking `paths[0]` positionally is not safe: on a relay-only listing
+ * that produces `path='relay', storeId=null`, which `openOrRelinkHolding` refuses with
+ * "A relay drop-off needs a store" — a user-facing error on a buyout, and a *failing
+ * worker job* in `auctionClose` and `promoteNextCandidate`, retried to exhaustion,
+ * leaving the listing active past its deadline with no winner and nobody notified.
+ *
+ * So: prefer the first declared path that needs no store. The trailing fallbacks keep
+ * behaviour identical for every listing that declares a non-custody path at all.
+ */
+export function fallbackFulfillmentPath(paths: readonly string[]): FulfillmentPath {
+  const declared = paths as readonly FulfillmentPath[];
+  return declared.find((p) => !usesCustodyTrack(p)) ?? declared[0] ?? 'cash_meetup';
+}
+
 /** The custody state a brand-new transaction on this path must start in. */
 export function initialCustodyState(path: FulfillmentPath): CustodyState {
   return usesCustodyTrack(path) ? 'awaiting_dropoff' : 'not_applicable';

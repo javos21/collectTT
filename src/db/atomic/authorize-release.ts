@@ -22,12 +22,16 @@
 
 import { sql } from 'drizzle-orm';
 
-import { loadHolding, CustodyConflictError, CustodyForbiddenError } from '../../services/custody';
+import {
+  loadHolding,
+  holdingContext,
+  assertCustodyTransitionForCounter,
+  CustodyConflictError,
+  CustodyForbiddenError,
+} from '../../services/custody';
 import { relayStoreStaff } from '../schema/custody';
 import { transactions, transactionEvents } from '../schema/transactions';
-import { listings } from '../schema/listings';
 import { notify } from '../../notifications/dispatch';
-import { assertCustodyTransition } from '../../domain/states/custody';
 import { and, eq } from 'drizzle-orm';
 import type { StoreActionInput } from '../../services/custody';
 
@@ -36,10 +40,9 @@ export async function authorizeReleaseAtomic(input: StoreActionInput): Promise<v
   const holding = await loadHolding(tx, holdingId);
   const actorRole = input.actorRole ?? 'store';
 
-  // Shape check first: is this transition legal at all?
-  assertCustodyTransition(holding.state, 'release_authorized');
-
-  // Authority check: only staff of THIS store (or an admin) may release.
+  // ★ AUTHORITY FIRST, then shape — the same order markReceived, markPickedUp and
+  //   returnToSeller use. A caller who is not staff here must learn nothing about the
+  //   holding, not even which custody state it is in.
   if (actorRole !== 'admin') {
     if (holding.storeId === null) {
       throw new CustodyForbiddenError('This item is with the delivery team, not a store');
@@ -58,6 +61,9 @@ export async function authorizeReleaseAtomic(input: StoreActionInput): Promise<v
       throw new CustodyForbiddenError('You are not staff at the store holding this item');
     }
   }
+
+  // Shape check: is this transition legal at all? Refused in the clerk's words.
+  assertCustodyTransitionForCounter(holding.state, 'release_authorized', 'released');
 
   // ────────────────────────────────────────────────────────────────────────────
   // ★ THE GATE. Payment state is checked inside the statement that acts on it.
@@ -114,20 +120,23 @@ export async function authorizeReleaseAtomic(input: StoreActionInput): Promise<v
     metadata: { holdingId },
   });
 
-  const ctx = await tx
-    .select({ buyerId: transactions.buyerId, title: listings.title })
-    .from(transactions)
-    .innerJoin(listings, eq(listings.id, transactions.listingId))
-    .where(eq(transactions.id, transactionId))
-    .limit(1);
-
-  const details = ctx[0];
-  if (details !== undefined) {
+  // ★ THE ONE PRODUCER of custody_ready_for_pickup. It reads through the SAME
+  //   `holdingContext` the rest of the custody notifications use, rather than a second
+  //   hand-rolled join, so the store name and the collection deadline in this message
+  //   can never disagree with the ones the board and the deal page show. The template
+  //   reads `storeName` AND `expiresAt`: both must be real values, or the buyer gets
+  //   `Collect "…" by .` and a title that says "at the store".
+  const details = await holdingContext(tx, holdingId);
+  if (details !== null && details.buyerId !== null) {
     await notify({
       tx,
       userId: details.buyerId,
       event: 'custody_ready_for_pickup',
-      data: { listingTitle: details.title, storeName: 'the store' },
+      data: {
+        listingTitle: details.listingTitle,
+        storeName: details.storeName,
+        expiresAt: details.custodyExpiresAt?.toLocaleString('en-TT') ?? 'the collection deadline',
+      },
       linkUrl: `/deals/${transactionId}`,
       idempotencyKey: `release_authorized:${holdingId}:${transactionId}`,
     });
