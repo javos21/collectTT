@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { and, desc, eq } from 'drizzle-orm';
 
 import { getListing } from '@/services/listings';
+import { candidateStoresFor } from '@/services/relay-stores';
 import { getCategory } from '@/domain/categories/definitions';
 import { formatMoney, minimumNextBid } from '@/domain/money';
 import { publicUrl } from '@/lib/storage';
@@ -77,6 +78,12 @@ export default async function ListingPage({
     : 0;
 
   const minBid = minimumNextBid(listing.currentBidCents, listing.startBidCents ?? 0);
+
+  // Candidate relay stores for the picker — UX filtering only; claimListing re-runs
+  // the real gate server-side.
+  const relayCandidates = listing.fulfillmentPaths.includes('relay')
+    ? await candidateStoresFor(db, id, listing.sizeClass)
+    : [];
 
   return (
     <main>
@@ -198,6 +205,19 @@ export default async function ListingPage({
               </option>
             ))}
           </select>
+          {relayCandidates.length > 0 && (
+            <>
+              <label htmlFor="relayStoreId">Which store will you collect from?</label>
+              <select id="relayStoreId" name="relayStoreId" defaultValue={relayCandidates[0]!.id}>
+                {relayCandidates.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name} — {store.area}
+                  </option>
+                ))}
+              </select>
+              <p className="muted">Only used if you pick relay drop-off.</p>
+            </>
+          )}
           <button type="submit">
             {listing.status === 'active'
               ? 'Claim it'

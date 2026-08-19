@@ -19,6 +19,8 @@ export async function claimAction(formData: FormData): Promise<void> {
 
   const listingId = String(formData.get('listingId') ?? '');
   const path = String(formData.get('fulfillmentPath') ?? 'cash_meetup') as FulfillmentPath;
+  const storeIdRaw = String(formData.get('relayStoreId') ?? '');
+  const relayStoreId = storeIdRaw === '' ? null : storeIdRaw;
 
   let result;
   try {
@@ -26,6 +28,7 @@ export async function claimAction(formData: FormData): Promise<void> {
       listingId,
       claimantId: user.userId,
       fulfillmentPath: path,
+      relayStoreId,
     });
   } catch (error) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent(message(error))}`);

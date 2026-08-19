@@ -338,6 +338,27 @@ describe('relay store nomination', () => {
     expect(rows[0]!.storeId).toBe(storeId);
   });
 
+  describe('size class', () => {
+    it('refuses a store that does not accept the size class', async () => {
+      const bigListing = await makeRelayListing({ sizeClass: 'large' });
+      await expect(
+        claimListing({
+          listingId: bigListing,
+          claimantId: buyerA,
+          fulfillmentPath: 'relay',
+          relayStoreId: storeId, // accepts 'small' only
+        }),
+      ).rejects.toThrow(/accepts small items only/i);
+    });
+
+    it('refuses a relay claim with no store chosen', async () => {
+      const listingId = await makeRelayListing();
+      await expect(
+        claimListing({ listingId, claimantId: buyerA, fulfillmentPath: 'relay' }),
+      ).rejects.toThrow(/choose which relay store/i);
+    });
+  });
+
   describe('candidateStoresFor', () => {
     it('excludes a store whose size classes do not accept the listing size', async () => {
       const largeListingId = await makeRelayListing({ sizeClass: 'large' });
