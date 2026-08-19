@@ -179,6 +179,8 @@ export async function publishListing(sellerId: string, listingId: string): Promi
     .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId), eq(listings.status, 'draft')));
 }
 
+export const BROWSE_PAGE_SIZE = 24;
+
 export interface BrowseFilters {
   category?: string;
   /**
@@ -186,16 +188,23 @@ export interface BrowseFilters {
    * `coerceFilters` — JSONB containment is type-strict, so raw query strings will not do.
    */
   attributes?: Record<string, string | number | boolean>;
-  limit?: number;
+  /** Narrow to one sale type; omitted means both. */
+  saleType?: 'straight_sale' | 'auction';
+  /** 1-based page number. */
+  page?: number;
+  pageSize?: number;
 }
 
-/**
- * Browse. Category and attribute filtering work from day one via the GIN index —
- * the polished UI for it is a fast-follow, the data model is not.
- */
-export async function browseListings(filters: BrowseFilters = {}) {
-  const conditions = [eq(listings.status, 'active')];
+export interface BrowsePage {
+  rows: Awaited<ReturnType<typeof selectBrowseRows>>;
+  /** Total matching the filters, independent of the returned page slice. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
 
+function browseConditions(filters: BrowseFilters) {
+  const conditions = [eq(listings.status, 'active')];
   if (filters.category !== undefined) {
     conditions.push(eq(listings.category, filters.category));
   }
@@ -203,7 +212,13 @@ export async function browseListings(filters: BrowseFilters = {}) {
     // JSONB containment — served by listings_attrs (GIN).
     conditions.push(sql`${listings.attributes} @> ${JSON.stringify(filters.attributes)}::jsonb`);
   }
+  if (filters.saleType !== undefined) {
+    conditions.push(eq(listings.saleType, filters.saleType));
+  }
+  return conditions;
+}
 
+function selectBrowseRows(where: ReturnType<typeof and>, limit: number, offset: number) {
   return db
     .select({
       id: listings.id,
@@ -222,9 +237,33 @@ export async function browseListings(filters: BrowseFilters = {}) {
     })
     .from(listings)
     .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
-    .where(and(...conditions))
+    .where(where)
     .orderBy(desc(listings.publishedAt))
-    .limit(filters.limit ?? 50);
+    .limit(limit)
+    .offset(offset);
+}
+
+/**
+ * Browse. Category, attribute and sale-type filtering all resolve in one WHERE, so the
+ * count and the page slice always agree. Attribute filtering is served by the GIN index.
+ */
+export async function browseListings(filters: BrowseFilters = {}): Promise<BrowsePage> {
+  const where = and(...browseConditions(filters));
+
+  const pageSize = filters.pageSize ?? BROWSE_PAGE_SIZE;
+  const page = Math.max(1, filters.page ?? 1);
+  const offset = (page - 1) * pageSize;
+
+  const [rows, totalRows] = await Promise.all([
+    selectBrowseRows(where, pageSize, offset),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(listings)
+      .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
+      .where(where),
+  ]);
+
+  return { rows, total: totalRows[0]?.n ?? 0, page, pageSize };
 }
 
 export async function getListing(id: string) {

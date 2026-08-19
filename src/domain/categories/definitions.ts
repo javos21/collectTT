@@ -52,7 +52,7 @@ export const CATEGORIES = {
         },
         help: 'Ungraded condition. Leave as-is if the card is graded.',
       },
-      { key: 'graded', label: 'Graded', type: 'boolean', filterable: true },
+      { key: 'graded', label: 'Graded', type: 'boolean', filterable: false },
       {
         key: 'grader',
         label: 'Grading company',
@@ -100,7 +100,7 @@ export const CATEGORIES = {
       { key: 'year', label: 'Year', type: 'year', filterable: true },
       { key: 'variant', label: 'Variant / printing', type: 'text', maxLength: 120 },
       { key: 'key_issue', label: 'Key issue', type: 'boolean', filterable: true, help: 'First appearance, death, major event, etc.' },
-      { key: 'graded', label: 'Slabbed / graded', type: 'boolean', filterable: true },
+      { key: 'graded', label: 'Slabbed / graded', type: 'boolean', filterable: false },
       {
         key: 'grader',
         label: 'Grading company',

@@ -21,6 +21,11 @@ export default async function BrowsePage({
 }) {
   const params = await searchParams;
   const category = typeof params.category === 'string' ? params.category : undefined;
+  const saleType =
+    params.saleType === 'straight_sale' || params.saleType === 'auction'
+      ? params.saleType
+      : undefined;
+  const page = Math.max(1, Number.parseInt(String(params.page ?? '1'), 10) || 1);
 
   // Only attributes the category declares as filterable are honoured (a query string
   // cannot smuggle arbitrary JSONB predicates in), and each value is coerced to the
@@ -35,10 +40,27 @@ export default async function BrowsePage({
   const attributes =
     category !== undefined && isCategoryKey(category) ? coerceFilters(category, raw) : {};
 
-  const rows = await browseListings({
+  const { rows, total, pageSize } = await browseListings({
     ...(category !== undefined ? { category } : {}),
     ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+    ...(saleType !== undefined ? { saleType } : {}),
+    page,
   });
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  // A page link that carries every active filter forward — only the page number moves.
+  const pageHref = (n: number) => {
+    const qs = new URLSearchParams();
+    if (category !== undefined) qs.set('category', category);
+    if (saleType !== undefined) qs.set('saleType', saleType);
+    for (const [key, value] of Object.entries(raw)) {
+      if (value !== undefined) qs.set(`attr_${key}`, value);
+    }
+    if (n > 1) qs.set('page', String(n));
+    const s = qs.toString();
+    return s === '' ? '/listings' : `/listings?${s}`;
+  };
 
   const activeFilters = category !== undefined && isCategoryKey(category) ? filtersFor(category) : [];
 
@@ -57,6 +79,15 @@ export default async function BrowsePage({
                   {c.label}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="saleType">Sale type</label>
+            <select id="saleType" name="saleType" defaultValue={saleType ?? ''}>
+              <option value="">All</option>
+              <option value="straight_sale">Straight sale</option>
+              <option value="auction">Auctions</option>
             </select>
           </div>
 
@@ -84,43 +115,74 @@ export default async function BrowsePage({
       </form>
 
       <p className="muted" style={{ marginTop: '1.5rem' }}>
-        {rows.length} listing{rows.length === 1 ? '' : 's'}
+        {total} listing{total === 1 ? '' : 's'}
         {category !== undefined && ` in ${category}`}
+        {saleType !== undefined && ` · ${saleType === 'auction' ? 'auctions' : 'straight sales'}`}
         {Object.keys(attributes).length > 0 &&
           ` matching ${Object.entries(attributes)
             .map(([k, v]) => `${k}=${v}`)
             .join(', ')}`}
       </p>
 
-      {rows.length === 0 ? (
+      {total === 0 ? (
         <p className="muted">
           Nothing here yet. <Link href="/listings/new">Create a listing</Link> or run{' '}
           <code>npm run seed:dev</code> for sample data.
         </p>
       ) : (
-        <div className="grid">
-          {rows.map((row) => (
-            <div className="card" key={row.id}>
-              <Link href={`/listings/${row.id}`}>{row.title}</Link>
-              <p className="muted" style={{ margin: '.25rem 0' }}>
-                <span className="pill">{row.category}</span>{' '}
-                <span className="pill">{row.saleType === 'auction' ? 'auction' : 'straight sale'}</span>
-              </p>
-              <p style={{ margin: '.25rem 0', fontWeight: 600 }}>
-                {row.saleType === 'auction'
-                  ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0)
-                  : formatMoney(row.priceCents ?? 0)}
-                {row.saleType === 'auction' && (
-                  <span className="muted" style={{ fontWeight: 400 }}>
-                    {' '}
-                    · {row.bidCount} bid{row.bidCount === 1 ? '' : 's'}
+        <>
+          <div className="grid">
+            {rows.map((row) => (
+              <div className="card" key={row.id}>
+                <Link href={`/listings/${row.id}`}>{row.title}</Link>
+                <p className="muted" style={{ margin: '.25rem 0' }}>
+                  <span className="pill">{row.category}</span>{' '}
+                  <span className="pill">
+                    {row.saleType === 'auction' ? 'auction' : 'straight sale'}
                   </span>
-                )}
-              </p>
-              <p className="muted" style={{ margin: 0 }}>by {row.sellerName}</p>
-            </div>
-          ))}
-        </div>
+                </p>
+                <p className="num" style={{ margin: '.25rem 0', fontWeight: 600 }}>
+                  {row.saleType === 'auction'
+                    ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0)
+                    : formatMoney(row.priceCents ?? 0)}
+                  {row.saleType === 'auction' && (
+                    <span className="muted" style={{ fontWeight: 400 }}>
+                      {' '}
+                      · {row.bidCount} bid{row.bidCount === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </p>
+                <p className="muted" style={{ margin: 0 }}>by {row.sellerName}</p>
+              </div>
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <nav className="pager" aria-label="Pagination">
+              {page > 1 ? (
+                <Link className="pager__link" href={pageHref(page - 1)} rel="prev">
+                  ← Previous
+                </Link>
+              ) : (
+                <span className="pager__link is-disabled" aria-disabled="true">
+                  ← Previous
+                </span>
+              )}
+              <span className="pager__status num">
+                Page {page} of {totalPages}
+              </span>
+              {page < totalPages ? (
+                <Link className="pager__link" href={pageHref(page + 1)} rel="next">
+                  Next →
+                </Link>
+              ) : (
+                <span className="pager__link is-disabled" aria-disabled="true">
+                  Next →
+                </span>
+              )}
+            </nav>
+          )}
+        </>
       )}
     </main>
   );

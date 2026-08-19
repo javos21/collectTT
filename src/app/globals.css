@@ -343,3 +343,18 @@ dl.attrs dd {
 .seller-card__meta { display: block; color: var(--ink-2); font-size: .82rem; margin-top: .15rem; }
 
 .prose { white-space: pre-wrap; line-height: 1.7; }
+
+/* ---------------------------------------------------------------- pagination */
+.pager {
+  display: flex; align-items: center; justify-content: center; gap: 1.25rem;
+  margin-top: 2.25rem;
+}
+.pager__link {
+  display: inline-block; padding: .5rem .9rem;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  font-size: .875rem; font-weight: 600; text-decoration: none; color: var(--fg);
+  background: var(--bg);
+}
+.pager__link:hover { background: var(--surface); }
+.pager__link.is-disabled { color: #b0b4b9; border-color: var(--border); pointer-events: none; }
+.pager__status { color: var(--ink-2); font-size: .875rem; }
