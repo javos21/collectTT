@@ -13,6 +13,8 @@
 ## Global Constraints
 
 - **Never rewrite `src/services/custody.ts`'s existing exported functions.** They are complete and tested-by-design. Add to them; do not restructure them. An urge to rewrite means something has been misread.
+- **`Tx` is not `db`.** `Tx` is the transaction-callback parameter; `db` (`Database`) is not assignable to it. Read-only helpers that server components call directly must be typed `DbOrTx`. Widening a read-only function's parameter from `Tx` to `DbOrTx` is explicitly permitted and is not a "rewrite" — it is a type-only change with no behavioural effect. Applies to `storeBoard` and `storesForStaff` (Task 8/9).
+- **Signatures in this codebase are mixed.** `src/services/custody.ts` takes object inputs (`{ tx, holdingId, actorUserId }`); `src/services/transactions.ts` and `src/services/listings.ts` are largely positional (`markPaid(tx, id, userId)`, `createListing(sellerId, raw, opts)`). Read the signature you are calling. Do not infer it from a neighbouring module.
 - **`src/domain` imports nothing from `db/` or `app/`.** It is imported by both processes.
 - **Every job handler is idempotent.** First statement is a conditional read or write that no-ops when state has already moved.
 - **Every enqueue is transactional** — `enqueue(tx, task, payload)` inside the transaction that caused the work. There is no non-transactional variant.
@@ -445,10 +447,11 @@ git commit -m "feat(custody): generate a stable drop-off code when a holding ope
 ```ts
   it('refuses a relay listing with no nominated store', async () => {
     const { createListing } = await import('../../src/services/listings');
+    // ★ createListing is POSITIONAL: (sellerId, raw, opts). Verified against source.
     await expect(
-      createListing({
-        sellerId: seller,
-        input: {
+      createListing(
+        seller,
+        {
           category: 'trading_card',
           title: 'Relay with no store',
           saleType: 'straight_sale',
@@ -459,8 +462,8 @@ git commit -m "feat(custody): generate a stable drop-off code when a holding ope
           relayStoreIds: [],
           attributes: {},
         },
-        publish: true,
-      } as never),
+        { publish: true },
+      ),
     ).rejects.toThrow(/at least one relay store/i);
   });
 ```
@@ -1177,7 +1180,11 @@ export async function findHoldingByCode(
 }
 ```
 
-- [ ] **Step 4: Add `ownerContact` and `dropoffCode` to the board**
+- [ ] **Step 4: Widen the read-only signatures to `DbOrTx`**
+
+`storeBoard(tx: Tx, ...)` and `storesForStaff(tx: Tx, ...)` are called directly from server components in Task 9, which hold `db`, not a `Tx`. Change both parameters to `DbOrTx` (already imported in this file for the new functions). Type-only; no behaviour changes and no call site breaks, because `Tx` remains assignable.
+
+- [ ] **Step 5: Add `ownerContact` and `dropoffCode` to the board**
 
 Extend the `StoreBoardRow` interface and the existing `storeBoard` query — it already joins `profiles` for `sellerName`, so add `profiles.phoneE164` to the select and a `users.email` fallback, then map:
 
@@ -1474,9 +1481,13 @@ git commit -m "feat(custody): per-role custody panel on the deal page"
       }),
     ).rejects.toThrow();
 
+    // ★ markPaid / confirmPayment are POSITIONAL: (tx, transactionId, userId).
+    //   Verified against src/services/transactions.ts. Note the custody service uses
+    //   object inputs instead — this codebase mixes both styles deliberately, so read
+    //   each signature rather than pattern-matching from a neighbour.
     await db.transaction(async (tx) => {
-      await markPaid({ tx, transactionId: txId, actorUserId: buyerA });
-      await confirmPayment({ tx, transactionId: txId, actorUserId: seller });
+      await markPaid(tx, txId, buyerA);
+      await confirmPayment(tx, txId, seller);
     });
 
     await db.transaction(async (tx) => {
