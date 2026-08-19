@@ -5,9 +5,8 @@
  * waits for the worker to pick them up, which is the only way to prove the chain
  * web -> transactional enqueue -> Graphile Worker -> handler actually closes.
  *
- * Requires all three processes running:
+ * Requires Postgres and the worker (it never contacts the web process):
  *   docker compose up -d
- *   npm run start          (or npm run dev)
  *   npm run start:worker   (or npm run dev:worker)
  *
  * Run with: npm run verify:phase1

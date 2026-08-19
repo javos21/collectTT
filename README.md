@@ -41,7 +41,7 @@ Sign in at `/sign-in` with any email — the magic link appears in the terminal 
 ### Verifying it works
 
 ```bash
-npm test              # 152 tests: state machine, categories, DB constraints,
+npm test              # 156 tests: state machine, categories, DB constraints,
                       # trading flows, custody flows
 npm run typecheck
 npm run verify        # Phase 0 end-to-end: presign -> upload -> worker -> variants
@@ -51,8 +51,13 @@ npm run verify:phase2 # Phase 2 end-to-end against the LIVE worker: claim -> dro
                       # code -> shelf clock -> overstay sweep -> store eviction notice
 ```
 
-All three `verify` scripts need all three processes running — they prove the chain
-`web -> transactional enqueue -> Graphile Worker -> handler`, which unit tests cannot.
+**Stop the worker before `npm test`.** The flow tests drive job handlers directly, so a
+live worker races them for the same rows and the failures look random.
+
+The `verify` scripts prove the chain `transactional enqueue -> Graphile Worker ->
+handler`, which unit tests cannot. Only `verify` (Phase 0) drives the web process, for
+the presign/upload leg; `verify:phase1` and `verify:phase2` enqueue against the database
+directly and need just Postgres and the worker.
 The custody flow tests call the overstay handler directly; only `verify:phase2` proves
 the worker really picks the scheduled sweep up and runs it.
 
@@ -168,7 +173,14 @@ Zero rows back means the clerk is told "payment has not been confirmed yet — d
 this item over." There is no window between checking and acting for a dispute to slip
 through, and no service function that can be called in the wrong order to bypass it.
 
-**The shelf clock runs on the database.** Drop-off starts a countdown — three days
+Note what kind of guarantee that is: the gate is a **statement, not a constraint**.
+Unlike everything in the invariants table below, it binds every path *this application*
+takes and nothing else — a stray `psql` session can still write `release_authorized`
+onto an unpaid holding by hand. It is the strongest form the check can take while the
+condition lives in another table, and it is why the release path is the one place with
+no alternative service entry point.
+
+**The shelf clock is settled on the database.** Drop-off starts a countdown — three days
 unpaid, seven days paid, both configurable per store. Confirming payment *extends* it,
 which is the right incentive: an unpaid item is pure liability for the shop. Each
 recompute enqueues a `custody:overstay` sweep in the same transaction, keyed on the

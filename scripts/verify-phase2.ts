@@ -10,9 +10,8 @@
  * that unit tests structurally cannot prove, because it depends on the worker really
  * picking up a scheduled job and running the handler in its own process.
  *
- * Requires all three processes running:
+ * Requires Postgres and the worker (it never contacts the web process):
  *   docker compose up -d
- *   npm run start          (or npm run dev)
  *   npm run start:worker   (or npm run dev:worker)
  *
  * Run with: npm run verify:phase2
