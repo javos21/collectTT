@@ -94,208 +94,267 @@ export default async function ListingPage({
     (path) => path !== 'relay' || relayCandidates.length > 0,
   );
 
+  const statusBadge =
+    listing.status === 'active'
+      ? { cls: 'badge badge--live', text: 'Available' }
+      : listing.status === 'claimed'
+        ? { cls: 'badge badge--claimed', text: 'Claimed' }
+        : { cls: 'badge badge--ended', text: listing.status.replace(/_/g, ' ') };
+
+  const settleForm = (idPrefix: string) =>
+    choosablePaths.length === 0 ? (
+      <p className="buybox__note">
+        No settlement method is available right now — the seller only offers relay
+        drop-off and none of their stores can take this item.
+      </p>
+    ) : (
+      <>
+        <label htmlFor={`${idPrefix}fulfillmentPath`}>How do you want to settle this?</label>
+        <select id={`${idPrefix}fulfillmentPath`} name="fulfillmentPath">
+          {choosablePaths.map((path) => (
+            <option key={path} value={path}>
+              {PATH_LABELS[path] ?? path}
+            </option>
+          ))}
+        </select>
+        {relayCandidates.length > 0 && (
+          <>
+            <label htmlFor={`${idPrefix}relayStoreId`}>Which store will you collect from?</label>
+            <select
+              id={`${idPrefix}relayStoreId`}
+              name="relayStoreId"
+              defaultValue={relayCandidates[0]!.id}
+            >
+              {relayCandidates.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name} — {store.area}
+                </option>
+              ))}
+            </select>
+            <p className="buybox__note">Only used if you pick relay drop-off.</p>
+          </>
+        )}
+      </>
+    );
+
+  const attributeRows = category.attributes.filter(
+    (attr) => attributes[attr.key] !== undefined,
+  );
+
   return (
     <main>
-      <p className="muted">
-        <Link href="/listings">← Browse</Link>
-      </p>
+      <div className="listing-head">
+        <Link className="breadcrumb" href="/listings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M15 18l-6-6 6-6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Browse
+        </Link>
+        <h1>{listing.title}</h1>
+        <div className="badge-row">
+          <span className="badge">{category.label}</span>
+          <span className="badge">{isAuction ? 'Auction' : 'Straight sale'}</span>
+          <span className={statusBadge.cls}>{statusBadge.text}</span>
+        </div>
+      </div>
 
-      <h1>{listing.title}</h1>
-      <p className="muted">
-        <span className="pill">{category.label}</span>{' '}
-        <span className="pill">{isAuction ? 'auction' : 'straight sale'}</span>{' '}
-        <span className="pill">{listing.status}</span>
-      </p>
-
-      {flash.error !== undefined && <p className="error">{flash.error}</p>}
+      {flash.error !== undefined && (
+        <div className="alert alert--error" role="alert">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+            <path d="M12 7v6m0 3.5v.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <span>{flash.error}</span>
+        </div>
+      )}
       {flash.queued !== undefined && flash.queued !== '' && (
-        <p className="ok">
-          You&apos;re #{flash.queued} in the backup queue. If the current buyer doesn&apos;t pay in
-          time, it comes to you automatically.
-        </p>
+        <div className="alert alert--info">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+            <path d="M12 8v4l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>
+            You&apos;re <strong>#{flash.queued}</strong> in the backup queue. If the current buyer
+            doesn&apos;t pay in time, it comes to you automatically.
+          </span>
+        </div>
       )}
-      {flash.bid === 'ok' && <p className="ok">Bid placed.</p>}
+      {flash.bid === 'ok' && <div className="alert alert--info">Bid placed.</div>}
       {flash.bid === 'extended' && (
-        <p className="ok">Bid placed — and it pushed the deadline out (soft close).</p>
-      )}
-
-      {images.length > 0 && (
-        <div
-          className="grid"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
-        >
-          {images.map((image) => {
-            const variants = imageVariants(image.variants);
-            const key = variants.card ?? variants.thumb;
-            return (
-              <div key={image.id} className="card">
-                {key !== undefined ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img className="thumb" src={publicUrl(key)} alt="" />
-                ) : (
-                  <div className="thumb" />
-                )}
-              </div>
-            );
-          })}
+        <div className="alert alert--info">
+          Bid placed — and it pushed the deadline out (soft close).
         </div>
       )}
 
-      {/* ------------------------------------------------ price / live auction */}
-      {isAuction ? (
-        <>
-          <h2>Auction</h2>
-          <AuctionLive
-            endsAt={(listing.endsAt ?? new Date()).toISOString()}
-            currentBid={formatMoney(listing.currentBidCents ?? listing.startBidCents ?? 0)}
-            bidCount={listing.bidCount}
-            extensionCount={listing.extensionCount}
-            antisnipeWindowS={listing.antisnipeWindowS}
-            closed={!isOpen}
-          />
-          {listing.buyoutCents !== null && (
-            <p className="muted">Buy it now for {formatMoney(listing.buyoutCents)}.</p>
-          )}
-        </>
-      ) : (
-        <>
-          <h2>Price</h2>
-          <p style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>
-            {formatMoney(listing.priceCents ?? 0)}
-          </p>
-        </>
-      )}
-
-      {/* ------------------------------------------------ act */}
-      {viewer === null ? (
-        <p style={{ marginTop: '1rem' }}>
-          <Link href="/sign-in">Sign in</Link> to {isAuction ? 'bid' : 'claim this'}.
-        </p>
-      ) : isSeller ? (
-        <p className="muted" style={{ marginTop: '1rem' }}>This is your listing.</p>
-      ) : isAuction ? (
-        isOpen ? (
-          <form action={bidAction}>
-            <input type="hidden" name="listingId" value={id} />
-            <label htmlFor="amount">Your bid (minimum {formatMoney(minBid)})</label>
-            <input
-              id="amount"
-              name="amount"
-              type="text"
-              inputMode="decimal"
-              placeholder={(minBid / 100).toFixed(2)}
-              required
-            />
-            {choosablePaths.length === 0 ? (
-              <p className="muted">
-                No settlement method is available for this listing right now — the
-                seller only offers relay drop-off and none of their stores can take this
-                item.
-              </p>
-            ) : (
-              <>
-                <label htmlFor="bidFulfillmentPath">How do you want to settle this?</label>
-                <select id="bidFulfillmentPath" name="fulfillmentPath">
-                  {choosablePaths.map((path) => (
-                    <option key={path} value={path}>
-                      {PATH_LABELS[path] ?? path}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-            {relayCandidates.length > 0 && (
-              <>
-                <label htmlFor="bidRelayStoreId">Which store will you collect from?</label>
-                <select
-                  id="bidRelayStoreId"
-                  name="relayStoreId"
-                  defaultValue={relayCandidates[0]!.id}
-                >
-                  {relayCandidates.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {store.name} — {store.area}
-                    </option>
-                  ))}
-                </select>
-                <p className="muted">Only used if you pick relay drop-off.</p>
-              </>
-            )}
-            <button type="submit">Place bid</button>
-          </form>
-        ) : (
-          <p className="muted" style={{ marginTop: '1rem' }}>This auction has closed.</p>
-        )
-      ) : myClaim !== undefined ? (
-        <p className="ok" style={{ marginTop: '1rem' }}>
-          {myClaim.status === 'active'
-            ? 'You have claimed this item.'
-            : `You are #${myClaim.position} in the backup queue.`}
-          {myClaim.transactionId !== null && (
+      <div className="listing-body">
+        {/* ------------------------------------------------ gallery */}
+        <div className="gallery">
+          {images.length > 0 ? (
             <>
-              {' '}
-              <Link href={`/deals/${myClaim.transactionId}`}>Open the deal →</Link>
+              <div className="gallery__track">
+                {images.map((image) => {
+                  const variants = imageVariants(image.variants);
+                  const key = variants.large ?? variants.card ?? variants.thumb;
+                  return (
+                    <div className="gallery__slide" key={image.id} id={`img-${image.id}`}>
+                      {key !== undefined ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={publicUrl(key)} alt="" />
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+              {images.length > 1 && (
+                <div className="gallery__rail">
+                  {images.map((image) => {
+                    const variants = imageVariants(image.variants);
+                    const key = variants.thumb ?? variants.card;
+                    return (
+                      <a className="gallery__thumb" key={image.id} href={`#img-${image.id}`}>
+                        {key !== undefined ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={publicUrl(key)} alt="" />
+                        ) : null}
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
             </>
+          ) : (
+            <div className="gallery__empty">No photos yet</div>
           )}
-        </p>
-      ) : listing.status === 'active' || listing.status === 'claimed' ? (
-        <form action={claimAction}>
-          <input type="hidden" name="listingId" value={id} />
-          {choosablePaths.length === 0 ? (
-            <p className="muted">
-              No settlement method is available for this listing right now — the seller
-              only offers relay drop-off and none of their stores can take this item.
-            </p>
+        </div>
+
+        {/* ------------------------------------------------ buy box */}
+        <aside className="buybox">
+          {isAuction ? (
+            <>
+              <p className="buybox__price-label">Current bid</p>
+              <AuctionLive
+                endsAt={(listing.endsAt ?? new Date()).toISOString()}
+                currentBid={formatMoney(listing.currentBidCents ?? listing.startBidCents ?? 0)}
+                bidCount={listing.bidCount}
+                extensionCount={listing.extensionCount}
+                antisnipeWindowS={listing.antisnipeWindowS}
+                closed={!isOpen}
+              />
+              {listing.buyoutCents !== null && (
+                <p className="buybox__note">Buy it now for {formatMoney(listing.buyoutCents)}.</p>
+              )}
+            </>
           ) : (
             <>
-              <label htmlFor="fulfillmentPath">How do you want to settle this?</label>
-              <select id="fulfillmentPath" name="fulfillmentPath">
-                {choosablePaths.map((path) => (
-                  <option key={path} value={path}>
-                    {PATH_LABELS[path] ?? path}
-                  </option>
-                ))}
-              </select>
+              <p className="buybox__price-label">Price</p>
+              <p className="buybox__price">{formatMoney(listing.priceCents ?? 0)}</p>
             </>
           )}
-          {relayCandidates.length > 0 && (
-            <>
-              <label htmlFor="relayStoreId">Which store will you collect from?</label>
-              <select id="relayStoreId" name="relayStoreId" defaultValue={relayCandidates[0]!.id}>
-                {relayCandidates.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.name} — {store.area}
-                  </option>
-                ))}
-              </select>
-              <p className="muted">Only used if you pick relay drop-off.</p>
-            </>
+
+          {/* ------------------------------------------------ act */}
+          {viewer === null ? (
+            <div className="buybox__state">
+              <Link href="/sign-in">Sign in</Link> to {isAuction ? 'bid' : 'claim this'}.
+            </div>
+          ) : isSeller ? (
+            <div className="buybox__state">This is your listing.</div>
+          ) : isAuction ? (
+            isOpen ? (
+              <form className="buybox__form" action={bidAction}>
+                <input type="hidden" name="listingId" value={id} />
+                <label htmlFor="amount">Your bid (minimum {formatMoney(minBid)})</label>
+                <input
+                  id="amount"
+                  name="amount"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={(minBid / 100).toFixed(2)}
+                  required
+                />
+                {settleForm('bid-')}
+                <button type="submit">Place bid</button>
+              </form>
+            ) : (
+              <div className="buybox__state">This auction has closed.</div>
+            )
+          ) : myClaim !== undefined ? (
+            <div className="buybox__state">
+              {myClaim.status === 'active'
+                ? 'You have claimed this item.'
+                : `You are #${myClaim.position} in the backup queue.`}
+              {myClaim.transactionId !== null && (
+                <>
+                  {' '}
+                  <Link href={`/deals/${myClaim.transactionId}`}>Open the deal →</Link>
+                </>
+              )}
+            </div>
+          ) : listing.status === 'active' || listing.status === 'claimed' ? (
+            <form className="buybox__form" action={claimAction}>
+              <input type="hidden" name="listingId" value={id} />
+              {settleForm('')}
+              <button type="submit">
+                {listing.status === 'active'
+                  ? 'Claim it'
+                  : `Join the backup queue (#${stackDepth + 1})`}
+              </button>
+              {listing.status === 'claimed' && (
+                <p className="buybox__note">
+                  Someone claimed this already. Joining the queue means it comes to you
+                  automatically if they don&apos;t pay in time.
+                </p>
+              )}
+            </form>
+          ) : (
+            <div className="buybox__state">This listing is no longer available.</div>
           )}
-          <button type="submit">
-            {listing.status === 'active'
-              ? 'Claim it'
-              : `Join the backup queue (#${stackDepth + 1})`}
-          </button>
-          {listing.status === 'claimed' && (
-            <p className="muted">
-              Someone claimed this already. Joining the queue means it comes to you
-              automatically if they don&apos;t pay in time.
-            </p>
-          )}
-        </form>
-      ) : (
-        <p className="muted" style={{ marginTop: '1rem' }}>This listing is no longer available.</p>
-      )}
+
+          <div className="trust">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M9 12l2 2 4-4"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>
+              <strong>You pay the seller directly.</strong> CollectTT never holds your funds —
+              cash, transfer, however you agree.
+            </span>
+          </div>
+        </aside>
+      </div>
 
       {/* ------------------------------------------------ bid history */}
       {isAuction && recentBids.length > 0 && (
         <>
-          <h2>Bids</h2>
+          <h2 className="section-label">Bid history</h2>
           <table>
+            <thead>
+              <tr>
+                <th>Bid</th>
+                <th>Bidder</th>
+                <th>When</th>
+              </tr>
+            </thead>
             <tbody>
               {recentBids.map((bid, i) => (
                 <tr key={`${bid.amountCents}-${i}`}>
-                  <td style={{ fontWeight: i === 0 ? 700 : 400 }}>
+                  <td className="num" style={{ fontWeight: i === 0 ? 700 : 500 }}>
                     {formatMoney(bid.amountCents)}
                   </td>
                   <td>{bid.bidderName}</td>
@@ -312,50 +371,72 @@ export default async function ListingPage({
 
       {listing.description !== null && listing.description !== '' && (
         <>
-          <h2>Description</h2>
-          <p style={{ whiteSpace: 'pre-wrap' }}>{listing.description}</p>
+          <h2 className="section-label">Description</h2>
+          <p className="prose">{listing.description}</p>
         </>
       )}
 
-      <h2>{category.label} details</h2>
-      <dl className="attrs">
-        {category.attributes
-          .filter((attr) => attributes[attr.key] !== undefined)
-          .map((attr) => {
-            const value = attributes[attr.key];
-            const display =
-              attr.type === 'enum'
-                ? (attr.optionLabels?.[String(value)] ?? String(value))
-                : attr.type === 'boolean'
-                  ? value === true
-                    ? 'Yes'
-                    : 'No'
-                  : String(value);
-            return (
-              <div key={attr.key} style={{ display: 'contents' }}>
-                <dt>{attr.label}</dt>
-                <dd>{display}</dd>
-              </div>
-            );
-          })}
-      </dl>
+      {attributeRows.length > 0 && (
+        <>
+          <h2 className="section-label">{category.label} details</h2>
+          <dl className="attrs">
+            {attributeRows.map((attr) => {
+              const value = attributes[attr.key];
+              const display =
+                attr.type === 'enum'
+                  ? (attr.optionLabels?.[String(value)] ?? String(value))
+                  : attr.type === 'boolean'
+                    ? value === true
+                      ? 'Yes'
+                      : 'No'
+                    : String(value);
+              return (
+                <div key={attr.key} style={{ display: 'contents' }}>
+                  <dt>{attr.label}</dt>
+                  <dd>{display}</dd>
+                </div>
+              );
+            })}
+          </dl>
+        </>
+      )}
 
-      <h2>How this deal can settle</h2>
-      <ul>
+      <h2 className="section-label">How this deal can settle</h2>
+      <ul className="settle-list">
         {listing.fulfillmentPaths.map((path) => (
-          <li key={path}>{PATH_LABELS[path] ?? path}</li>
+          <li key={path}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M5 12l5 5 9-11"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {PATH_LABELS[path] ?? path}
+          </li>
         ))}
       </ul>
-      <p className="muted">
+      <p className="muted" style={{ marginTop: '.85rem' }}>
         Accepted payment: {listing.settlementMethods.join(', ')}. Payment always flows
         directly between buyer and seller — CollectTT never holds funds.
       </p>
 
-      <h2>Seller</h2>
-      <p>
-        <Link href={`/members/${listing.sellerId}`}>{sellerName}</Link>{' '}
-        <span className="muted">· member since {sellerSince.toLocaleDateString('en-TT')}</span>
-      </p>
+      <h2 className="section-label">Seller</h2>
+      <div className="seller-card">
+        <span className="seller-card__avatar" aria-hidden="true">
+          {sellerName.trim().charAt(0).toUpperCase()}
+        </span>
+        <span>
+          <Link className="seller-card__name" href={`/members/${listing.sellerId}`}>
+            {sellerName}
+          </Link>
+          <span className="seller-card__meta">
+            Member since {sellerSince.toLocaleDateString('en-TT')}
+          </span>
+        </span>
+      </div>
     </main>
   );
 }
