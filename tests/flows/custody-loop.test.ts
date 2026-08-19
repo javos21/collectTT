@@ -768,3 +768,160 @@ describe('custody notification strings', () => {
     await db.delete(relayStores).where(eq(relayStores.id, isolatedStoreId));
   });
 });
+
+describe('the full custody loop', () => {
+  it('runs the full loop: drop-off -> pay -> release -> collect -> complete', async () => {
+    const { markReceived, authorizeRelease, markPickedUp } = await import(
+      '../../src/services/custody'
+    );
+    // ★ markPaid / confirmPayment are POSITIONAL: (tx, transactionId, userId). The
+    //   custody store actions next door take object inputs — this codebase mixes both
+    //   styles deliberately, so each signature is read from source rather than inferred.
+    const { markPaid, confirmPayment } = await import('../../src/services/transactions');
+    const { transactions } = await import('../../src/db/schema/transactions');
+
+    const listingId = await makeRelayListing();
+    const claim = await claimListing({
+      listingId,
+      claimantId: buyerA,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+    const txId = claim.transactionId!;
+    const held = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.listingId, listingId));
+    const holdingId = held[0]!.id;
+
+    await db.transaction(async (tx) => {
+      await markReceived({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    // ★ THE GATE: unpaid items do not move. The refusal is a single SQL statement in
+    //   src/db/atomic/authorize-release.ts — there is no window between check and act.
+    await expect(
+      db.transaction(async (tx) => {
+        await authorizeRelease({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+      }),
+    ).rejects.toThrow(/payment has not been confirmed/i);
+
+    // The refusal left the item exactly where it was.
+    const stillHeld = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.id, holdingId));
+    expect(stillHeld[0]!.state).toBe('at_relay');
+    expect(stillHeld[0]!.releaseAuthorizedAt).toBeNull();
+
+    await db.transaction(async (tx) => {
+      await markPaid(tx, txId, buyerA);
+      await confirmPayment(tx, txId, seller);
+    });
+
+    await db.transaction(async (tx) => {
+      await authorizeRelease({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+    await db.transaction(async (tx) => {
+      await markPickedUp({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    const finished = await db.select().from(transactions).where(eq(transactions.id, txId));
+    expect(finished[0]!.state).toBe('completed');
+    expect(finished[0]!.custodyState).toBe('picked_up');
+
+    // The holding and its mirror agree — the CHECK that guards completion only holds
+    // because both are written in the same DB transaction.
+    const collected = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.id, holdingId));
+    expect(collected[0]!.state).toBe('picked_up');
+    expect(collected[0]!.pickedUpAt).not.toBeNull();
+  });
+
+  it('returns an unpaid item to the seller when the window lapses and nobody is left', async () => {
+    const { markReceived } = await import('../../src/services/custody');
+    const { paymentWindowExpired, promoteNext } = await import(
+      '../../src/jobs/tasks/transaction-windows'
+    );
+    const { transactions } = await import('../../src/db/schema/transactions');
+    const helpers = {
+      logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} },
+    } as never;
+
+    // No backup claimer: this listing has exactly one candidate, so the stack empties.
+    const listingId = await makeRelayListing();
+    const claim = await claimListing({
+      listingId,
+      claimantId: buyerA,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+    const txId = claim.transactionId!;
+    const held = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.listingId, listingId));
+    const holdingId = held[0]!.id;
+
+    // The seller did their part: the item is on the shelf, unpaid.
+    await db.transaction(async (tx) => {
+      await markReceived({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    // Force both clocks into the past on the DATABASE clock, keeping
+    // tx_dropoff_before_payment satisfied (drop-off deadline < payment deadline).
+    await db
+      .update(transactions)
+      .set({
+        sellerDropoffDeadlineAt: sql`now() - interval '2 hours'`,
+        paymentDeadlineAt: sql`now() - interval '1 hour'`,
+      })
+      .where(eq(transactions.id, txId));
+
+    await paymentWindowExpired({ transactionId: txId }, helpers);
+
+    // The buyer reneged. The item does NOT go back yet — terminateTransaction unlinks
+    // it and enqueues promote_next, because a backup might still be waiting.
+    const midway = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.id, holdingId));
+    expect(midway[0]!.state).toBe('at_relay');
+    expect(midway[0]!.currentTransactionId).toBeNull();
+
+    // The promotion job is what discovers the stack is empty. Run it as the worker
+    // would; resolveListingAfterFailure then sends the stranded item home.
+    await promoteNext({ listingId, failedTransactionId: txId }, helpers);
+
+    const after = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.id, holdingId));
+    expect(after[0]!.state).toBe('returned_to_seller');
+    expect(after[0]!.returnedAt).not.toBeNull();
+
+    const failed = await db.select().from(transactions).where(eq(transactions.id, txId));
+    expect(failed[0]!.state).toBe('reneged_buyer');
+
+    // Nobody was promoted: no second attempt was opened on this listing.
+    const attempts = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.listingId, listingId));
+    expect(attempts).toHaveLength(1);
+
+    // The seller was actually told where their item is. Matched on linkUrl as well as
+    // event type, so a sibling test's return notice cannot satisfy this assertion.
+    const { notifications } = await import('../../src/db/schema/notifications');
+    const sellerInbox = await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, seller));
+    const returnNotice = sellerInbox.filter(
+      (n) => n.eventType === 'custody_return_to_seller' && n.linkUrl === `/listings/${listingId}`,
+    );
+    expect(returnNotice).toHaveLength(1);
+  });
+});

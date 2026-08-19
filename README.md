@@ -9,11 +9,13 @@ and has no PCI scope. It collects only its own service fees, for logistics it ac
 performed. See [product-design-document.md](product-design-document.md) for the full
 rationale.
 
-**Status: Phase 1 complete.** A full deal now runs end to end, peer to peer: atomic
-claims with a backup queue, auctions with anti-snipe soft close, the
-mark-paid/confirm-received handshake, automatic renege-and-promote, objective
-reputation with automatic restrictions, and blind mutual ratings. Custody and the store
-tooling are Phase 2.
+**Status: Phase 2 complete — relay custody is live.** A full deal now runs end to end,
+peer to peer: atomic claims with a backup queue, auctions with anti-snipe soft close,
+the mark-paid/confirm-received handshake, automatic renege-and-promote, objective
+reputation with automatic restrictions, and blind mutual ratings. On top of that the
+item track is real: a seller drops an item at a relay store under a drop-off code, the
+store holds it on a time-bounded shelf clock, and it is released to the buyer only once
+payment is confirmed. WhatsApp and the paid delivery rail are Phase 3.
 
 ---
 
@@ -39,15 +41,20 @@ Sign in at `/sign-in` with any email — the magic link appears in the terminal 
 ### Verifying it works
 
 ```bash
-npm test              # 127 tests: state machine, categories, DB constraints, trading flows
+npm test              # 152 tests: state machine, categories, DB constraints,
+                      # trading flows, custody flows
 npm run typecheck
 npm run verify        # Phase 0 end-to-end: presign -> upload -> worker -> variants
 npm run verify:phase1 # Phase 1 end-to-end against the LIVE worker: auction close,
                       # renege, runner-up promotion, backup-claim promotion
+npm run verify:phase2 # Phase 2 end-to-end against the LIVE worker: claim -> drop-off
+                      # code -> shelf clock -> overstay sweep -> store eviction notice
 ```
 
-Both `verify` scripts need all three processes running — they prove the chain
+All three `verify` scripts need all three processes running — they prove the chain
 `web -> transactional enqueue -> Graphile Worker -> handler`, which unit tests cannot.
+The custody flow tests call the overstay handler directly; only `verify:phase2` proves
+the worker really picks the scheduled sweep up and runs it.
 
 ---
 
@@ -119,6 +126,57 @@ No `ALTER TABLE`, no new table, no enum value, no form code. `listings.category`
 real foreign key to a seeded lookup table, and `listings.attributes` is JSONB validated
 by a `.strict()` schema — so integrity stays strict everywhere it matters and
 flexibility lives only where item descriptions genuinely vary.
+
+### Relay custody, concretely
+
+A relay listing nominates one or more stores; the buyer picks one from that list when
+they claim (or when they bid), and that choice — not the seller's first-listed store —
+is what the holding opens against. From there the item walks the custody states
+`awaiting_dropoff -> at_relay -> release_authorized -> picked_up`, with
+`returned_to_seller` as the escape hatch at either shelf state.
+
+**The drop-off code.** Every holding is born with a short `CT-XXXX` code drawn from an
+alphabet that omits `I`, `L`, `O`, `0` and `1`, so a misread character cannot resolve to
+a different real code. The seller quotes it at the counter and the clerk types it in; a
+buyer shows the same code back when collecting. The code belongs to the **item**, not to
+the buyer — when a buyer reneges and a backup is promoted, the holding re-links to the
+new attempt and the code on the parcel stays valid, because nothing physically moved. A
+collision on insert is retried against a fresh code rather than handed to the clerk as
+an error.
+
+**Release is two taps, deliberately.** `at_relay -> release_authorized` is the clerk
+saying "the money is in, this is cleared"; `release_authorized -> picked_up` is the
+separate, later act of a person walking in, showing their code and taking the parcel.
+Collapsing them into one button would force the shop to either hold the item as
+un-cleared until the buyer happens to appear, or mark it collected before anyone
+collected it. Splitting them means the board can honestly show a "ready for collection"
+shelf, and the audit trail records *when payment cleared* and *when the item left*
+as two different facts.
+
+**The gate is SQL, not a code path.** The first tap is the only cross-track dependency
+in the system, and it is enforced inside the same `UPDATE` that flips the state:
+
+```sql
+update custody_holdings h set state = 'release_authorized'
+ where h.id = $1 and h.state = 'at_relay'
+   and exists (select 1 from transactions t
+                where t.id = h.current_transaction_id
+                  and t.state = 'open' and t.payment_state = 'confirmed')
+```
+
+Zero rows back means the clerk is told "payment has not been confirmed yet — do not hand
+this item over." There is no window between checking and acting for a dispute to slip
+through, and no service function that can be called in the wrong order to bypass it.
+
+**The shelf clock runs on the database.** Drop-off starts a countdown — three days
+unpaid, seven days paid, both configurable per store. Confirming payment *extends* it,
+which is the right incentive: an unpaid item is pure liability for the shop. Each
+recompute enqueues a `custody:overstay` sweep in the same transaction, keyed on the
+holding so a later extension replaces the earlier job instead of racing it. When the
+sweep fires, the handler re-checks expiry against `now()` in Postgres and no-ops if the
+clock has since moved; a genuine overstay is flagged and the store is sent the owner's
+contact details so they can chase it. An unpaid item with nobody left to hand it to goes
+back to the seller rather than becoming the shop's problem.
 
 ### Invariants the database enforces
 
@@ -201,9 +259,17 @@ dispute reversal · payment window → reneged → promote next candidate · sym
 deadlines · objective reputation events, counters and automatic restrictions · blind
 mutual ratings · public member trust pages · live auction feed by polling
 
-**Phase 2 — next**
-custody track live · relay drop-off · store audit/control log · time-bounded custody ·
-size/eligibility gate · unpaid-item return-to-seller
+**Phase 2 — done**
+two-track payment/custody model · relay store nomination on a listing, store choice on
+the claim *and* the bid · relay drop-off with `CT-XXXX` codes · SQL-enforced
+payment-gated release · store audit/control board with receive-by-code and the four
+counter actions · per-store time-bounded custody with an overstay sweep · size and
+eligibility gate · unpaid-item return-to-seller · per-role custody panel on the deal
+page
 
-**Later** — WhatsApp adapter + store bot · pickup & delivery rail · vouching ·
-subscriptions · promoted listings · grading concierge · SSE upgrade from polling
+**Phase 3 — next**
+WhatsApp notification adapter + store bot · full-service pickup & delivery rail with
+per-zone pricing · WhatsApp OTP · SSE upgrade from polling
+
+**Later** — vouching · power-seller subscription · promoted listings · seller analytics
+· grading concierge · sponsorship placements

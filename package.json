@@ -19,6 +19,7 @@
     "seed:dev": "tsx scripts/seed-dev.ts",
     "verify": "tsx scripts/verify-phase0.ts",
     "verify:phase1": "tsx scripts/verify-phase1.ts",
+    "verify:phase2": "tsx scripts/verify-phase2.ts",
     "setup": "npm run db:migrate && npm run seed:categories",
     "test": "vitest run",
     "test:watch": "vitest",
