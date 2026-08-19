@@ -206,6 +206,16 @@ export default async function DealPage({
             </p>
           )}
 
+          {/* Reachable before the money settles: a buyer can collect while payment is
+              still being confirmed, so this heading must never stand with nothing
+              under it. */}
+          {custodyPanel.state === 'picked_up' && (
+            <p>
+              {isBuyer ? 'You collected this' : 'The buyer collected this'} from{' '}
+              {custodyPanel.storeName ?? 'the delivery team'}.
+            </p>
+          )}
+
           {custodyPanel.state === 'returned_to_seller' && <p>This item went back to the seller.</p>}
 
           {custodyPanel.state === 'voided' && <p>This item was never dropped off.</p>}

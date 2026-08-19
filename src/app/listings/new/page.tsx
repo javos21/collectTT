@@ -182,7 +182,17 @@ export default async function NewListingPage({
           <p className="muted" style={{ marginTop: 0 }}>
             The platform never handles the money — you and the buyer settle directly.
           </p>
-          {FULFILLMENT_PATHS.map((path) => (
+          {/*
+            ★ full_service is NOT offerable yet. The enum, the state machine and the
+              windows are all ready for it, but spec §9 defers the courier rail to a
+              later phase and there is no operational surface behind it: a full_service
+              holding opens with store_id = null, so it appears on NO store board, no
+              staff member can act on it, and it sits in awaiting_dropoff until
+              dropoffWindowExpired terminates the deal as seller_no_dropoff — a
+              reputation-bearing renege against a seller who did nothing wrong. Filtered
+              at the only place a seller can choose it; nothing below it changes.
+          */}
+          {FULFILLMENT_PATHS.filter((path) => path !== 'full_service').map((path) => (
             <label key={path} htmlFor={`path_${path}`} style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
               <input
                 id={`path_${path}`}

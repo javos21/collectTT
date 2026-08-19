@@ -85,6 +85,15 @@ export default async function ListingPage({
     ? await candidateStoresFor(db, id, listing.sizeClass)
     : [];
 
+  // ★ Never offer a path the member cannot actually complete. A listing can declare
+  //   `relay` while every store the seller nominated has since been deactivated or
+  //   stopped accepting this size — `candidateStoresFor` then returns nothing, no
+  //   picker renders, and choosing "Relay store drop-off" is refused only AFTER the
+  //   form is submitted. Both the bid form and the claim form read this list.
+  const choosablePaths = listing.fulfillmentPaths.filter(
+    (path) => path !== 'relay' || relayCandidates.length > 0,
+  );
+
   return (
     <main>
       <p className="muted">
@@ -177,14 +186,24 @@ export default async function ListingPage({
               placeholder={(minBid / 100).toFixed(2)}
               required
             />
-            <label htmlFor="bidFulfillmentPath">How do you want to settle this?</label>
-            <select id="bidFulfillmentPath" name="fulfillmentPath">
-              {listing.fulfillmentPaths.map((path) => (
-                <option key={path} value={path}>
-                  {PATH_LABELS[path] ?? path}
-                </option>
-              ))}
-            </select>
+            {choosablePaths.length === 0 ? (
+              <p className="muted">
+                No settlement method is available for this listing right now — the
+                seller only offers relay drop-off and none of their stores can take this
+                item.
+              </p>
+            ) : (
+              <>
+                <label htmlFor="bidFulfillmentPath">How do you want to settle this?</label>
+                <select id="bidFulfillmentPath" name="fulfillmentPath">
+                  {choosablePaths.map((path) => (
+                    <option key={path} value={path}>
+                      {PATH_LABELS[path] ?? path}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             {relayCandidates.length > 0 && (
               <>
                 <label htmlFor="bidRelayStoreId">Which store will you collect from?</label>
@@ -222,14 +241,23 @@ export default async function ListingPage({
       ) : listing.status === 'active' || listing.status === 'claimed' ? (
         <form action={claimAction}>
           <input type="hidden" name="listingId" value={id} />
-          <label htmlFor="fulfillmentPath">How do you want to settle this?</label>
-          <select id="fulfillmentPath" name="fulfillmentPath">
-            {listing.fulfillmentPaths.map((path) => (
-              <option key={path} value={path}>
-                {PATH_LABELS[path] ?? path}
-              </option>
-            ))}
-          </select>
+          {choosablePaths.length === 0 ? (
+            <p className="muted">
+              No settlement method is available for this listing right now — the seller
+              only offers relay drop-off and none of their stores can take this item.
+            </p>
+          ) : (
+            <>
+              <label htmlFor="fulfillmentPath">How do you want to settle this?</label>
+              <select id="fulfillmentPath" name="fulfillmentPath">
+                {choosablePaths.map((path) => (
+                  <option key={path} value={path}>
+                    {PATH_LABELS[path] ?? path}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           {relayCandidates.length > 0 && (
             <>
               <label htmlFor="relayStoreId">Which store will you collect from?</label>
