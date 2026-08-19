@@ -16,8 +16,14 @@ import { db, pool } from '../../src/db/client';
 import { users } from '../../src/db/schema/auth';
 import { profiles, reputationCounters } from '../../src/db/schema/profiles';
 import { listings } from '../../src/db/schema/listings';
-import { relayStores, relayStoreStaff, custodyHoldings } from '../../src/db/schema/custody';
+import {
+  relayStores,
+  relayStoreStaff,
+  custodyHoldings,
+  listingRelayStores,
+} from '../../src/db/schema/custody';
 import { claimListing } from '../../src/db/atomic/claim-listing';
+import { candidateStoresFor } from '../../src/services/relay-stores';
 
 /**
  * A queue of codes the generator hands out before falling back to the real one. It is
@@ -297,5 +303,86 @@ describe('relay store nomination', () => {
         { publish: true },
       ),
     ).rejects.toThrow(/at least one relay store/i);
+  });
+
+  it('persists nominated relay stores in the same transaction as the listing', async () => {
+    const { createListing } = await import('../../src/services/listings');
+    const created = await createListing(
+      seller,
+      {
+        category: 'trading_card',
+        title: 'Relay with a nominated store',
+        saleType: 'straight_sale',
+        priceCents: 5000,
+        fulfillmentPaths: ['relay'],
+        settlementMethods: ['cash'],
+        sizeClass: 'small',
+        relayStoreIds: [storeId],
+        attributes: {
+          game: 'pokemon',
+          set: 'base',
+          card_name: 'Pikachu',
+          condition: 'NM',
+        },
+      },
+      { publish: true },
+    );
+
+    const rows = await db
+      .select()
+      .from(listingRelayStores)
+      .where(eq(listingRelayStores.listingId, created.id));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.listingId).toBe(created.id);
+    expect(rows[0]!.storeId).toBe(storeId);
+  });
+
+  describe('candidateStoresFor', () => {
+    it('excludes a store whose size classes do not accept the listing size', async () => {
+      const largeListingId = await makeRelayListing({ sizeClass: 'large' });
+      await db.insert(listingRelayStores).values({ listingId: largeListingId, storeId });
+
+      // The fixture store only accepts 'small' — a 'large' listing should see nothing.
+      const candidates = await candidateStoresFor(db, largeListingId, 'large');
+      expect(candidates).toHaveLength(0);
+
+      // Sanity check: the same store IS a candidate for a 'small' listing.
+      const smallCandidates = await candidateStoresFor(db, largeListingId, 'small');
+      expect(smallCandidates.map((s) => s.id)).toContain(storeId);
+    });
+
+    it('excludes an inactive store', async () => {
+      const inactiveStores = await db
+        .insert(relayStores)
+        .values({
+          name: `Inactive Relay ${SUFFIX}`,
+          area: 'San Fernando',
+          acceptsSizeClasses: ['small'],
+          paidCustodyDays: 7,
+          unpaidCustodyDays: 3,
+          active: false,
+        })
+        .returning({ id: relayStores.id });
+      const inactiveStoreId = inactiveStores[0]!.id;
+
+      try {
+        const listingId = await makeRelayListing({ sizeClass: 'small' });
+        await db.insert(listingRelayStores).values([
+          { listingId, storeId },
+          { listingId, storeId: inactiveStoreId },
+        ]);
+
+        const candidates = await candidateStoresFor(db, listingId, 'small');
+        const candidateIds = candidates.map((s) => s.id);
+
+        expect(candidateIds).toContain(storeId);
+        expect(candidateIds).not.toContain(inactiveStoreId);
+      } finally {
+        // Break the restrict-FK before deleting the store: drop its join rows first.
+        await db.delete(listingRelayStores).where(eq(listingRelayStores.storeId, inactiveStoreId));
+        await db.delete(relayStores).where(eq(relayStores.id, inactiveStoreId));
+      }
+    });
   });
 });
