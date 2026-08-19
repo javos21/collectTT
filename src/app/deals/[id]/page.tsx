@@ -8,6 +8,7 @@ import { transactions, transactionEvents } from '@/db/schema/transactions';
 import { listings } from '@/db/schema/listings';
 import { profiles } from '@/db/schema/profiles';
 import { ratingsFor } from '@/services/ratings';
+import { custodyPanelFor } from '@/services/custody';
 import { formatMoney } from '@/domain/money';
 import { usesCustodyTrack } from '@/domain/states/transaction';
 import {
@@ -88,6 +89,7 @@ export default async function DealPage({
 
   const ratings = t.state === 'completed' ? await ratingsFor(id, viewer.userId) : null;
   const isOpen = t.state === 'open';
+  const custodyPanel = usesCustodyTrack(t.fulfillmentPath) ? await custodyPanelFor(db, id) : null;
 
   return (
     <main>
@@ -124,10 +126,7 @@ export default async function DealPage({
           {usesCustodyTrack(t.fulfillmentPath) && (
             <tr>
               <td>Custody</td>
-              <td>
-                {t.custodyState.replace(/_/g, ' ')}{' '}
-                <span className="muted">— the store flow lands in Phase 2</span>
-              </td>
+              <td>{t.custodyState.replace(/_/g, ' ')}</td>
             </tr>
           )}
           <tr>
@@ -147,6 +146,71 @@ export default async function DealPage({
           )}
         </tbody>
       </table>
+
+      {usesCustodyTrack(t.fulfillmentPath) && custodyPanel !== null && (
+        <>
+          <h2>Where your item is</h2>
+          {custodyPanel.state === 'awaiting_dropoff' && isSeller && (
+            <p>
+              Drop it off at{' '}
+              {[custodyPanel.storeName ?? 'the delivery team', custodyPanel.storeArea, custodyPanel.storeAddress]
+                .filter((part): part is string => part !== null)
+                .join(', ')}
+              . Show this code at the counter: <strong>{custodyPanel.dropoffCode}</strong>.
+              {t.sellerDropoffDeadlineAt !== null && (
+                <> Drop it off by {t.sellerDropoffDeadlineAt.toLocaleString('en-TT')}.</>
+              )}
+            </p>
+          )}
+
+          {custodyPanel.state === 'awaiting_dropoff' && isBuyer && (
+            <p className="muted">
+              Waiting for the seller to drop it off at{' '}
+              {custodyPanel.storeName ?? 'the delivery team'}.
+            </p>
+          )}
+
+          {custodyPanel.state === 'at_relay' && isBuyer && (
+            <p>
+              Your item is at <strong>{custodyPanel.storeName ?? 'the delivery team'}</strong>.
+              Your code is <strong>{custodyPanel.dropoffCode}</strong>.{' '}
+              {t.paymentState === 'confirmed' ? (
+                custodyPanel.custodyExpiresAt !== null && (
+                  <>Collect by {custodyPanel.custodyExpiresAt.toLocaleString('en-TT')}.</>
+                )
+              ) : (
+                <>Confirm your payment and the store will release it.</>
+              )}
+            </p>
+          )}
+
+          {custodyPanel.state === 'at_relay' && isSeller && (
+            <p className="muted">
+              Dropped off at {custodyPanel.storeName ?? 'the delivery team'}. Waiting for the
+              buyer to collect it.
+            </p>
+          )}
+
+          {custodyPanel.state === 'release_authorized' && isBuyer && (
+            <p>
+              Cleared for collection at{' '}
+              <strong>{custodyPanel.storeName ?? 'the delivery team'}</strong>. Show code{' '}
+              <strong>{custodyPanel.dropoffCode}</strong>.
+            </p>
+          )}
+
+          {custodyPanel.state === 'release_authorized' && isSeller && (
+            <p className="muted">
+              Cleared for collection at {custodyPanel.storeName ?? 'the delivery team'}. Waiting
+              for the buyer to pick it up.
+            </p>
+          )}
+
+          {custodyPanel.state === 'returned_to_seller' && <p>This item went back to the seller.</p>}
+
+          {custodyPanel.state === 'voided' && <p>This item was never dropped off.</p>}
+        </>
+      )}
 
       <p className="muted">
         Pay the {isBuyer ? 'seller' : 'buyer'} directly — cash, bank transfer, however you

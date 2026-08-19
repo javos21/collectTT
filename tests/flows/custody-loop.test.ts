@@ -24,6 +24,7 @@ import {
 } from '../../src/db/schema/custody';
 import { claimListing } from '../../src/db/atomic/claim-listing';
 import { candidateStoresFor } from '../../src/services/relay-stores';
+import { custodyPanelFor } from '../../src/services/custody';
 
 /**
  * A queue of codes the generator hands out before falling back to the real one. It is
@@ -279,6 +280,30 @@ describe('drop-off code', () => {
     expect(holdings).toHaveLength(0);
 
     codes.queue.length = 0;
+  });
+});
+
+describe('custodyPanelFor', () => {
+  it('joins the holding to its store for the member-facing deal page', async () => {
+    const listingId = await makeRelayListing();
+    const { transactionId } = await claimListing({
+      listingId,
+      claimantId: buyerA,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+
+    const panel = await custodyPanelFor(db, transactionId!);
+
+    expect(panel).not.toBeNull();
+    expect(panel!.state).toBe('awaiting_dropoff');
+    expect(panel!.dropoffCode).toMatch(/^CT-[A-Z2-9]{4}$/);
+    expect(panel!.storeName).not.toBeNull();
+  });
+
+  it('returns null when the transaction has no live custody holding', async () => {
+    const panel = await custodyPanelFor(db, randomUUID());
+    expect(panel).toBeNull();
   });
 });
 

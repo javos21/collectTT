@@ -591,6 +591,39 @@ export async function activeStores(tx: Tx) {
     .orderBy(relayStores.name);
 }
 
+// ════════════════════════════════════════════════════════ member-facing reads
+
+export interface CustodyPanel {
+  state: CustodyState;
+  dropoffCode: string;
+  storeName: string | null;
+  storeArea: string | null;
+  storeAddress: string | null;
+  custodyExpiresAt: Date | null;
+}
+
+/** Everything the deal page needs to tell a member where their item is. */
+export async function custodyPanelFor(
+  tx: DbOrTx,
+  transactionId: string,
+): Promise<CustodyPanel | null> {
+  const rows = await tx
+    .select({
+      state: custodyHoldings.state,
+      dropoffCode: custodyHoldings.dropoffCode,
+      custodyExpiresAt: custodyHoldings.custodyExpiresAt,
+      storeName: relayStores.name,
+      storeArea: relayStores.area,
+      storeAddress: relayStores.address,
+    })
+    .from(custodyHoldings)
+    .leftJoin(relayStores, eq(relayStores.id, custodyHoldings.storeId))
+    .where(eq(custodyHoldings.currentTransactionId, transactionId))
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 // ════════════════════════════════════════════════════════ internals
 
 type Holding = typeof custodyHoldings.$inferSelect;
