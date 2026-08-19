@@ -563,4 +563,49 @@ describe('custody notification strings', () => {
     const expiresAtText = holdingAfter[0]!.custodyExpiresAt!.toLocaleString('en-TT');
     expect(ready!.body).toContain(expiresAtText);
   });
+
+  it('flags an overstayed item and no-ops when the clock has moved', async () => {
+    const { custodyOverstay } = await import('../../src/jobs/tasks/custody-overstay');
+    const { markReceived } = await import('../../src/services/custody');
+    const helpers = { logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} } } as never;
+
+    const listingId = await makeRelayListing();
+    await claimListing({ listingId, claimantId: buyerA, fulfillmentPath: 'relay', relayStoreId: storeId });
+    const held = await db.select().from(custodyHoldings).where(eq(custodyHoldings.listingId, listingId));
+    const holdingId = held[0]!.id;
+
+    await db.transaction(async (tx) => {
+      await markReceived({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    // Not yet expired — the handler must do nothing.
+    await custodyOverstay({ holdingId }, helpers);
+    let row = await db.select().from(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
+    expect(row[0]!.overstayFlaggedAt).toBeNull();
+
+    // Force the clock into the past.
+    await db
+      .update(custodyHoldings)
+      .set({ custodyExpiresAt: sql`now() - interval '1 hour'` })
+      .where(eq(custodyHoldings.id, holdingId));
+
+    await custodyOverstay({ holdingId }, helpers);
+    row = await db.select().from(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
+    expect(row[0]!.overstayFlaggedAt).not.toBeNull();
+
+    // The store was actually told, with the owner's contact. The seller fixture has no
+    // phone, so the rule falls through to their auth email.
+    const { notifications } = await import('../../src/db/schema/notifications');
+    const clerkInbox = await db.select().from(notifications).where(eq(notifications.userId, clerk));
+    const evictions = clerkInbox.filter((n) => n.eventType === 'custody_overstay_store');
+    expect(evictions.length).toBe(1);
+    expect(evictions[0]!.body).toContain(`${seller}@test.local`);
+    expect(evictions[0]!.body).not.toContain('no contact on file');
+
+    // Idempotent: a redelivery must not move the timestamp.
+    const firstFlag = row[0]!.overstayFlaggedAt!.getTime();
+    await custodyOverstay({ holdingId }, helpers);
+    row = await db.select().from(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
+    expect(row[0]!.overstayFlaggedAt!.getTime()).toBe(firstFlag);
+  });
 });

@@ -24,6 +24,7 @@ import {
   reputationRecompute,
   consistencyCheck,
 } from './transaction-windows';
+import { custodyOverstay } from './custody-overstay';
 
 /** Payload contract for every task in the system. */
 export interface TaskPayloads {
@@ -65,6 +66,8 @@ export const taskList: TaskList = {
   'ratings:reveal': ratingsReveal as Task,
   'reputation:recompute': reputationRecompute as Task,
   'consistency:check': consistencyCheck as Task,
+  // Phase 2
+  'custody:overstay': custodyOverstay as Task,
 };
 
 export const IMPLEMENTED_TASKS = Object.keys(taskList);

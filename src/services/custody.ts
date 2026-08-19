@@ -20,6 +20,7 @@ import { custodyHoldings, relayStores, relayStoreStaff } from '../db/schema/cust
 import { transactions, transactionEvents } from '../db/schema/transactions';
 import { listings } from '../db/schema/listings';
 import { profiles } from '../db/schema/profiles';
+import { users } from '../db/schema/auth';
 import { enqueue } from '../jobs/enqueue';
 import { notify } from '../notifications/dispatch';
 import { custodyExpiry } from '../domain/policy/windows';
@@ -682,9 +683,20 @@ interface HoldingContext {
   buyerId: string | null;
   transactionId: string | null;
   storeName: string;
+  storeId: string | null;
+  droppedOffAt: Date | null;
   paymentDeadlineAt: Date | null;
   custodyExpiresAt: Date | null;
+  /**
+   * The seller's phone, falling back to their auth email, falling back to a literal
+   * placeholder. The store board renders the SAME rule — a clerk must never see a
+   * different contact string on the board than in an eviction notification.
+   */
+  ownerContact: string;
 }
+
+/** ★ ONE wording for "we have no way to reach this owner", shared with the store board. */
+const NO_CONTACT = 'no contact on file';
 
 /**
  * Everything the notification templates need about a holding. `buyerId` and
@@ -700,13 +712,19 @@ async function holdingContext(tx: Tx, holdingId: string): Promise<HoldingContext
       buyerId: transactions.buyerId,
       transactionId: transactions.id,
       storeName: relayStores.name,
+      storeId: custodyHoldings.storeId,
+      droppedOffAt: custodyHoldings.droppedOffAt,
       paymentDeadlineAt: transactions.paymentDeadlineAt,
       custodyExpiresAt: custodyHoldings.custodyExpiresAt,
+      sellerPhone: profiles.phoneE164,
+      sellerEmail: users.email,
     })
     .from(custodyHoldings)
     .innerJoin(listings, eq(listings.id, custodyHoldings.listingId))
     .leftJoin(transactions, eq(transactions.id, custodyHoldings.currentTransactionId))
     .leftJoin(relayStores, eq(relayStores.id, custodyHoldings.storeId))
+    .leftJoin(profiles, eq(profiles.userId, listings.sellerId))
+    .leftJoin(users, eq(users.id, listings.sellerId))
     .where(eq(custodyHoldings.id, holdingId))
     .limit(1);
 
@@ -720,7 +738,54 @@ async function holdingContext(tx: Tx, holdingId: string): Promise<HoldingContext
     buyerId: row.buyerId,
     transactionId: row.transactionId,
     storeName: row.storeName ?? 'the delivery team',
+    storeId: row.storeId,
+    droppedOffAt: row.droppedOffAt,
     paymentDeadlineAt: row.paymentDeadlineAt,
     custodyExpiresAt: row.custodyExpiresAt,
+    ownerContact: row.sellerPhone ?? row.sellerEmail ?? NO_CONTACT,
+  };
+}
+
+export interface HoldingNotificationContext {
+  listingTitle: string;
+  storeName: string;
+  storeId: string | null;
+  droppedOffAt: Date | null;
+  /** The seller's phone, falling back to their email — for the eviction prompt. */
+  ownerContact: string;
+  storeStaffIds: string[];
+}
+
+/**
+ * The public, notification-shaped view of a holding — for job handlers outside this
+ * module.
+ *
+ * ★ It EXTENDS the private `holdingContext` rather than re-joining the same tables.
+ *   Two readers of the same rows that can disagree is exactly the drift this module
+ *   cannot afford. The only extra query is the one-to-many staff list, which cannot
+ *   live in a single-row join.
+ */
+export async function holdingNotificationContext(
+  tx: Tx,
+  holdingId: string,
+): Promise<HoldingNotificationContext | null> {
+  const ctx = await holdingContext(tx, holdingId);
+  if (ctx === null) return null;
+
+  const staff =
+    ctx.storeId === null
+      ? []
+      : await tx
+          .select({ userId: relayStoreStaff.userId })
+          .from(relayStoreStaff)
+          .where(eq(relayStoreStaff.storeId, ctx.storeId));
+
+  return {
+    listingTitle: ctx.listingTitle,
+    storeName: ctx.storeName,
+    storeId: ctx.storeId,
+    droppedOffAt: ctx.droppedOffAt,
+    ownerContact: ctx.ownerContact,
+    storeStaffIds: staff.map((s) => s.userId),
   };
 }
