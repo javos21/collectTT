@@ -12,7 +12,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 
 import { db } from '@/db/client';
-import { currentUser } from '@/lib/session';
+import { currentUser, SignInRequiredError } from '@/lib/session';
 import { requireStoreStaff, NotStoreStaffError, type StoreSession } from '@/lib/store-session';
 import {
   findHoldingByCode,
@@ -41,7 +41,7 @@ async function counterSession(storeId: string): Promise<StoreSession> {
   } catch (error) {
     if (error instanceof NotStoreStaffError) redirect('/store');
     // The session can also lapse between the check above and this call.
-    if (error instanceof Error && error.message === 'Sign in required') redirect('/sign-in');
+    if (error instanceof SignInRequiredError) redirect('/sign-in');
     throw error;
   }
 }

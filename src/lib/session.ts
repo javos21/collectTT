@@ -33,9 +33,22 @@ export async function currentUser(): Promise<CurrentUser | null> {
   };
 }
 
+/**
+ * ★ A TYPE, not a string. Callers that must turn "no session" into a sign-in redirect
+ *   rather than a crash page — the store counter, above all — match on this class.
+ *   Matching on `error.message === 'Sign in required'` made a copy-edit of that
+ *   sentence silently reintroduce the crash page it exists to prevent.
+ */
+export class SignInRequiredError extends Error {
+  constructor() {
+    super('Sign in required');
+    this.name = 'SignInRequiredError';
+  }
+}
+
 export async function requireUser(): Promise<CurrentUser> {
   const user = await currentUser();
-  if (user === null) throw new Error('Sign in required');
+  if (user === null) throw new SignInRequiredError();
   return user;
 }
 
