@@ -35,6 +35,22 @@ import type { ActorRole } from '../domain/states/actors';
 import type { FulfillmentPath } from '../domain/states/transaction';
 import type { SizeClass } from '../domain/states/listing';
 
+/** How many drop-off codes we will draw before giving up on finding a free one. */
+const DROPOFF_CODE_ATTEMPTS = 5;
+
+/**
+ * Was this a collision on the drop-off code specifically? Drizzle wraps driver errors,
+ * so the pg fields can be one `cause` down. Deliberately narrow: the OTHER unique
+ * index on this table (one live holding per listing) must never be retried away.
+ */
+function isDropoffCodeCollision(error: unknown): boolean {
+  for (let e: unknown = error; e !== null && e !== undefined; e = (e as { cause?: unknown }).cause) {
+    const pg = e as { code?: string; constraint?: string };
+    if (pg.code === '23505' && pg.constraint?.includes('dropoff_code') === true) return true;
+  }
+  return false;
+}
+
 export class CustodyError extends Error {}
 export class CustodyForbiddenError extends CustodyError {}
 export class CustodyConflictError extends CustodyError {}
@@ -98,18 +114,35 @@ export async function openOrRelinkHolding(input: OpenHoldingInput): Promise<{
     if (!eligibility.eligible) throw new CustodyConflictError(eligibility.reasons.join(' '));
   }
 
-  const inserted = await tx
-    .insert(custodyHoldings)
-    .values({
-      listingId: input.listingId,
-      currentTransactionId: input.transactionId,
-      holder: input.path === 'relay' ? 'relay_store' : 'platform_courier',
-      storeId: input.path === 'relay' ? input.storeId : null,
-      state: 'awaiting_dropoff',
-      sizeClass: input.sizeClass,
-      dropoffCode: generateDropoffCode(),
-    })
-    .returning({ id: custodyHoldings.id });
+  // ★ Retry on the unique index rather than pre-checking. 31^4 codes against a few
+  //   dozen live holdings makes a collision rare; a retry makes it a non-event, and a
+  //   pre-check would still race. Each attempt runs in its own SAVEPOINT because a
+  //   failed INSERT aborts the enclosing transaction outright — without one, the
+  //   second attempt dies on 25P02 instead of retrying.
+  let inserted: Array<{ id: string }> = [];
+  for (let attempt = 0; attempt < DROPOFF_CODE_ATTEMPTS; attempt += 1) {
+    try {
+      inserted = await tx.transaction((sp) =>
+        sp
+          .insert(custodyHoldings)
+          .values({
+            listingId: input.listingId,
+            currentTransactionId: input.transactionId,
+            holder: input.path === 'relay' ? 'relay_store' : 'platform_courier',
+            storeId: input.path === 'relay' ? input.storeId : null,
+            state: 'awaiting_dropoff',
+            sizeClass: input.sizeClass,
+            dropoffCode: generateDropoffCode(),
+          })
+          .returning({ id: custodyHoldings.id }),
+      );
+      break;
+    } catch (error) {
+      if (!isDropoffCodeCollision(error) || attempt === DROPOFF_CODE_ATTEMPTS - 1) {
+        throw error;
+      }
+    }
+  }
 
   const holding = inserted[0];
   if (holding === undefined) throw new CustodyError('Failed to open custody holding');
