@@ -1193,12 +1193,12 @@ Extend the `StoreBoardRow` interface and the existing `storeBoard` query — it 
     ownerContact: r.sellerPhone ?? r.sellerEmail ?? 'no contact on file',
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 6: Run test to verify it passes**
 
 Run: `npx vitest run tests/flows/custody-loop.test.ts -t 'by code' && npm run typecheck`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/services/custody.ts tests/flows/custody-loop.test.ts
