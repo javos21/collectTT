@@ -11,6 +11,7 @@ import { z } from 'zod';
 
 import { db, type DbOrTx } from '../db/client';
 import { listings, listingImages, categories } from '../db/schema/listings';
+import { listingRelayStores } from '../db/schema/custody';
 import { images } from '../db/schema/images';
 import { profiles } from '../db/schema/profiles';
 import { parseAttributes } from '../domain/categories/build-schema';
@@ -40,9 +41,23 @@ export const listingInputSchema = z
     sizeClass: z.enum(SIZE_CLASSES).default('small'),
     autoRelistOnRenege: z.boolean().default(true),
     imageIds: z.array(z.string().uuid()).max(8).default([]),
+    /**
+     * Candidate relay stores. The buyer picks one of these at claim time.
+     * NOTE: "declaring relay requires at least one store" spans two tables and so
+     * cannot be a database CHECK — this superRefine is the enforcement point. It is
+     * deliberately NOT in the README's invariants table, which is for DB constraints.
+     */
+    relayStoreIds: z.array(z.string().uuid()).default([]),
     attributes: z.record(z.unknown()).default({}),
   })
   .superRefine((value, ctx) => {
+    if (value.fulfillmentPaths.includes('relay') && value.relayStoreIds.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['relayStoreIds'],
+        message: 'Nominate at least one relay store for drop-off',
+      });
+    }
     if (value.saleType === 'straight_sale' && value.priceCents === undefined) {
       ctx.addIssue({ code: 'custom', path: ['priceCents'], message: 'A price is required' });
     }
@@ -116,6 +131,12 @@ export async function createListing(
     if (listing === undefined) throw new Error('Failed to create listing');
 
     await attachImages(tx, listing.id, input.imageIds);
+
+    if (input.relayStoreIds.length > 0) {
+      await tx.insert(listingRelayStores).values(
+        input.relayStoreIds.map((storeId) => ({ listingId: listing.id, storeId })),
+      );
+    }
 
     // ★ The close job is enqueued in the SAME transaction that created the auction, so
     //   an auction cannot exist without something scheduled to resolve it. The job

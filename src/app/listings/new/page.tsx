@@ -4,6 +4,8 @@ import { z } from 'zod';
 
 import { currentUser } from '@/lib/session';
 import { createListing, SETTLEMENT_METHODS } from '@/services/listings';
+import { listRelayStores } from '@/services/relay-stores';
+import { db } from '@/db/client';
 import { CATEGORY_LIST, getCategory } from '@/domain/categories/definitions';
 import { FULFILLMENT_PATHS } from '@/domain/states/transaction';
 import { SIZE_CLASSES } from '@/domain/states/listing';
@@ -79,6 +81,7 @@ async function create(formData: FormData): Promise<void> {
       saleType === 'auction' ? Number(formData.get('durationHours') ?? 48) : undefined,
     fulfillmentPaths: formData.getAll('fulfillmentPaths').map(String),
     settlementMethods: formData.getAll('settlementMethods').map(String),
+    relayStoreIds: formData.getAll('relayStoreIds').map(String),
     sizeClass: String(formData.get('sizeClass') ?? 'small'),
     autoRelistOnRenege: formData.get('autoRelistOnRenege') !== null,
     imageIds: [],
@@ -107,6 +110,7 @@ export default async function NewListingPage({
 }) {
   const user = await currentUser();
   const { error } = await searchParams;
+  const relayStoreOptions = await listRelayStores(db);
 
   if (user === null) {
     return (
@@ -188,6 +192,22 @@ export default async function NewListingPage({
                 defaultChecked={path === 'cash_meetup'}
               />
               {PATH_LABELS[path]}
+            </label>
+          ))}
+
+          <label style={{ marginTop: '1rem' }}>Where will you drop it off?</label>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Pick every store you&apos;re willing to use — the buyer chooses one of these.
+          </p>
+          {relayStoreOptions.map((store) => (
+            <label key={store.id} htmlFor={`store_${store.id}`} style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
+              <input
+                id={`store_${store.id}`}
+                type="checkbox"
+                name="relayStoreIds"
+                value={store.id}
+              />
+              {store.name} ({store.area})
             </label>
           ))}
 

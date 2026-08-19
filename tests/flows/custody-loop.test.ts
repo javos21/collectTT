@@ -275,3 +275,27 @@ describe('drop-off code', () => {
     codes.queue.length = 0;
   });
 });
+
+describe('relay store nomination', () => {
+  it('refuses a relay listing with no nominated store', async () => {
+    const { createListing } = await import('../../src/services/listings');
+    // ★ createListing is POSITIONAL: (sellerId, raw, opts). Verified against source.
+    await expect(
+      createListing(
+        seller,
+        {
+          category: 'trading_card',
+          title: 'Relay with no store',
+          saleType: 'straight_sale',
+          priceCents: 5000,
+          fulfillmentPaths: ['relay'],
+          settlementMethods: ['cash'],
+          sizeClass: 'small',
+          relayStoreIds: [],
+          attributes: {},
+        },
+        { publish: true },
+      ),
+    ).rejects.toThrow(/at least one relay store/i);
+  });
+});
