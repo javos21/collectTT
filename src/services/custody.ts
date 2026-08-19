@@ -24,6 +24,7 @@ import { enqueue } from '../jobs/enqueue';
 import { notify } from '../notifications/dispatch';
 import { custodyExpiry } from '../domain/policy/windows';
 import { checkEligibility } from '../domain/policy/eligibility';
+import { generateDropoffCode } from '../domain/dropoff-code';
 import {
   assertCustodyTransition,
   canActorTransitionCustody,
@@ -106,6 +107,7 @@ export async function openOrRelinkHolding(input: OpenHoldingInput): Promise<{
       storeId: input.path === 'relay' ? input.storeId : null,
       state: 'awaiting_dropoff',
       sizeClass: input.sizeClass,
+      dropoffCode: generateDropoffCode(),
     })
     .returning({ id: custodyHoldings.id });
 

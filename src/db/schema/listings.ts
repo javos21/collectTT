@@ -201,6 +201,15 @@ export const bids = pgTable(
       .references(() => profiles.userId),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     isBuyout: boolean('is_buyout').notNull().default(false),
+    /**
+     * ★ The bidder's chosen settlement, mirroring what `claims` has always carried.
+     *   Without these a relay auction cannot close: openTransaction would insert a
+     *   holding with holder='relay_store' and store_id=null, violating
+     *   custody_store_required. Nullable because bids predating Phase 2 have neither;
+     *   nextFromBidLadder falls back to the listing's first declared path.
+     */
+    fulfillmentPath: fulfillmentPathEnum('fulfillment_path'),
+    relayStoreId: uuid('relay_store_id'),
     status: bidStatusEnum('status').notNull().default('active'),
     /** True if this bid triggered an anti-snipe extension. Shown in the live feed. */
     extendedAuction: boolean('extended_auction').notNull().default(false),

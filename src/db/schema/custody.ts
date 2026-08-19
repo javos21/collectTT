@@ -74,6 +74,13 @@ export const custodyHoldings = pgTable(
     state: custodyStateEnum('state').notNull().default('awaiting_dropoff'),
     sizeClass: sizeClassEnum('size_class').notNull(),
 
+    /**
+     * ★ The counter token. Shown to the seller for drop-off and to the buyer for
+     *   collection. NOT regenerated when a holding re-links on promotion — the code
+     *   belongs to the item on the shelf, not to the buyer.
+     */
+    dropoffCode: text('dropoff_code').notNull().unique(),
+
     droppedOffAt: timestamp('dropped_off_at', { withTimezone: true }),
     receivedByUserId: text('received_by_user_id').references(() => profiles.userId),
     releaseAuthorizedAt: timestamp('release_authorized_at', { withTimezone: true }),
@@ -109,4 +116,26 @@ export const custodyHoldings = pgTable(
       sql`${t.holder} <> 'platform_courier' or ${t.storeId} is null`,
     ),
   ],
+);
+
+/**
+ * The stores a seller is willing to drop off at. The buyer picks one of these at claim
+ * time, so both parties consent to the location before the claim locks.
+ *
+ * A join table rather than a uuid[] on `listings`, because a store id with no foreign
+ * key is a dangling reference waiting to happen. `on delete restrict` means a store
+ * with live listings cannot be deleted out from under them — deactivation is what
+ * `relay_stores.active` is for.
+ */
+export const listingRelayStores = pgTable(
+  'listing_relay_stores',
+  {
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    storeId: uuid('store_id')
+      .notNull()
+      .references(() => relayStores.id, { onDelete: 'restrict' }),
+  },
+  (t) => [primaryKey({ columns: [t.listingId, t.storeId] })],
 );

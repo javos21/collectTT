@@ -407,8 +407,8 @@ describe('★ path/track coherence', () => {
 describe('★ custody_one_live_per_listing — an item cannot be on two shelves', () => {
   it('accepts the first live holding', async () => {
     await pool.query(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class)
-       values ($1, 'relay_store', $2, 'at_relay', 'small')`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
+       values ($1, 'relay_store', $2, 'at_relay', 'small', 'CT-TEST')`,
       [ids.listing, ids.store],
     );
     const { rows } = await pool.query(
@@ -420,8 +420,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
 
   it('REJECTS a second live holding for the same item', async () => {
     await expectRejected(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class)
-       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'small')`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
+       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'small', 'CT-TES2')`,
       [ids.listing, ids.store],
       'custody_one_live_per_listing',
     );
@@ -434,8 +434,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
       [ids.listing],
     );
     const { rows } = await pool.query(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class)
-       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'small') returning id`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
+       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'small', 'CT-TES3') returning id`,
       [ids.listing, ids.store],
     );
     expect(rows[0].id).toBeTruthy();
@@ -443,8 +443,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
 
   it('REJECTS a relay holding with no store', async () => {
     await expectRejected(
-      `insert into custody_holdings (listing_id, holder, state, size_class)
-       values ($1, 'relay_store', 'awaiting_dropoff', 'small')`,
+      `insert into custody_holdings (listing_id, holder, state, size_class, dropoff_code)
+       values ($1, 'relay_store', 'awaiting_dropoff', 'small', 'CT-TES4')`,
       [ids.listing2],
       'custody_store_required',
     );
@@ -452,8 +452,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
 
   it('REJECTS a courier holding attached to a store', async () => {
     await expectRejected(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class)
-       values ($1, 'platform_courier', $2, 'awaiting_dropoff', 'small')`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
+       values ($1, 'platform_courier', $2, 'awaiting_dropoff', 'small', 'CT-TES5')`,
       [ids.listing2, ids.store],
       'custody_courier_has_no_store',
     );
