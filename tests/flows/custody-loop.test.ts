@@ -490,3 +490,77 @@ describe('relay auction close', () => {
     expect(deals[0]!.fulfillmentPath).toBe('relay');
   });
 });
+
+describe('custody notification strings', () => {
+  it('renders custody notifications with real dates', async () => {
+    const { notifications } = await import('../../src/db/schema/notifications');
+    const { markReceived } = await import('../../src/services/custody');
+
+    const listingId = await makeRelayListing();
+    await claimListing({ listingId, claimantId: buyerA, fulfillmentPath: 'relay', relayStoreId: storeId });
+    const held = await db.select().from(custodyHoldings).where(eq(custodyHoldings.listingId, listingId));
+
+    await db.transaction(async (tx) => {
+      await markReceived({ tx, holdingId: held[0]!.id, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    const inbox = await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, buyerA));
+    const received = inbox.find((n) => n.eventType === 'custody_received_buyer');
+
+    expect(received).toBeDefined();
+    expect(received!.body).not.toMatch(/Pay by \.$/);
+    expect(received!.body).toMatch(/Pay by \S+/);
+  });
+
+  it('renders the collection deadline after payment extends the shelf clock, not the tight unpaid one', async () => {
+    const { notifications } = await import('../../src/db/schema/notifications');
+    const { markReceived, onPaymentConfirmed } = await import('../../src/services/custody');
+    const { transactions: transactionsTable } = await import('../../src/db/schema/transactions');
+
+    const listingId = await makeRelayListing();
+    const claim = await claimListing({
+      listingId,
+      claimantId: buyerB,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+    const held = await db.select().from(custodyHoldings).where(eq(custodyHoldings.listingId, listingId));
+
+    await db.transaction(async (tx) => {
+      await markReceived({ tx, holdingId: held[0]!.id, actorUserId: clerk, actorRole: 'store' });
+    });
+
+    // Confirm payment: this extends the shelf clock from the tight unpaid window (3
+    // days) to the paid window (7 days) before the "ready for pickup" notification
+    // is sent.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(transactionsTable)
+        .set({ paymentState: 'confirmed', paymentConfirmedAt: sql`now()` })
+        .where(eq(transactionsTable.id, claim.transactionId!));
+      await onPaymentConfirmed(tx, claim.transactionId!);
+    });
+
+    const holdingAfter = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.id, held[0]!.id));
+
+    const inbox = await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, buyerB));
+    const ready = inbox.find((n) => n.eventType === 'custody_ready_for_pickup');
+
+    expect(ready).toBeDefined();
+    expect(ready!.body).not.toMatch(/Collect it by \.$/);
+    expect(ready!.body).toMatch(/Collect ".*" by \S+/);
+    // The notified deadline matches the extended (paid) clock actually stored on the
+    // holding, not a value computed before recomputeShelfClock ran.
+    const expiresAtText = holdingAfter[0]!.custodyExpiresAt!.toLocaleString('en-TT');
+    expect(ready!.body).toContain(expiresAtText);
+  });
+});

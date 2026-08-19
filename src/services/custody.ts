@@ -199,7 +199,11 @@ export async function markReceived(input: StoreActionInput): Promise<void> {
       tx: input.tx,
       userId: ctx.buyerId,
       event: 'custody_received_buyer',
-      data: { listingTitle: ctx.listingTitle, storeName: ctx.storeName },
+      data: {
+        listingTitle: ctx.listingTitle,
+        storeName: ctx.storeName,
+        deadline: ctx.paymentDeadlineAt?.toLocaleString('en-TT') ?? 'your payment deadline',
+      },
       linkUrl: `/deals/${ctx.transactionId}`,
       idempotencyKey: `custody_received:${input.holdingId}`,
     });
@@ -397,7 +401,11 @@ export async function onPaymentConfirmed(tx: Tx, transactionId: string): Promise
     tx,
     userId: ctx.buyerId,
     event: 'custody_ready_for_pickup',
-    data: { listingTitle: ctx.listingTitle, storeName: ctx.storeName },
+    data: {
+      listingTitle: ctx.listingTitle,
+      storeName: ctx.storeName,
+      expiresAt: ctx.custodyExpiresAt?.toLocaleString('en-TT') ?? 'the collection deadline',
+    },
     linkUrl: `/deals/${transactionId}`,
     idempotencyKey: `custody_ready:${holding.id}:${transactionId}`,
   });
@@ -674,6 +682,8 @@ interface HoldingContext {
   buyerId: string | null;
   transactionId: string | null;
   storeName: string;
+  paymentDeadlineAt: Date | null;
+  custodyExpiresAt: Date | null;
 }
 
 /**
@@ -690,6 +700,8 @@ async function holdingContext(tx: Tx, holdingId: string): Promise<HoldingContext
       buyerId: transactions.buyerId,
       transactionId: transactions.id,
       storeName: relayStores.name,
+      paymentDeadlineAt: transactions.paymentDeadlineAt,
+      custodyExpiresAt: custodyHoldings.custodyExpiresAt,
     })
     .from(custodyHoldings)
     .innerJoin(listings, eq(listings.id, custodyHoldings.listingId))
@@ -708,5 +720,7 @@ async function holdingContext(tx: Tx, holdingId: string): Promise<HoldingContext
     buyerId: row.buyerId,
     transactionId: row.transactionId,
     storeName: row.storeName ?? 'the delivery team',
+    paymentDeadlineAt: row.paymentDeadlineAt,
+    custodyExpiresAt: row.custodyExpiresAt,
   };
 }
