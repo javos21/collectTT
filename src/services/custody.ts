@@ -463,6 +463,10 @@ export interface StoreBoardRow {
   buyerName: string | null;
   paid: boolean;
   droppedOffAt: Date | null;
+  pickedUpAt: Date | null;
+  returnedAt: Date | null;
+  /** Last write to the row — the only timestamp a voided holding has. */
+  updatedAt: Date;
   custodyExpiresAt: Date | null;
   overstayFlaggedAt: Date | null;
   transactionId: string | null;
@@ -525,6 +529,9 @@ export async function storeBoard(tx: DbOrTx, storeId: string): Promise<StoreBoar
     buyerName: r.buyerId === null ? null : (buyerNames.get(r.buyerId) ?? null),
     paid: r.paymentState === 'confirmed',
     droppedOffAt: r.h.droppedOffAt,
+    pickedUpAt: r.h.pickedUpAt,
+    returnedAt: r.h.returnedAt,
+    updatedAt: r.h.updatedAt,
     custodyExpiresAt: r.h.custodyExpiresAt,
     overstayFlaggedAt: r.h.overstayFlaggedAt,
     transactionId: r.transactionId,

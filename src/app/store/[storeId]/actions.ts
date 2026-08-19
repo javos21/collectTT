@@ -12,7 +12,8 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 
 import { db } from '@/db/client';
-import { requireStoreStaff } from '@/lib/store-session';
+import { currentUser } from '@/lib/session';
+import { requireStoreStaff, NotStoreStaffError, type StoreSession } from '@/lib/store-session';
 import {
   findHoldingByCode,
   markReceived,
@@ -25,11 +26,31 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong';
 }
 
+/**
+ * ★ A counter terminal is the likeliest place in this app to meet an expired session —
+ *   a tab open since morning, a customer at the till. That must be a sign-in redirect,
+ *   never a crash page. Still not the security boundary: the services re-check every
+ *   write against the holding's own store.
+ */
+async function counterSession(storeId: string): Promise<StoreSession> {
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+
+  try {
+    return await requireStoreStaff(storeId);
+  } catch (error) {
+    if (error instanceof NotStoreStaffError) redirect('/store');
+    // The session can also lapse between the check above and this call.
+    if (error instanceof Error && error.message === 'Sign in required') redirect('/sign-in');
+    throw error;
+  }
+}
+
 /** The counter's primary interaction: a code in, an item on the shelf or a refusal. */
 export async function receiveByCodeAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const code = String(formData.get('code') ?? '');
-  const session = await requireStoreStaff(storeId);
+  const session = await counterSession(storeId);
 
   const found = await findHoldingByCode(db, storeId, code);
   if (found === null) {
@@ -65,7 +86,7 @@ export async function receiveByCodeAction(formData: FormData): Promise<void> {
 export async function authorizeReleaseAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const holdingId = String(formData.get('holdingId') ?? '');
-  const session = await requireStoreStaff(storeId);
+  const session = await counterSession(storeId);
 
   try {
     await db.transaction(async (tx) => {
@@ -91,7 +112,7 @@ export async function authorizeReleaseAction(formData: FormData): Promise<void> 
 export async function markPickedUpAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const holdingId = String(formData.get('holdingId') ?? '');
-  const session = await requireStoreStaff(storeId);
+  const session = await counterSession(storeId);
 
   try {
     await db.transaction(async (tx) => {
@@ -114,7 +135,7 @@ export async function returnToSellerAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const holdingId = String(formData.get('holdingId') ?? '');
   const reason = String(formData.get('reason') ?? '').trim();
-  const session = await requireStoreStaff(storeId);
+  const session = await counterSession(storeId);
 
   try {
     await db.transaction(async (tx) => {

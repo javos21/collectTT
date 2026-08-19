@@ -26,9 +26,43 @@ const SETTLED_LABELS: Record<string, string> = {
   voided: 'Never arrived — voided',
 };
 
+/**
+ * A refusal a clerk can act on, not a stack trace. Both the unknown-code refusal and
+ * a service refusal (the payment gate, from a tab left open) render through this.
+ */
+function Refusal({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      className="error"
+      role="alert"
+      style={{
+        border: '2px solid var(--danger)',
+        borderRadius: '6px',
+        padding: '.75rem',
+        fontSize: '1rem',
+        fontWeight: 700,
+      }}
+    >
+      {children}
+    </p>
+  );
+}
+
+/** How many settled rows the audit tail shows. A clerk keeps this page open all day. */
+const SETTLED_WINDOW = 25;
+
 /** Every clock on this page comes from the database. Nothing here computes a deadline. */
 function when(value: Date | null): string {
   return value === null ? '—' : value.toLocaleString('en-TT');
+}
+
+/**
+ * When a holding stopped being the store's problem. Straight from the database:
+ * picked_up and returned_to_seller each stamp their own column, and a voided holding
+ * — nothing ever arrived — has only the row's last write.
+ */
+function settledAt(row: StoreBoardRow): Date {
+  return row.pickedUpAt ?? row.returnedAt ?? row.updatedAt;
 }
 
 function heldFor(row: StoreBoardRow): string {
@@ -63,9 +97,13 @@ export default async function StoreBoardPage({
   const expected = rows.filter((r) => r.state === 'awaiting_dropoff');
   const onShelf = rows.filter((r) => r.state === 'at_relay');
   const ready = rows.filter((r) => r.state === 'release_authorized');
-  const settled = rows.filter((r) =>
+  const settledAll = rows.filter((r) =>
     ['picked_up', 'returned_to_seller', 'voided'].includes(r.state),
   );
+  // Most recently settled first, then capped: this is the tail of a log, not the log.
+  const settled = [...settledAll]
+    .sort((a, b) => settledAt(b).getTime() - settledAt(a).getTime())
+    .slice(0, SETTLED_WINDOW);
 
   // Overstayed items are the store's actual pain. They go to the top of the shelf list.
   const shelf = [...onShelf].sort((a, b) => {
@@ -93,28 +131,14 @@ export default async function StoreBoardPage({
           type="text"
           autoComplete="off"
           autoFocus
-          placeholder="e.g. K4M9"
+          placeholder="e.g. CT-K4M9"
           required
         />
         <button type="submit">Receive item</button>
       </form>
 
-      {flash.refuse !== undefined && (
-        <p
-          className="error"
-          role="alert"
-          style={{
-            border: '2px solid var(--danger)',
-            borderRadius: '6px',
-            padding: '.75rem',
-            fontSize: '1rem',
-            fontWeight: 700,
-          }}
-        >
-          {flash.refuse}
-        </p>
-      )}
-      {flash.error !== undefined && <p className="error">{flash.error}</p>}
+      {flash.refuse !== undefined && <Refusal>{flash.refuse}</Refusal>}
+      {flash.error !== undefined && <Refusal>{flash.error}</Refusal>}
       {flash.ok !== undefined && <p className="ok">{flash.ok}</p>}
 
       <p className="muted">
@@ -278,12 +302,18 @@ export default async function StoreBoardPage({
 
       {/* ------------------------------------------------ audit tail */}
       <h2>Recently settled</h2>
+      <p className="muted">
+        {settledAll.length > settled.length
+          ? `The last ${SETTLED_WINDOW} of ${settledAll.length} items this store has settled — newest first.`
+          : 'Everything this store has settled — newest first.'}
+      </p>
       {settled.length === 0 ? (
         <p className="muted">Nothing settled yet.</p>
       ) : (
         <table>
           <thead>
             <tr>
+              <th>Settled</th>
               <th>Item</th>
               <th>Outcome</th>
               <th>Code</th>
@@ -294,6 +324,7 @@ export default async function StoreBoardPage({
           <tbody>
             {settled.map((row) => (
               <tr key={row.holdingId}>
+                <td className="muted">{when(settledAt(row))}</td>
                 <td>{row.listingTitle}</td>
                 <td>{SETTLED_LABELS[row.state] ?? row.state.replace(/_/g, ' ')}</td>
                 <td className="muted">{row.dropoffCode}</td>
