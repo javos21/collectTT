@@ -407,3 +407,39 @@ describe('relay store nomination', () => {
     });
   });
 });
+
+describe('relay auction close', () => {
+  it('closes a relay auction at the winning bidder\'s chosen store', async () => {
+    const { placeBid } = await import('../../src/db/atomic/place-bid');
+    const { auctionClose } = await import('../../src/jobs/tasks/auction-close');
+    const helpers = { logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} } } as never;
+
+    const listingId = await makeRelayListing({
+      saleType: 'auction',
+      priceCents: null,
+      startBidCents: 5_000,
+      // $inferInsert types endsAt as Date; this value is resolved by the DB clock.
+      endsAt: sql`now() + interval '1 hour'` as unknown as Date,
+    });
+
+    await placeBid({
+      listingId,
+      bidderId: buyerA,
+      amountCents: 6_000,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+
+    await db.update(listings).set({ endsAt: sql`now() - interval '1 minute'` }).where(eq(listings.id, listingId));
+    await auctionClose({ listingId }, helpers);
+
+    const holdings = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.listingId, listingId));
+
+    expect(holdings).toHaveLength(1);
+    expect(holdings[0]!.storeId).toBe(storeId);
+    expect(holdings[0]!.holder).toBe('relay_store');
+  });
+});

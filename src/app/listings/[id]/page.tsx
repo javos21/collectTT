@@ -177,6 +177,31 @@ export default async function ListingPage({
               placeholder={(minBid / 100).toFixed(2)}
               required
             />
+            <label htmlFor="bidFulfillmentPath">How do you want to settle this?</label>
+            <select id="bidFulfillmentPath" name="fulfillmentPath">
+              {listing.fulfillmentPaths.map((path) => (
+                <option key={path} value={path}>
+                  {PATH_LABELS[path] ?? path}
+                </option>
+              ))}
+            </select>
+            {relayCandidates.length > 0 && (
+              <>
+                <label htmlFor="bidRelayStoreId">Which store will you collect from?</label>
+                <select
+                  id="bidRelayStoreId"
+                  name="relayStoreId"
+                  defaultValue={relayCandidates[0]!.id}
+                >
+                  {relayCandidates.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name} — {store.area}
+                    </option>
+                  ))}
+                </select>
+                <p className="muted">Only used if you pick relay drop-off.</p>
+              </>
+            )}
             <button type="submit">Place bid</button>
           </form>
         ) : (

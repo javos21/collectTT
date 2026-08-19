@@ -118,12 +118,15 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
       sellerId: listing.sellerId,
       buyerId: winner.bidderId,
       amountCents: winner.amountCents,
-      // The bid ladder carries no fulfillment choice, so the buyer starts on the
-      // seller's first declared path and can change it before paying.
-      fulfillmentPath: (listing.fulfillmentPaths[0] ?? 'cash_meetup') as FulfillmentPath,
+      // ★ The winner's OWN choice, recorded when they bid. Falls back to the seller's
+      //   first declared path only for bids placed before Phase 2, which carry none.
+      fulfillmentPath: (winner.fulfillmentPath ??
+        listing.fulfillmentPaths[0] ??
+        'cash_meetup') as FulfillmentPath,
       source: 'auction_win',
       winningBidId: winner.id,
       listingTitle: listing.title,
+      relayStoreId: winner.relayStoreId,
     });
 
     await notify({

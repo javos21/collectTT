@@ -790,10 +790,11 @@ async function nextFromBidLadder(
     if (listing.reserve !== null && row.amountCents < listing.reserve) return null;
     return {
       buyerId: row.bidderId,
-      // The bid ladder does not record a fulfillment path; the buyer picks from the
-      // seller's declared list, defaulting to the first.
       amountCents: row.amountCents,
-      fulfillmentPath: (listing.paths[0] ?? 'cash_meetup') as FulfillmentPath,
+      // ★ The bidder's OWN choice, mirroring how the claim stack has always worked.
+      //   Falls back to the listing's first path only for bids placed before Phase 2.
+      fulfillmentPath: (row.fulfillmentPath ?? listing.paths[0] ?? 'cash_meetup') as FulfillmentPath,
+      relayStoreId: row.relayStoreId,
       bidId: row.id,
     };
   }

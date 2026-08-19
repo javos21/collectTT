@@ -21,12 +21,15 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 
 import { db, type Tx } from '../client';
 import { listings, bids } from '../schema/listings';
+import { relayStores } from '../schema/custody';
 import { openTransaction, ConflictError, ForbiddenError } from '../../services/transactions';
 import { activeRestrictions } from '../../services/reputation';
 import { notify } from '../../notifications/dispatch';
 import { enqueue } from '../../jobs/enqueue';
 import { bidIncrement, formatMoney, minimumNextBid } from '../../domain/money';
+import { checkEligibility } from '../../domain/policy/eligibility';
 import type { FulfillmentPath } from '../../domain/states/transaction';
+import type { SizeClass } from '../../domain/states/listing';
 
 export interface BidResult {
   bidId: string;
@@ -42,6 +45,14 @@ export async function placeBid(opts: {
   listingId: string;
   bidderId: string;
   amountCents: number;
+  /**
+   * ★ The bidder's own settlement choice, recorded on the bid the way the claim stack
+   *   has always recorded it. Optional: a bid without one falls back to the listing's
+   *   first declared path when the ladder is walked.
+   */
+  fulfillmentPath?: FulfillmentPath;
+  /** Which relay store the bidder will collect from. Required when path === 'relay'. */
+  relayStoreId?: string | null;
 }): Promise<BidResult> {
   return db.transaction(async (tx) => {
     const listing = await loadListing(tx, opts.listingId);
@@ -59,6 +70,43 @@ export async function placeBid(opts: {
     const restrictions = await activeRestrictions(tx, opts.bidderId);
     if (restrictions.includes('bid_blocked') || restrictions.includes('claim_blocked')) {
       throw new ForbiddenError('Bidding is paused on your account because of recent unpaid deals.');
+    }
+
+    // ★ The SAME gate the claim stack uses, in the same words — a bidder and a claimer
+    //   must be refused for the same reasons. It only runs when the bidder actually
+    //   made a choice; a bid without one carries no path and no store.
+    if (opts.fulfillmentPath !== undefined) {
+      if (!listing.fulfillmentPaths.includes(opts.fulfillmentPath)) {
+        throw new ConflictError('The seller does not accept that fulfillment method');
+      }
+
+      // The size gate runs against THIS store's declared limits, not a global default.
+      let storeAcceptedSizes: readonly SizeClass[] | undefined;
+      if (opts.fulfillmentPath === 'relay') {
+        if (opts.relayStoreId === undefined || opts.relayStoreId === null) {
+          throw new ConflictError('Choose which relay store you want to collect from');
+        }
+        const storeRows = await tx
+          .select()
+          .from(relayStores)
+          .where(eq(relayStores.id, opts.relayStoreId))
+          .limit(1);
+        const store = storeRows[0];
+        if (store === undefined || !store.active) {
+          throw new ConflictError('That store is not currently accepting items');
+        }
+        storeAcceptedSizes = store.acceptsSizeClasses;
+      }
+
+      const eligibility = checkEligibility({
+        path: opts.fulfillmentPath,
+        sizeClass: listing.sizeClass,
+        buyerRestrictions: restrictions,
+        ...(storeAcceptedSizes !== undefined ? { storeAcceptedSizes } : {}),
+      });
+      if (!eligibility.eligible) {
+        throw new ConflictError(eligibility.reasons.join(' '));
+      }
     }
 
     const startBid = listing.startBidCents ?? 0;
@@ -84,6 +132,8 @@ export async function placeBid(opts: {
         bidderId: opts.bidderId,
         amountCents: opts.amountCents,
         isBuyout,
+        fulfillmentPath: opts.fulfillmentPath ?? null,
+        relayStoreId: opts.relayStoreId ?? null,
         status: 'active',
       })
       .returning({ id: bids.id });
@@ -195,10 +245,15 @@ export async function placeBid(opts: {
         sellerId: listing.sellerId,
         buyerId: opts.bidderId,
         amountCents: opts.amountCents,
-        fulfillmentPath: (listing.fulfillmentPaths[0] ?? 'cash_meetup') as FulfillmentPath,
+        // ★ The buyer's OWN choice. Falls back to the listing's first declared path
+        //   only when the bid carried none.
+        fulfillmentPath: (opts.fulfillmentPath ??
+          listing.fulfillmentPaths[0] ??
+          'cash_meetup') as FulfillmentPath,
         source: 'auction_win',
         winningBidId: bid.id,
         listingTitle: listing.title,
+        relayStoreId: opts.relayStoreId ?? null,
       });
 
       return {

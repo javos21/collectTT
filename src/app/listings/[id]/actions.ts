@@ -53,9 +53,18 @@ export async function bidAction(formData: FormData): Promise<void> {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Enter a valid amount')}`);
   }
 
+  const path = String(formData.get('fulfillmentPath') ?? '') as FulfillmentPath | '';
+  const storeIdRaw = String(formData.get('relayStoreId') ?? '');
+
   let result;
   try {
-    result = await placeBid({ listingId, bidderId: user.userId, amountCents });
+    result = await placeBid({
+      listingId,
+      bidderId: user.userId,
+      amountCents,
+      ...(path !== '' ? { fulfillmentPath: path } : {}),
+      relayStoreId: storeIdRaw === '' ? null : storeIdRaw,
+    });
   } catch (error) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent(message(error))}`);
   }
