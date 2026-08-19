@@ -13,6 +13,7 @@ import { db, pool } from '../src/db/client';
 import { users } from '../src/db/schema/auth';
 import { profiles, reputationCounters } from '../src/db/schema/profiles';
 import { listings } from '../src/db/schema/listings';
+import { relayStores, relayStoreStaff, listingRelayStores } from '../src/db/schema/custody';
 import { parseAttributes } from '../src/domain/categories/build-schema';
 
 const SEED_USERS = [
@@ -20,6 +21,18 @@ const SEED_USERS = [
   { id: 'seed_dwayne', name: 'Dwayne M.', email: 'dwayne@seed.local', area: 'San Fernando' },
   { id: 'seed_anisa', name: 'Anisa B.', email: 'anisa@seed.local', area: 'Chaguanas' },
 ];
+
+/**
+ * One relay store, so the store board at /store is reachable locally. Fixed id, and
+ * never deleted on re-seed: live custody holdings may reference it.
+ */
+const SEED_STORE = {
+  id: '00000000-0000-4000-8000-000000000001',
+  name: 'Frontline Comics & Games',
+  area: 'Port of Spain',
+  address: '12 Frederick Street, Port of Spain',
+  phoneE164: '+18685550100',
+};
 
 const SEED_LISTINGS = [
   {
@@ -172,8 +185,53 @@ async function main(): Promise<void> {
     console.log(`[seed] listing ${item.title}`);
   }
 
+  // ── the relay store, its staff, and which listings may be dropped there ──────
+  await db
+    .insert(relayStores)
+    .values({
+      id: SEED_STORE.id,
+      name: SEED_STORE.name,
+      area: SEED_STORE.area,
+      address: SEED_STORE.address,
+      phoneE164: SEED_STORE.phoneE164,
+      acceptsSizeClasses: ['small'],
+      active: true,
+    })
+    .onConflictDoUpdate({
+      target: relayStores.id,
+      set: {
+        name: SEED_STORE.name,
+        area: SEED_STORE.area,
+        acceptsSizeClasses: ['small'],
+        active: true,
+      },
+    });
+
+  const staffUser = SEED_USERS[0];
+  if (staffUser === undefined) throw new Error('No seed user to make store staff');
+  await db
+    .insert(relayStoreStaff)
+    .values({ storeId: SEED_STORE.id, userId: staffUser.id, role: 'manager' })
+    .onConflictDoNothing();
+  console.log(`[seed] store ${SEED_STORE.name} — ${staffUser.name} is manager`);
+
+  // listing_relay_stores rows cascade away with their listing, so this stays idempotent.
+  const seeded = await db
+    .select({ id: listings.id })
+    .from(listings)
+    .where(inArray(listings.sellerId, ids));
+  if (seeded.length > 0) {
+    await db
+      .insert(listingRelayStores)
+      .values(seeded.map((l) => ({ listingId: l.id, storeId: SEED_STORE.id })))
+      .onConflictDoNothing();
+  }
+
   const count = await db.select({ id: listings.id }).from(listings).where(eq(listings.status, 'active'));
   console.log(`\n[seed] done — ${count.length} active listings. Visit http://localhost:3000/listings`);
+  console.log(
+    `[seed] store board: sign in as ${staffUser.email}, then open http://localhost:3000/store`,
+  );
 
   await pool.end();
 }
