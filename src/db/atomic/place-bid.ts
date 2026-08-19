@@ -21,15 +21,13 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 
 import { db, type Tx } from '../client';
 import { listings, bids } from '../schema/listings';
-import { relayStores } from '../schema/custody';
 import { openTransaction, ConflictError, ForbiddenError } from '../../services/transactions';
 import { activeRestrictions } from '../../services/reputation';
+import { assertFulfillmentEligible } from '../../services/fulfillment-eligibility';
 import { notify } from '../../notifications/dispatch';
 import { enqueue } from '../../jobs/enqueue';
 import { bidIncrement, formatMoney, minimumNextBid } from '../../domain/money';
-import { checkEligibility } from '../../domain/policy/eligibility';
 import type { FulfillmentPath } from '../../domain/states/transaction';
-import type { SizeClass } from '../../domain/states/listing';
 
 export interface BidResult {
   bidId: string;
@@ -72,41 +70,20 @@ export async function placeBid(opts: {
       throw new ForbiddenError('Bidding is paused on your account because of recent unpaid deals.');
     }
 
-    // ★ The SAME gate the claim stack uses, in the same words — a bidder and a claimer
-    //   must be refused for the same reasons. It only runs when the bidder actually
-    //   made a choice; a bid without one carries no path and no store.
+    // ★ The SAME gate the claim stack runs — literally the same function, so a bidder
+    //   and a claimer are refused for the same reasons in the same words. It only runs
+    //   when the bidder actually made a choice; a bid without one carries no path and
+    //   no store.
     if (opts.fulfillmentPath !== undefined) {
       if (!listing.fulfillmentPaths.includes(opts.fulfillmentPath)) {
         throw new ConflictError('The seller does not accept that fulfillment method');
       }
-
-      // The size gate runs against THIS store's declared limits, not a global default.
-      let storeAcceptedSizes: readonly SizeClass[] | undefined;
-      if (opts.fulfillmentPath === 'relay') {
-        if (opts.relayStoreId === undefined || opts.relayStoreId === null) {
-          throw new ConflictError('Choose which relay store you want to collect from');
-        }
-        const storeRows = await tx
-          .select()
-          .from(relayStores)
-          .where(eq(relayStores.id, opts.relayStoreId))
-          .limit(1);
-        const store = storeRows[0];
-        if (store === undefined || !store.active) {
-          throw new ConflictError('That store is not currently accepting items');
-        }
-        storeAcceptedSizes = store.acceptsSizeClasses;
-      }
-
-      const eligibility = checkEligibility({
+      await assertFulfillmentEligible(tx, {
         path: opts.fulfillmentPath,
+        relayStoreId: opts.relayStoreId,
         sizeClass: listing.sizeClass,
         buyerRestrictions: restrictions,
-        ...(storeAcceptedSizes !== undefined ? { storeAcceptedSizes } : {}),
       });
-      if (!eligibility.eligible) {
-        throw new ConflictError(eligibility.reasons.join(' '));
-      }
     }
 
     const startBid = listing.startBidCents ?? 0;

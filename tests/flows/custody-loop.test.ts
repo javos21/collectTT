@@ -442,4 +442,51 @@ describe('relay auction close', () => {
     expect(holdings[0]!.storeId).toBe(storeId);
     expect(holdings[0]!.holder).toBe('relay_store');
   });
+
+  /**
+   * ★ A buyout ends the auction inside `placeBid` itself, on a different code path from
+   *   `auctionClose`. It used to hardcode `fulfillmentPaths[0]`; it now honours the
+   *   bidder's choice, which feeds the deadlines and the custody track. So the listing
+   *   here declares cash_meetup FIRST and the bidder picks relay — if the old fallback
+   *   were still in force the transaction would open as cash_meetup with no holding.
+   */
+  it('opens a relay holding when a buyout ends the auction at the chosen store', async () => {
+    const { placeBid } = await import('../../src/db/atomic/place-bid');
+    const { transactions } = await import('../../src/db/schema/transactions');
+
+    const listingId = await makeRelayListing({
+      saleType: 'auction',
+      priceCents: null,
+      startBidCents: 5_000,
+      buyoutCents: 20_000,
+      fulfillmentPaths: ['cash_meetup', 'relay'],
+      endsAt: sql`now() + interval '1 hour'` as unknown as Date,
+    });
+
+    const result = await placeBid({
+      listingId,
+      bidderId: buyerB,
+      amountCents: 20_000,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+
+    expect(result.transactionId).toBeDefined();
+
+    const holdings = await db
+      .select()
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.listingId, listingId));
+
+    expect(holdings).toHaveLength(1);
+    expect(holdings[0]!.storeId).toBe(storeId);
+    expect(holdings[0]!.holder).toBe('relay_store');
+
+    // The bidder's choice, NOT fulfillmentPaths[0].
+    const deals = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.id, result.transactionId!));
+    expect(deals[0]!.fulfillmentPath).toBe('relay');
+  });
 });

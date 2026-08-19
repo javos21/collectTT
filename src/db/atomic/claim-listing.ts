@@ -21,14 +21,12 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import { db, type Tx } from '../client';
 import { listings, claims } from '../schema/listings';
-import { relayStores } from '../schema/custody';
 import { openTransaction, ConflictError, ForbiddenError } from '../../services/transactions';
 import { activeRestrictions } from '../../services/reputation';
+import { assertFulfillmentEligible } from '../../services/fulfillment-eligibility';
 import { notify } from '../../notifications/dispatch';
 import { WINDOWS } from '../../domain/policy/windows';
-import { checkEligibility } from '../../domain/policy/eligibility';
 import type { FulfillmentPath } from '../../domain/states/transaction';
-import type { SizeClass } from '../../domain/states/listing';
 
 export interface ClaimResult {
   outcome: 'claimed' | 'queued';
@@ -65,34 +63,14 @@ export async function claimListing(opts: {
         'Claiming is paused on your account because of recent unpaid claims.',
       );
     }
-    // The size gate runs against THIS store's declared limits, not a global default —
-    // "if it's not in the log, it doesn't belong there" starts at the claim.
-    let storeAcceptedSizes: readonly SizeClass[] | undefined;
-    if (opts.fulfillmentPath === 'relay') {
-      if (opts.relayStoreId === undefined || opts.relayStoreId === null) {
-        throw new ConflictError('Choose which relay store you want to collect from');
-      }
-      const storeRows = await tx
-        .select()
-        .from(relayStores)
-        .where(eq(relayStores.id, opts.relayStoreId))
-        .limit(1);
-      const store = storeRows[0];
-      if (store === undefined || !store.active) {
-        throw new ConflictError('That store is not currently accepting items');
-      }
-      storeAcceptedSizes = store.acceptsSizeClasses;
-    }
-
-    const eligibility = checkEligibility({
+    // ★ The shared gate — the same one `placeBid` runs, so a claimer and a bidder are
+    //   refused for the same reasons in the same words.
+    await assertFulfillmentEligible(tx, {
       path: opts.fulfillmentPath,
+      relayStoreId: opts.relayStoreId,
       sizeClass: listing.sizeClass,
       buyerRestrictions: restrictions,
-      ...(storeAcceptedSizes !== undefined ? { storeAcceptedSizes } : {}),
     });
-    if (!eligibility.eligible) {
-      throw new ConflictError(eligibility.reasons.join(' '));
-    }
 
     // Already in the stack? Idempotent — return their existing position.
     const existing = await tx
