@@ -631,4 +631,51 @@ describe('custody notification strings', () => {
     expect(await findHoldingByCode(db, otherStore[0]!.id, code)).toBeNull();
     await db.delete(relayStores).where(eq(relayStores.id, otherStore[0]!.id));
   });
+
+  it('board row carries the dropoff code and falls back to the seller email for contact', async () => {
+    const { storeBoard } = await import('../../src/services/custody');
+    const { generateDropoffCode } = await import('../../src/domain/dropoff-code');
+
+    // A dedicated store, scoped to just this one holding: storeBoard's own query (a
+    // pre-existing, untouched part of the function) resolves buyer names for every
+    // buyer-linked holding on the store in one batch, so sharing the suite's fixture
+    // store here would pull in whatever buyer-linked rows sibling tests left behind.
+    // Isolating to a fresh store keeps this assertion about dropoffCode/ownerContact
+    // only, per the brief's "one test" scope.
+    const isolatedStore = await db
+      .insert(relayStores)
+      .values({ name: `Board ${SUFFIX}`, area: 'San Fernando', acceptsSizeClasses: ['small'] })
+      .returning({ id: relayStores.id });
+    const isolatedStoreId = isolatedStore[0]!.id;
+
+    // Inserted directly rather than via claimListing: this test targets only the
+    // board's read-side mapping of dropoffCode/ownerContact, so a holding with no
+    // attached transaction keeps the fixture minimal and the assertion unambiguous.
+    const listingId = await makeRelayListing();
+    const dropoffCode = generateDropoffCode();
+    const inserted = await db
+      .insert(custodyHoldings)
+      .values({
+        listingId,
+        holder: 'relay_store',
+        storeId: isolatedStoreId,
+        state: 'awaiting_dropoff',
+        sizeClass: 'small',
+        dropoffCode,
+      })
+      .returning({ id: custodyHoldings.id });
+    const holdingId = inserted[0]!.id;
+
+    const board = await storeBoard(db, isolatedStoreId);
+    const row = board.find((r) => r.holdingId === holdingId);
+
+    expect(row?.dropoffCode).toBe(dropoffCode);
+    // The seller fixture has no phone_e164, so the fallback must fire — and must land on
+    // their auth email, not the generic 'no contact on file' string.
+    expect(row?.ownerContact).toBe(`${seller}@test.local`);
+
+    // Clean up: the holding references the store (on delete restrict), so it must go first.
+    await db.delete(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
+    await db.delete(relayStores).where(eq(relayStores.id, isolatedStoreId));
+  });
 });
