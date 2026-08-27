@@ -13,7 +13,7 @@ import { db, type DbOrTx } from '../db/client';
 import { listings, listingImages, categories } from '../db/schema/listings';
 import { listingRelayStores } from '../db/schema/custody';
 import { images } from '../db/schema/images';
-import { profiles } from '../db/schema/profiles';
+import { profiles, reputationCounters } from '../db/schema/profiles';
 import { parseAttributes } from '../domain/categories/build-schema';
 import { CATEGORY_LIST } from '../domain/categories/definitions';
 import { FULFILLMENT_PATHS } from '../domain/states/transaction';
@@ -234,9 +234,26 @@ function selectBrowseRows(where: ReturnType<typeof and>, limit: number, offset: 
       publishedAt: listings.publishedAt,
       sellerName: profiles.displayName,
       sellerId: profiles.userId,
+      sellerRatingAvg: reputationCounters.ratingAvg,
+      sellerRatingCount: reputationCounters.ratingCount,
+      fulfillmentPaths: listings.fulfillmentPaths,
+      settlementMethods: listings.settlementMethods,
+      primaryImageKey: sql<string | null>`(
+        select coalesce(
+          i.variants -> 'card' ->> 'key',
+          i.variants -> 'thumb' ->> 'key',
+          i.r2_key_original
+        )
+        from listing_images li
+        inner join images i on i.id = li.image_id
+        where li.listing_id = ${listings.id} and i.status = 'ready'
+        order by li.position asc
+        limit 1
+      )`,
     })
     .from(listings)
     .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
+    .leftJoin(reputationCounters, eq(reputationCounters.userId, profiles.userId))
     .where(where)
     .orderBy(desc(listings.publishedAt))
     .limit(limit)

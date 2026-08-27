@@ -7,23 +7,45 @@ import { currentUser } from '@/lib/session';
 import { storesForStaff } from '@/services/custody';
 
 export const metadata: Metadata = {
-  title: 'CollectTT',
-  description:
-    'Trust and coordination for trading cards, comics and collectibles in Trinidad & Tobago.',
+  title: 'CollectTT — Collect with confidence',
+  description: 'A trusted, peer-to-peer home for trading cards, comics and collectibles in Trinidad & Tobago.',
 };
 
-/**
- * ★ The store board's ONLY entry point. Phase 2's deliverable is "stores get their
- *   control tool", and until this link existed a clerk had to be told the URL. Shown
- *   only to people who are actually staff somewhere: a member who is not learns
- *   nothing about which stores exist, which is the same rule /store itself follows.
- */
-async function StoreLink() {
+function initials(name: string): string {
+  const letters = name
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0] ?? '')
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+  return letters || 'C';
+}
+
+async function SiteNavigation() {
   const viewer = await currentUser();
-  if (viewer === null) return null;
-  const stores = await storesForStaff(db, viewer.userId);
-  if (stores.length === 0) return null;
-  return <Link href="/store">Store</Link>;
+  const stores = viewer === null ? [] : await storesForStaff(db, viewer.userId);
+
+  return (
+    <nav aria-label="Primary navigation">
+      <Link href="/listings">Browse</Link>
+      <Link href="/listings/new">Sell</Link>
+      <Link href="/deals">My deals</Link>
+      {stores.length > 0 && <Link href="/store">Store</Link>}
+      {viewer === null ? (
+        <Link href="/sign-in">Sign in</Link>
+      ) : (
+        <Link className="user-nav" href="/me" aria-label={`Open ${viewer.displayName} profile`}>
+          {viewer.image === null ? (
+            <span className="user-nav__avatar" aria-hidden="true">{initials(viewer.displayName)}</span>
+          ) : (
+            <img className="user-nav__avatar" src={viewer.image} alt="" />
+          )}
+          <span>{viewer.displayName}</span>
+        </Link>
+      )}
+    </nav>
+  );
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -31,20 +53,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <header className="site">
-          <Link className="brand" href="/">
-            CollectTT
+          <Link className="brand" href="/" aria-label="CollectTT home">
+            <span className="brand-mark">C</span>CollectTT
           </Link>
-          <span className="muted">Phase 0</span>
-          <nav>
-            <Link href="/listings">Browse</Link>
-            <Link href="/listings/new">Sell</Link>
-            <Link href="/deals">My deals</Link>
-            <StoreLink />
-            <Link href="/me">Profile</Link>
-            <Link href="/sign-in">Sign in</Link>
-          </nav>
+          <span className="phase">Collect with confidence</span>
+          <SiteNavigation />
         </header>
         <div className="wrap">{children}</div>
+        <nav className="mobile-tabs" aria-label="Mobile navigation">
+          <Link href="/listings"><span>⌕</span><span>Browse</span></Link>
+          <Link href="/listings/new"><span>＋</span><span>Sell</span></Link>
+          <Link href="/deals"><span>◷</span><span>Deals</span></Link>
+          <Link href="/me"><span>●</span><span>Profile</span></Link>
+        </nav>
       </body>
     </html>
   );

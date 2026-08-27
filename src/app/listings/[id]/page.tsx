@@ -234,7 +234,7 @@ export default async function ListingPage({
         </div>
 
         {/* ------------------------------------------------ buy box */}
-        <aside className="buybox">
+          <aside id="buy-panel" className="buybox">
           {isAuction ? (
             <>
               <p className="buybox__price-label">Current bid</p>

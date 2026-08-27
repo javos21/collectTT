@@ -38,6 +38,10 @@ services:
         sync: false        # set to the deployed URL
       - key: APP_URL
         sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
       # Cloudflare R2 — same S3 API as the local MinIO container, different credentials.
       - key: STORAGE_ENDPOINT
         sync: false
@@ -54,8 +58,8 @@ services:
       - key: STORAGE_PUBLIC_URL
         sync: false
       - key: EMAIL_ADAPTER
-        value: resend
-      - key: RESEND_API_KEY
+        value: brevo
+      - key: BREVO_API_KEY
         sync: false
       - key: EMAIL_FROM
         sync: false
@@ -93,8 +97,8 @@ services:
       - key: STORAGE_PUBLIC_URL
         sync: false
       - key: EMAIL_ADAPTER
-        value: resend
-      - key: RESEND_API_KEY
+        value: brevo
+      - key: BREVO_API_KEY
         sync: false
       - key: EMAIL_FROM
         sync: false

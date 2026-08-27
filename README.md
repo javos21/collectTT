@@ -21,8 +21,9 @@ payment is confirmed. WhatsApp and the paid delivery rail are Phase 3.
 
 ## Running it locally
 
-Everything runs on your machine. **No vendor account is required** — object storage is a
-MinIO container and sign-in links print to your terminal.
+The database and object storage run entirely on your machine. Google OAuth credentials
+are required to test Google sign-in; email verification and password-reset links can
+still print to your terminal with `EMAIL_ADAPTER=console`.
 
 ```bash
 docker compose up -d      # Postgres (:5434) + MinIO (:9000, console :9001)
@@ -35,13 +36,14 @@ npm run dev               # web process    -> http://localhost:3000
 npm run dev:worker        # worker process (separate terminal)
 ```
 
-Sign in at `/sign-in` with any email — the magic link appears in the terminal running
-`npm run dev`, because `EMAIL_ADAPTER=console`.
+Sign in at `/sign-in` with Google or create a verified email/password account. In local
+console mode, verification and password-reset links print in the terminal running
+`npm run dev`.
 
 ### Verifying it works
 
 ```bash
-npm test              # 156 tests: state machine, categories, DB constraints,
+npm test              # 165 tests: auth safety, state machine, categories, DB constraints,
                       # trading flows, custody flows
 npm run typecheck
 npm run verify        # Phase 0 end-to-end: presign -> upload -> worker -> variants
@@ -72,6 +74,18 @@ connections are held open, and both processes want stable pooled connections.
 
 **Postgres is the centre of gravity** — database, job queue, and real-time backplane in
 one system. No Redis, no queue vendor, no realtime vendor, no payment processor.
+
+**Authentication is self-hosted through Better Auth.** Google is the primary, prominent
+sign-in path; verified email/password is the fallback. Users, sessions, provider accounts,
+and password credentials remain in CollectTT's Postgres. Verified matching-email methods
+link to one stable user ID, preserving profiles, listings, reputation, and deals. Magic
+links and Facebook login are not part of the current authentication surface.
+
+**Brevo is the outbound email provider.** Better Auth uses the same shared email adapter
+as deal notifications for verification and password-reset messages. `console` mode prints
+messages locally; `brevo` mode sends transactional email through the official Brevo SDK.
+Future SMS can be added as a separate notification adapter after phone verification and
+consent are designed—it is not coupled to sign-in.
 
 ```
 src/
@@ -219,8 +233,17 @@ buyer" is structurally impossible. There is deliberately no non-transactional va
 ## Deploying
 
 `render.yaml` declares the web service, worker service and Postgres. Storage moves from
-MinIO to Cloudflare R2 and email from console to Resend — both are credential changes,
+MinIO to Cloudflare R2 and email from console to Brevo — both are credential changes,
 not code changes, because each sits behind an adapter used from day one.
+
+Production authentication/email requires:
+
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the web service;
+- `APP_URL` and `BETTER_AUTH_URL` set to the canonical HTTPS origin;
+- Google's exact callback URI: `https://YOUR_DOMAIN/api/auth/callback/google`;
+- `EMAIL_ADAPTER=brevo`, `BREVO_API_KEY`, and a verified `EMAIL_FROM` on the web service;
+- the same Brevo delivery settings on the worker for queued deal notifications; and
+- Brevo domain verification/DKIM/DMARC records published at the active DNS provider.
 
 ```bash
 npm run db:migrate && npm run seed:categories   # after first deploy
@@ -259,10 +282,11 @@ which is why a reneged auction winner costs no extra machinery.
 ## What is built, and what is not
 
 **Phase 0 — done**
-accounts (email magic link) · profiles · multi-category listing CRUD · browse with
-category *and* attribute filtering · image upload → R2/MinIO → worker-generated
-responsive variants · notification dispatcher with in-app + email adapters · the full
-schema and state machine for every later phase
+accounts (Google-first + verified email/password, verification and password recovery) ·
+profiles · multi-category listing CRUD · browse with category *and* attribute filtering ·
+image upload → R2/MinIO → worker-generated responsive variants · notification dispatcher
+with in-app + console/Brevo email adapters · the full schema and state machine for every
+later phase
 
 **Phase 1 — done**
 atomic straight-sale claim + backup-claim stack · auctions with anti-snipe soft close,

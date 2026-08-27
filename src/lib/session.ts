@@ -16,6 +16,7 @@ import { profiles, reputationCounters } from '../db/schema/profiles';
 export interface CurrentUser {
   userId: string;
   email: string;
+  image: string | null;
   displayName: string;
   handle: string;
 }
@@ -28,6 +29,7 @@ export async function currentUser(): Promise<CurrentUser | null> {
   return {
     userId: session.user.id,
     email: session.user.email,
+    image: session.user.image ?? null,
     displayName: profile.displayName,
     handle: profile.handle,
   };
@@ -57,8 +59,8 @@ async function ensureProfile(userId: string, email: string, name: string | null 
   const found = existing[0];
   if (found !== undefined) return found;
 
-  // Better Auth sets `name` to an EMPTY STRING for magic-link signups (there is no
-  // name to collect), so `?? fallback` never fires. Check for blank, not just null.
+  // Provider data is not guaranteed to include a useful name. Check for blank rather
+  // than only null so every authentication path still creates a usable profile.
   const trimmedName = (name ?? '').trim();
   const base = trimmedName !== '' ? trimmedName : (email.split('@')[0] ?? 'member');
   const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'member';

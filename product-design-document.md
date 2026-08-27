@@ -70,14 +70,33 @@ Chosen on merits for reliability, speed, and low cost at this scale — not on p
 | **Validation** | **Zod** | Runtime input validation at every boundary. |
 | **Job queue** | **Graphile Worker** (Postgres-backed, `SKIP LOCKED` + `LISTEN/NOTIFY`) | Every "do this later" is a delayed job: payment window expiry → reneged + promote backup; custody clock → overstay flag; notification dispatch. **Killer feature:** enqueue the job in the *same transaction* that changes state — impossible to get "marked reneged but forgot to notify." No Redis. |
 | **Real-time** | **Server-Sent Events (SSE)** | Bids are discrete HTTP POSTs; the only push-out is "new bid / countdown extended / outbid" — one-directional, exactly SSE's job, over plain HTTP. No WebSockets, no Pusher/Ably. `LISTEN/NOTIFY` is the fan-out backplane if you ever run multiple web instances. Start with 2–3s polling; SSE is the upgrade. |
-| **Auth** | **Better Auth** (self-hosted, owns data in your Postgres) | Phone-verified identity, OTP support, **no per-MAU fees or lock-in** (vs Clerk/Auth0). OTP over WhatsApp when live, **email magic-link as the free fallback** so onboarding isn't hostage to Meta. *(Newish library — sanity-check maturity; the principle "self-hosted, own-your-data" is the durable call.)* |
+| **Auth** | **Better Auth** (self-hosted, owns data in your Postgres) | **Google is the primary sign-in path**, with verified email/password as the fallback. Multiple methods link to one stable user record so listings, reputation, and deals never split across identities. *(The durable call remains "self-hosted, own-your-data".)* |
 | **Image storage** | **Cloudflare R2 + CDN** | **Zero egress fees** — the biggest cost lever for a gallery-heavy app serving high-fidelity WebP all day (detail-heavy items — foil cards, comic covers, collectibles). Pre-generate 2–3 responsive sizes + one large zoom variant on upload (via `sharp` in the worker). |
-| **Email** | **Resend** | Transactional email (OTP fallback, notifications). Lovely DX, cheap, free tier covers this scale. |
+| **Email / future SMS** | **Brevo** | Transactional verification, password-reset, and deal email now; the same provider can carry an SMS adapter later without coupling SMS to authentication. |
 | **Notifications** | Channel-agnostic dispatcher | One dispatch job, pluggable adapters: **in-app** (notifications table + SSE) and **email** ship first (no gatekeeper); **WhatsApp** slots in as a third adapter — a config change, not a rewrite. |
 | **Store interface** | **WhatsApp bot** (once verified) | Store staff need only three actions: mark received, mark released, mark picked up. A WhatsApp bot meets a busy shop clerk where they already are, far better adoption than a new dashboard login. Lightweight authenticated web view as fallback. |
 | **Hosting** | **Render** (web + worker + Postgres co-located) | Flat, predictable pricing; git deploy; everything on one platform. |
 | **Monitoring** | **Sentry** (free tier) + automated Postgres backups + periodic `pg_dump` to R2 | Reputation data is the one thing you genuinely cannot lose — belt and suspenders. |
 | **Payments** | **None — by design** | No processor, no PCI scope, no money-transmitter exposure. Payment for the item always flows buyer↔seller directly. |
+
+### Authentication and messaging boundaries
+
+Better Auth exposes Google OAuth as the preferred path and email/password as the
+fallback. Email/password registration requires verification; passwords are constrained
+to 12–128 characters; reset completion revokes existing sessions. Verification and reset
+links expire after one hour. Google identities may link to an existing local identity
+only when the provider and local email checks satisfy the configured matching-email
+policy. Different-email linking is disabled. These rules keep the user ID referenced by
+profiles, listings, deals, custody, and reputation stable across sign-in methods.
+
+The web process owns OAuth callbacks and synchronous authentication email requests.
+Both the web and Graphile Worker use one `sendEmail` boundary: console delivery in local
+development and Brevo transactional delivery in production. Brevo therefore carries
+account verification, password recovery, and deal notifications without becoming the
+identity store. The worker needs Brevo credentials for queued notifications; only the web
+process needs Google OAuth credentials. SMS remains a future, independent adapter using
+the same provider and dispatcher. It must not reuse an email address as proof of phone
+ownership or silently opt users into messaging.
 
 ### Why NOT the reflexive choices
 
@@ -152,7 +171,7 @@ Stores keep most/all of the *holding* fee (their shelf, their pain). **Your reve
 ## 6. Features List
 
 ### MVP (must-ship)
-- Phone-verified accounts; profile with "member since / completed deals / paid-on-time %"
+- Google-first or verified email/password accounts; profile with "member since / completed deals / paid-on-time %"
 - Create listing: pick **category** (trading card / comic / collectible) → category-specific attribute fields (JSONB); straight-sale or auction; required fields for **accepted settlement methods** and **fulfillment path**, shown before anyone claims/bids
 - Straight-sale claim (atomic) + **backup-claim queue**
 - Auction: starting bid, buyout, deadline, **anti-snipe soft close**, live bid feed (polling → SSE)
@@ -162,14 +181,14 @@ Stores keep most/all of the *holding* fee (their shelf, their pain). **Your reve
 - **Blind mutual ratings** on completed deals
 - Relay custody track + **store audit/control log** (release / picked-up / overstay)
 - Time-bounded custody + size/eligibility gate + unpaid-item return path
-- Channel-agnostic notifications: **in-app + email** (Resend)
+- Channel-agnostic notifications: **in-app + email** (Brevo)
 - Image upload → R2 with responsive sizes; standard gallery (no deep zoom)
 
 ### Fast-follow
 - **Vouching** with vouch-quality scoring
 - **WhatsApp** notification adapter + **store WhatsApp bot** (post Meta verification)
 - **Full-service pickup & delivery** flow (your paid rail) with per-zone pricing
-- WhatsApp OTP (replacing/augmenting email magic-link)
+- Optional phone verification/OTP after the email/password and Google paths are stable
 - **Browse/search filterable by category and category-specific attributes**
 - Listing analytics for sellers
 
@@ -215,7 +234,7 @@ All USD/month. Rates verified Aug 2026 — re-check before budgeting.
 | Workspace | Render Hobby | free (5 GB bandwidth) | $0 |
 | Image storage + CDN | Cloudflare R2 | within free tier (10 GB, 1M writes, 10M reads) | ~$0 |
 | DNS / CDN | Cloudflare | free | $0 |
-| Email | Resend | free tier | $0 |
+| Email | Brevo | verify current allowance before launch | usage-based |
 | Error monitoring | Sentry | free tier | $0 |
 | Domain | registrar | ~$12/yr amortized | ~$1 |
 | **Subtotal (MVP)** | | | **≈ $22–29/mo** |
@@ -252,7 +271,7 @@ Any *one* of your four real revenue streams (delivery rail, subscription, gradin
 ## 10. Development Plan (Phased)
 
 **Phase 0 — Foundations (data + skeleton)**
-Postgres schema for Users, Listings (with `category` + JSONB `attributes`), Bids, Transactions, Custody, RelayStores, ReputationEvents, Vouches, Notifications, Subscriptions — plus the per-category attribute-declaration config. Next.js + Drizzle + Zod scaffold. Better Auth with **email magic-link** (no Meta dependency). Graphile Worker wired. Image upload → R2 pipeline. *Deliverable: accounts, profiles, multi-category listing CRUD.*
+Postgres schema for Users, Listings (with `category` + JSONB `attributes`), Bids, Transactions, Custody, RelayStores, ReputationEvents, Vouches, Notifications, Subscriptions — plus the per-category attribute-declaration config. Next.js + Drizzle + Zod scaffold. Better Auth with **Google-first sign-in, verified email/password, secure same-email account linking, email verification, and password recovery**. Brevo provides production authentication and transactional email through the shared adapter; console delivery remains available locally. Graphile Worker wired. Image upload → R2 pipeline. *Deliverable: accounts, profiles, multi-category listing CRUD.*
 
 **Phase 1 — Core trading loop (MVP heart)**
 Straight-sale atomic claim + backup queue. Auctions + anti-snipe soft close. Transaction lifecycle + mark-paid/confirm handshake. Payment window → reneged → promote. Objective reputation counters + restrictions. Blind mutual ratings. Live feed via polling. *Deliverable: a full deal runs end-to-end, P2P.*
@@ -280,7 +299,7 @@ Vouching. Power-seller subscription. Native promoted listings. Seller analytics.
 
 **Store resistance to fees.** Solved by decoupling: give the control tool free, make fees optional/per-store/footfall-amplifying (§5).
 
-**Better Auth maturity.** It's a newer library. **Mitigation:** the durable decision is "self-hosted, own-your-data auth in Postgres" — if Better Auth disappoints, the principle survives a swap; sanity-check its maturity before Phase 0 commits.
+**Better Auth maturity.** It's a newer library. **Mitigation:** the durable decision is "self-hosted, own-your-data auth in Postgres" — if Better Auth disappoints, the principle survives a swap. Before launch, pin and exercise the deployed version, monitor its advisories and migration notes, and retain regression coverage for Google, credentials, linking, verification, reset, and session revocation.
 
 **Reputation data loss.** The one thing you cannot lose. **Mitigation:** Render automated backups + periodic `pg_dump` to R2.
 

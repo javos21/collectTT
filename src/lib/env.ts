@@ -15,6 +15,8 @@ const envSchema = z.object({
 
   BETTER_AUTH_SECRET: z.string().min(1),
   BETTER_AUTH_URL: z.string().url().default('http://localhost:3000'),
+  GOOGLE_CLIENT_ID: z.string().min(1),
+  GOOGLE_CLIENT_SECRET: z.string().min(1),
 
   // Storage: MinIO locally, Cloudflare R2 in production. Same S3 API either way —
   // only these values change, never the code.
@@ -29,9 +31,9 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   STORAGE_PUBLIC_URL: z.string().url(),
 
-  // "console" needs no account and prints magic links to the terminal.
-  EMAIL_ADAPTER: z.enum(['console', 'resend']).default('console'),
-  RESEND_API_KEY: z.string().optional(),
+  // "console" keeps verification/reset and notification email testable offline.
+  EMAIL_ADAPTER: z.enum(['console', 'brevo']).default('console'),
+  BREVO_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('CollectTT <noreply@example.com>'),
 });
 
@@ -53,8 +55,8 @@ export function env(): Env {
     );
   }
 
-  if (parsed.data.EMAIL_ADAPTER === 'resend' && !parsed.data.RESEND_API_KEY) {
-    throw new Error('EMAIL_ADAPTER=resend requires RESEND_API_KEY to be set.');
+  if (parsed.data.EMAIL_ADAPTER === 'brevo' && !parsed.data.BREVO_API_KEY) {
+    throw new Error('EMAIL_ADAPTER=brevo requires BREVO_API_KEY to be set.');
   }
 
   cached = parsed.data;

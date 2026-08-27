@@ -1,62 +1,45 @@
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
 
-import { auth } from '@/lib/auth';
+import { safeAuthReturnTo } from '@/lib/auth-redirect';
 import { currentUser } from '@/lib/session';
 import { env } from '@/lib/env';
+import { AuthPanel } from './auth-panel';
 
 export const dynamic = 'force-dynamic';
-
-async function sendLink(formData: FormData): Promise<void> {
-  'use server';
-  const email = String(formData.get('email') ?? '').trim();
-  if (email === '') return;
-
-  await auth.api.signInMagicLink({
-    body: { email, callbackURL: '/me' },
-    headers: await headers(),
-  });
-
-  redirect('/sign-in?sent=1');
-}
 
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sent?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await currentUser();
-  if (user !== null) redirect('/me');
-
-  const { sent } = await searchParams;
-  const consoleMode = env().EMAIL_ADAPTER === 'console';
+  const params = await searchParams;
+  const returnTo = safeAuthReturnTo(params.returnTo);
+  if (user !== null) redirect(returnTo);
 
   return (
-    <main>
-      <h1>Sign in</h1>
-      <p className="muted">
-        Enter your email and we&apos;ll send a sign-in link. No password to forget.
-      </p>
+    <main className="auth-page">
+      <section className="auth-context" aria-labelledby="auth-title">
+        <div>
+          <span className="auth-mark" aria-hidden="true">C</span>
+          <h1 id="auth-title">Your collection has a trusted place.</h1>
+          <p>
+            Buy, sell and coordinate handoffs with a record that follows every deal from
+            first claim to final collection.
+          </p>
+        </div>
+        <ul className="auth-proof" aria-label="CollectTT trust features">
+          <li>Payments stay between buyer and seller</li>
+          <li>Claims, bids and deadlines use server time</li>
+          <li>Relay releases require confirmed payment</li>
+        </ul>
+      </section>
 
-      {sent === '1' && (
-        <p className="ok">
-          Link sent.
-          {consoleMode && ' Check the terminal running `npm run dev` — it is printed there.'}
-        </p>
-      )}
-
-      <form action={sendLink}>
-        <label htmlFor="email">Email</label>
-        <input id="email" name="email" type="email" required autoComplete="email" />
-        <button type="submit">Send sign-in link</button>
-      </form>
-
-      {consoleMode && (
-        <p className="muted" style={{ marginTop: '2rem' }}>
-          <strong>Dev mode:</strong> EMAIL_ADAPTER=console, so the link prints to your
-          terminal instead of being emailed. No Resend account needed to develop.
-        </p>
-      )}
+      <AuthPanel
+        callbackURL={returnTo}
+        consoleMode={env().EMAIL_ADAPTER === 'console'}
+        oauthFailed={typeof params.error === 'string' || params.oauth === 'failed'}
+      />
     </main>
   );
 }

@@ -2,15 +2,15 @@
  * Email adapter.
  *
  *   EMAIL_ADAPTER=console  -> prints to the terminal. No account, no network, no cost.
- *                             This is what makes local auth work offline: the magic
- *                             link shows up in your dev server output.
- *   EMAIL_ADAPTER=resend   -> real delivery, set when deploying at the end of Phase 0.
+ *                             Verification and reset links stay testable offline.
+ *   EMAIL_ADAPTER=brevo    -> real transactional delivery through Brevo. The same SDK
+ *                             can power the separate SMS adapter when that ships.
  *
  * The console implementation is not a stub to throw away — it is the same seam the
  * WhatsApp adapter will occupy, so exercising it locally proves the seam works.
  */
 
-import { Resend } from 'resend';
+import { BrevoClient } from '@getbrevo/brevo';
 
 import { env } from '../../lib/env';
 import { db } from '../../db/client';
@@ -19,14 +19,24 @@ import { users } from '../../db/schema/auth';
 import { eq } from 'drizzle-orm';
 import type { DeliveryRequest, NotificationAdapter } from '../dispatch';
 
-let resend: Resend | null = null;
+let brevo: BrevoClient | null = null;
 
-function resendClient(): Resend {
-  if (resend !== null) return resend;
-  const key = env().RESEND_API_KEY;
-  if (key === undefined || key === '') throw new Error('RESEND_API_KEY is not set');
-  resend = new Resend(key);
-  return resend;
+function brevoClient(): BrevoClient {
+  if (brevo !== null) return brevo;
+  const key = env().BREVO_API_KEY;
+  if (key === undefined || key === '') throw new Error('BREVO_API_KEY is not set');
+  brevo = new BrevoClient({ apiKey: key, timeoutInSeconds: 15, maxRetries: 2 });
+  return brevo;
+}
+
+function sender(from: string): { email: string; name?: string } {
+  const match = /^\s*(.*?)\s*<([^<>]+)>\s*$/.exec(from);
+  if (match === null) return { email: from.trim() };
+  const name = match[1]?.trim();
+  return {
+    email: match[2]!.trim(),
+    ...(name !== undefined && name !== '' ? { name } : {}),
+  };
 }
 
 export interface RawEmail {
@@ -35,7 +45,7 @@ export interface RawEmail {
   text: string;
 }
 
-/** Low-level send, used by Better Auth for magic links as well as by the adapter. */
+/** Low-level send, shared by Better Auth and the notification adapter. */
 export async function sendEmail(email: RawEmail): Promise<{ providerMessageId?: string }> {
   const e = env();
 
@@ -55,17 +65,14 @@ export async function sendEmail(email: RawEmail): Promise<{ providerMessageId?: 
     return {};
   }
 
-  const result = await resendClient().emails.send({
-    from: e.EMAIL_FROM,
-    to: email.to,
+  const result = await brevoClient().transactionalEmails.sendTransacEmail({
+    sender: sender(e.EMAIL_FROM),
+    to: [{ email: email.to }],
     subject: email.subject,
-    text: email.text,
+    textContent: email.text,
   });
 
-  if (result.error !== null && result.error !== undefined) {
-    throw new Error(`Resend error: ${result.error.message}`);
-  }
-  return { providerMessageId: result.data?.id };
+  return { providerMessageId: result.messageId };
 }
 
 async function emailAddressFor(userId: string): Promise<string | null> {
