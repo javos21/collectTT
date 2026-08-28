@@ -23,6 +23,7 @@ const seller = `b_seller_${SUFFIX}`;
 // A category of its own so the fixtures are isolated from any seed data on the shared DB.
 const CATEGORY = 'trading_card';
 const TAG = `browse-${SUFFIX}`;
+const SEARCH_TERM = `rare-${SUFFIX}`;
 
 async function makeListing(over: Partial<typeof listings.$inferInsert>): Promise<void> {
   await db.insert(listings).values({
@@ -51,7 +52,14 @@ beforeAll(async () => {
   await db.insert(reputationCounters).values({ userId: seller });
 
   // 5 straight sales + 3 auctions, all tagged.
-  for (let i = 0; i < 5; i += 1) await makeListing({ saleType: 'straight_sale' });
+  for (let i = 0; i < 5; i += 1) {
+    await makeListing({
+      saleType: 'straight_sale',
+      priceCents: 4_000 + i * 1_000,
+      ...(i === 0 ? { description: `A ${SEARCH_TERM} find` } : {}),
+      ...(i === 0 ? { fulfillmentPaths: ['relay'], settlementMethods: ['bank_transfer'] } : {}),
+    });
+  }
   for (let i = 0; i < 3; i += 1) {
     await makeListing({
       saleType: 'auction',
@@ -99,5 +107,31 @@ describe('browseListings', () => {
 
     const ids1 = new Set(page1.rows.map((r) => r.id));
     expect(page3.rows.some((r) => ids1.has(r.id))).toBe(false);
+  });
+
+  it('supports delivery, payment, price, and sort facets', async () => {
+    const relay = await browseListings({ attributes: mine, fulfillmentPath: 'relay' });
+    expect(relay.total).toBe(1);
+    expect(relay.rows[0]?.fulfillmentPaths).toEqual(['relay']);
+
+    const bankTransfer = await browseListings({ attributes: mine, settlementMethod: 'bank_transfer' });
+    expect(bankTransfer.total).toBe(1);
+    expect(bankTransfer.rows[0]?.settlementMethods).toEqual(['bank_transfer']);
+
+    const lowToHigh = await browseListings({ attributes: mine, sort: 'price_low' });
+    expect(lowToHigh.rows[0]?.priceCents).toBe(4_000);
+
+    const highToLow = await browseListings({ attributes: mine, sort: 'price_high' });
+    expect(highToLow.rows[0]?.priceCents).toBe(8_000);
+
+    const priceRange = await browseListings({ attributes: mine, minPriceCents: 6_000, maxPriceCents: 7_000 });
+    expect(priceRange.total).toBe(2);
+    expect(priceRange.rows.every((row) => (row.priceCents ?? 0) >= 6_000 && (row.priceCents ?? 0) <= 7_000)).toBe(true);
+  });
+
+  it('searches titles and descriptions', async () => {
+    const result = await browseListings({ attributes: mine, query: SEARCH_TERM });
+    expect(result.total).toBe(1);
+    expect(result.rows[0]?.description).toContain(SEARCH_TERM);
   });
 });

@@ -58,6 +58,8 @@ export const transactions = pgTable(
     source: transactionSourceEnum('source').notNull(),
     claimId: uuid('claim_id').references(() => claims.id),
     winningBidId: uuid('winning_bid_id').references(() => bids.id),
+    /** Set when a seller accepts a fixed-price offer; FK is added post-create. */
+    offerId: uuid('offer_id'),
 
     /** Locked at creation — a promoted runner-up owes their OWN bid, not the winner's. */
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),

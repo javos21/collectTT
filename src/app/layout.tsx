@@ -54,7 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <header className="site">
           <Link className="brand" href="/" aria-label="CollectTT home">
-            <span className="brand-mark">C</span>CollectTT
+            <img className="brand-logo" src="/assets/collecttt_logo.png" alt="CollectTT" />
           </Link>
           <span className="phase">Collect with confidence</span>
           <SiteNavigation />

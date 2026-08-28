@@ -3,10 +3,11 @@ import Link from 'next/link';
 import { CATEGORY_LIST } from '@/domain/categories/definitions';
 import { browseListings } from '@/services/listings';
 import { formatMoney } from '@/domain/money';
+import { publicUrl } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
-/* Authored icons — one stroke language (1.7, round), never emoji. */
+/* Authored icons — one stroke language, kept compact for the browse shortcuts. */
 const stroke = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
 
 const CATEGORY_ICON: Record<string, React.ReactNode> = {
@@ -33,151 +34,162 @@ const CATEGORY_ICON: Record<string, React.ReactNode> = {
   ),
 };
 
-const EverythingIcon = (
-  <svg viewBox="0 0 24 24" {...stroke}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
-);
 const AuctionIcon = (
   <svg viewBox="0 0 24 24" {...stroke}><path d="M14 6l4 4M9.5 10.5l4 4M4 20h9" /><path d="M12 8l-6 6 2 2 6-6zM15 5l4 4" /></svg>
 );
 const TagIcon = (
   <svg viewBox="0 0 24 24" {...stroke}><path d="M4 4h7l9 9-7 7-9-9z" /><circle cx="8.5" cy="8.5" r="1.4" /></svg>
 );
-const PlusIcon = (
-  <svg viewBox="0 0 24 24" {...stroke}><path d="M12 5v14M5 12h14" /></svg>
-);
-const ShieldIcon = (
-  <svg viewBox="0 0 24 24" {...stroke}><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /><path d="M9 12l2 2 4-4" /></svg>
-);
-const CashIcon = (
-  <svg viewBox="0 0 24 24" {...stroke}><rect x="3" y="6" width="18" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></svg>
-);
-const StarIcon = (
-  <svg viewBox="0 0 24 24" {...stroke}><path d="M12 4l2.2 4.5 5 .7-3.6 3.5.9 4.9L12 15.8 7.6 18l.9-4.9L5 9.6l5-.7z" /></svg>
+const SearchIcon = (
+  <svg viewBox="0 0 24 24" {...stroke}><circle cx="10.8" cy="10.8" r="6.2" /><path d="M15.5 15.5L20 20" /></svg>
 );
 
-function saleLabel(t: string) {
-  return t === 'auction' ? 'Auction' : 'For sale';
+const PATH_LABELS: Record<string, string> = {
+  cash_meetup: 'Meetup',
+  remote_ship: 'Ships to you',
+  relay: 'Relay store',
+  full_service: 'Delivery',
+};
+
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'Cash',
+  bank_transfer: 'Bank transfer',
+  linx: 'LINX',
+  other: 'Other',
+};
+
+type BrowseRow = Awaited<ReturnType<typeof browseListings>>['rows'][number];
+
+function saleLabel(saleType: string): string {
+  return saleType === 'auction' ? 'Auction' : 'For sale';
+}
+
+function priceFor(row: BrowseRow): number {
+  return row.saleType === 'auction'
+    ? row.currentBidCents ?? row.startBidCents ?? 0
+    : row.priceCents ?? 0;
+}
+
+function valuesLabel(values: readonly string[], labels: Record<string, string>): string {
+  return values.map((value) => labels[value] ?? value.replaceAll('_', ' ')).join(' · ');
+}
+
+function ListingTile({ row }: { row: BrowseRow }) {
+  return (
+    <Link className="home-listing-tile" href={`/listings/${row.id}`}>
+      <div className="home-listing-tile__image">
+        {row.primaryImageKey ? (
+          <img src={publicUrl(row.primaryImageKey)} alt="" />
+        ) : (
+          <span aria-hidden="true">Collectible preview</span>
+        )}
+      </div>
+      <div className="home-listing-tile__body">
+        <div className="home-listing-tile__tags">
+          <span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span>
+          <span className={`pill tag ${row.saleType === 'auction' ? 'tag--auction' : 'tag--sale'}`}>{saleLabel(row.saleType)}</span>
+        </div>
+        <h3>{row.title}</h3>
+        {row.description !== null && row.description !== '' && <p>{row.description}</p>}
+        <div className="home-listing-tile__meta">
+          <strong className="num">{formatMoney(priceFor(row))}</strong>
+          {row.saleType === 'auction' && <span>{row.bidCount} bid{row.bidCount === 1 ? '' : 's'}</span>}
+        </div>
+        <small>{valuesLabel(row.fulfillmentPaths, PATH_LABELS)} · {valuesLabel(row.settlementMethods, PAYMENT_LABELS)}</small>
+      </div>
+    </Link>
+  );
 }
 
 export default async function HomePage() {
   const [recent, auctions, buynow, ...catPages] = await Promise.all([
-    browseListings({ pageSize: 8 }),
-    browseListings({ saleType: 'auction', pageSize: 1 }),
+    browseListings({ pageSize: 8, sort: 'newest' }),
+    browseListings({ saleType: 'auction', pageSize: 8, sort: 'ending_soon' }),
     browseListings({ saleType: 'straight_sale', pageSize: 1 }),
-    ...CATEGORY_LIST.map((c) => browseListings({ category: c.key, pageSize: 1 })),
+    ...CATEGORY_LIST.map((category) => browseListings({ category: category.key, pageSize: 1 })),
   ]);
 
   const total = recent.total;
-  const catCounts = new Map(CATEGORY_LIST.map((c, i) => [c.key, catPages[i]?.total ?? 0]));
-
-  const explore = [
-    { href: '/listings', icon: EverythingIcon, tint: 'i-slate', title: 'Everything', note: `${total} listing${total === 1 ? '' : 's'}` },
-    { href: '/listings?saleType=auction', icon: AuctionIcon, tint: 'i-amber', title: 'Live auctions', note: `${auctions.total} running` },
-    { href: '/listings?saleType=straight_sale', icon: TagIcon, tint: 'i-green', title: 'Buy it now', note: `${buynow.total} at a fixed price` },
-    { href: '/listings/new', icon: PlusIcon, tint: 'i-clay', title: 'Sell yours', note: 'List in minutes' },
-  ];
+  const catCounts = new Map(CATEGORY_LIST.map((category, index) => [category.key, catPages[index]?.total ?? 0]));
 
   return (
-    <main>
-      {/* -------------------------------------------------- hero */}
-      <section className="hero">
-        <div className="hero__pattern" aria-hidden="true" />
-        <h1>Deals you don&apos;t have to second-guess.</h1>
-        <p className="hero__lede">
-          Buy and sell trading cards, comics and collectibles with other Trinbagonians —
-          paying each other directly, with a relay store holding the item until the money&apos;s in.
-        </p>
-        <div className="hero__actions">
-          <Link className="btn-paper" href="/listings">
-            Browse listings
-          </Link>
-          <Link className="btn-ghost" href="/listings/new">
-            Sell an item
-          </Link>
+    <main className="home-page">
+      {/* The landing surface is intentionally brighter and more catalog-like than the operational app shell. */}
+      <section className="home-hero" aria-labelledby="home-title">
+        <div className="home-hero__orb home-hero__orb--one" aria-hidden="true" />
+        <div className="home-hero__orb home-hero__orb--two" aria-hidden="true" />
+        <div className="home-hero__main">
+          <div className="home-hero__content">
+            <img className="home-hero__logo" src="/assets/collecttt_logo.png" alt="CollectTT — Trinidad's Collector Platform" />
+            <h1 id="home-title">Find your next great collectible.</h1>
+            <p className="home-hero__lede">Trade cards, comics, and collectibles with collectors across Trinidad &amp; Tobago.</p>
+            <form className="home-search" action="/listings" method="get" role="search">
+              {SearchIcon}
+              <label className="sr-only" htmlFor="home-search-input">Search listings</label>
+              <input id="home-search-input" name="q" type="search" placeholder="Search cards, comics, collectibles" />
+              <button type="submit">Search</button>
+            </form>
+            <p className="home-search__hint">Search active listings by title or description</p>
+          </div>
+          <div className="home-hero__art">
+            <img src="/assets/collecttt-hero-v2.png" alt="Abstract trading cards, graded collectible, comic, and geometric figure" />
+          </div>
         </div>
-        <div className="hero__trust">
-          <span>{CashIcon} You pay each other — never the platform</span>
-          <span>{ShieldIcon} Released only when payment clears</span>
-          <span>{StarIcon} Reputation you can actually see</span>
+
+        <div className="home-sale-types" aria-label="Shop by sale type">
+          <Link className="home-sale-type home-sale-type--auction" href="/listings?saleType=auction">
+            <span className="home-sale-type__icon">{AuctionIcon}</span>
+            <span><strong>Live auctions</strong><small>{auctions.total} running now</small></span>
+            <span className="home-sale-type__arrow" aria-hidden="true">↗</span>
+          </Link>
+          <Link className="home-sale-type home-sale-type--sale" href="/listings?saleType=straight_sale">
+            <span className="home-sale-type__icon">{TagIcon}</span>
+            <span><strong>Fixed price</strong><small>{buynow.total} ready to claim</small></span>
+            <span className="home-sale-type__arrow" aria-hidden="true">↗</span>
+          </Link>
         </div>
       </section>
 
-      {/* -------------------------------------------------- explore */}
-      <div className="section-head">
-        <h2>Start exploring</h2>
-        <Link href="/listings">All listings →</Link>
-      </div>
-      <div className="explore">
-        {explore.map((e) => (
-          <Link className="card explore-card" key={e.href} href={e.href}>
-            <span className={`explore-card__icon ${e.tint}`}>{e.icon}</span>
-            <span>
-              <b>{e.title}</b>
-              <small>{e.note}</small>
-            </span>
-          </Link>
-        ))}
-      </div>
-
-      {/* -------------------------------------------------- categories */}
-      <div className="section-head">
-        <h2>Browse by category</h2>
-      </div>
-      <div className="cat-grid">
-        {CATEGORY_LIST.map((category) => {
-          const count = catCounts.get(category.key) ?? 0;
-          return (
-            <Link className="card category-card" key={category.key} href={`/listings?category=${category.key}`}>
-              <span className="category-card__icon">
-                {CATEGORY_ICON[category.key] ?? StarIcon}
-              </span>
-              <span>
-                <strong>{category.label}s</strong>
-                <span className="cat-count">
-                  {count} listed · {category.attributes.filter((a) => a.filterable === true).length} ways to filter
-                </span>
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-
-      {/* -------------------------------------------------- recently listed */}
-      <div className="section-head">
-        <h2>Recently listed</h2>
-        <Link href="/listings">See all →</Link>
-      </div>
-      {recent.rows.length === 0 ? (
-        <div className="empty-state">
-          <h2>Nothing listed yet</h2>
-          <p>Be the first to put something up for the community.</p>
-          <Link className="button" href="/listings/new">Create a listing</Link>
+      <section className="home-section home-categories" aria-labelledby="category-title">
+        <div className="home-section__heading">
+          <div><h2 id="category-title">Explore categories</h2><p>Start with what you collect.</p></div>
+          <Link href="/listings">View all <span aria-hidden="true">→</span></Link>
         </div>
-      ) : (
-        <div className="grid listing-grid">
-          {recent.rows.map((row) => (
-            <Link className="card listing-card" href={`/listings/${row.id}`} key={row.id}>
-              <div className="listing-card__image" aria-hidden="true">Collectible preview</div>
-              <div className="listing-card__body">
-                <div>
-                  <span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span>{' '}
-                  <span className={`pill tag ${row.saleType === 'auction' ? 'tag--auction' : 'tag--sale'}`}>{saleLabel(row.saleType)}</span>
-                </div>
-                <h3 style={{ marginTop: 12 }}>{row.title}</h3>
-                <p className="listing-card__price num">
-                  {row.saleType === 'auction'
-                    ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0)
-                    : formatMoney(row.priceCents ?? 0)}
-                </p>
-                <p className="muted" style={{ margin: 0 }}>
-                  by {row.sellerName}
-                  {row.saleType === 'auction' && ` · ${row.bidCount} bid${row.bidCount === 1 ? '' : 's'}`}
-                </p>
-              </div>
+        <div className="home-category-grid">
+          {CATEGORY_LIST.map((category) => (
+            <Link className="home-category" key={category.key} href={`/listings?category=${category.key}`}>
+              <span className="home-category__icon">{CATEGORY_ICON[category.key]}</span>
+              <span><strong>{category.label}s</strong><small>{catCounts.get(category.key) ?? 0} listings</small></span>
+              <span className="home-category__arrow" aria-hidden="true">↗</span>
             </Link>
           ))}
         </div>
-      )}
+      </section>
+
+      <section className="home-section" aria-labelledby="auction-title">
+        <div className="home-section__heading">
+          <div><h2 id="auction-title">Live auctions</h2><p>See what collectors are bidding on now.</p></div>
+          <Link href="/listings?saleType=auction">See all <span aria-hidden="true">→</span></Link>
+        </div>
+        {auctions.rows.length > 0 ? (
+          <div className="home-listing-grid">{auctions.rows.map((row) => <ListingTile key={row.id} row={row} />)}</div>
+        ) : (
+          <div className="home-empty"><strong>No live auctions yet.</strong><span>Check back soon or list something for the community.</span></div>
+        )}
+      </section>
+
+      <section className="home-section home-section--recent" aria-labelledby="recent-title">
+        <div className="home-section__heading">
+          <div><h2 id="recent-title">Recent listings</h2><p>Fresh finds, just added.</p></div>
+          <Link href="/listings">Browse everything <span aria-hidden="true">→</span></Link>
+        </div>
+        {recent.rows.length > 0 ? (
+          <div className="home-listing-grid">{recent.rows.map((row) => <ListingTile key={row.id} row={row} />)}</div>
+        ) : (
+          <div className="home-empty"><strong>Nothing listed yet.</strong><span>Be the first to put something up for the community.</span><Link className="button" href="/listings/new">Create a listing</Link></div>
+        )}
+        <p className="home-catalog-note"><span className="home-catalog-note__dot" aria-hidden="true" /> {total} active listing{total === 1 ? '' : 's'} across the catalog · secure local handoff options available</p>
+      </section>
     </main>
   );
 }

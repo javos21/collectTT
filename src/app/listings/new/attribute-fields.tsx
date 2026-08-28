@@ -16,33 +16,36 @@ export function AttributeFields({ categories }: { categories: CategoryDefinition
   const selected = categories.find((c) => c.key === categoryKey);
 
   return (
-    <>
-      <label htmlFor="category">Category</label>
-      <select
-        id="category"
-        name="category"
-        value={categoryKey}
-        onChange={(e) => setCategoryKey(e.target.value)}
-      >
-        {categories.map((c) => (
-          <option key={c.key} value={c.key}>
-            {c.label}
-          </option>
-        ))}
-      </select>
+    <div className="attribute-fields">
+      <div className="form-field">
+        <label htmlFor="category">Category</label>
+        <select
+          id="category"
+          name="category"
+          value={categoryKey}
+          onChange={(e) => setCategoryKey(e.target.value)}
+          required
+        >
+          {categories.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {selected !== undefined && (
-        <fieldset>
-          <legend>{selected.label} details</legend>
-          <p className="muted" style={{ marginTop: 0 }}>
-            These fields come from the category config, not from hardcoded form code.
-          </p>
-          {selected.attributes.map((attr) => (
-            <Field key={attr.key} attr={attr} />
-          ))}
-        </fieldset>
+        <div className="category-details">
+          <div className="category-details__heading">
+            <h3>{selected.label} details</h3>
+            <p>Add the details collectors use to identify and filter this item.</p>
+          </div>
+          <div className="form-grid">
+            {selected.attributes.map((attr) => <Field key={attr.key} attr={attr} />)}
+          </div>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -53,20 +56,14 @@ function Field({ attr }: { attr: AttributeDef }) {
   const name = `attr__${attr.key}`;
   const required = attr.required === true;
 
-  const label = (
-    <label htmlFor={id}>
-      {attr.label}
-      {required && ' *'}
-      {attr.filterable === true && <span className="pill" style={{ marginLeft: '.4rem' }}>filterable</span>}
-    </label>
-  );
+  const label = <label htmlFor={id}>{attr.label}{required && ' *'}</label>;
 
   switch (attr.type) {
     case 'enum':
       return (
-        <>
+        <div className="form-field">
           {label}
-          <select id={id} name={name} defaultValue="">
+          <select id={id} name={name} defaultValue="" required={required}>
             <option value="">{required ? 'Select…' : '(none)'}</option>
             {attr.options.map((option) => (
               <option key={option} value={option}>
@@ -74,24 +71,24 @@ function Field({ attr }: { attr: AttributeDef }) {
               </option>
             ))}
           </select>
-          {attr.help !== undefined && <p className="muted">{attr.help}</p>}
-        </>
+          {attr.help !== undefined && <small className="field-help">{attr.help}</small>}
+        </div>
       );
 
     case 'boolean':
       return (
-        <>
-          <label htmlFor={id} style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
+        <div className="form-field form-field--checkbox">
+          <label htmlFor={id}>
             <input id={id} name={name} type="checkbox" value="true" />
             {attr.label}
           </label>
-          {attr.help !== undefined && <p className="muted">{attr.help}</p>}
-        </>
+          {attr.help !== undefined && <small className="field-help">{attr.help}</small>}
+        </div>
       );
 
     case 'number':
       return (
-        <>
+        <div className="form-field">
           {label}
           <input
             id={id}
@@ -100,27 +97,28 @@ function Field({ attr }: { attr: AttributeDef }) {
             step={attr.integer === true ? 1 : 'any'}
             min={attr.min}
             max={attr.max}
+            required={required}
           />
-          {attr.help !== undefined && <p className="muted">{attr.help}</p>}
-        </>
+          {attr.help !== undefined && <small className="field-help">{attr.help}</small>}
+        </div>
       );
 
     case 'year':
       return (
-        <>
+        <div className="form-field">
           {label}
-          <input id={id} name={name} type="number" step={1} min={1800} max={new Date().getFullYear() + 1} />
-          {attr.help !== undefined && <p className="muted">{attr.help}</p>}
-        </>
+          <input id={id} name={name} type="number" step={1} min={1800} max={new Date().getFullYear() + 1} required={required} />
+          {attr.help !== undefined && <small className="field-help">{attr.help}</small>}
+        </div>
       );
 
     case 'text':
       return (
-        <>
+        <div className="form-field">
           {label}
-          <input id={id} name={name} type="text" maxLength={attr.maxLength} />
-          {attr.help !== undefined && <p className="muted">{attr.help}</p>}
-        </>
+          <input id={id} name={name} type="text" maxLength={attr.maxLength} required={required} />
+          {attr.help !== undefined && <small className="field-help">{attr.help}</small>}
+        </div>
       );
   }
 }

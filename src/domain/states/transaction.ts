@@ -143,6 +143,7 @@ export const REASON_TO_STATE: Record<TerminationReason, TransactionState> = {
 export const TRANSACTION_SOURCES = [
   'claim', // straight sale, first claimant
   'claim_promotion', // straight sale, promoted from the backup stack
+  'offer_accept', // fixed-price offer accepted by the seller
   'auction_win', // auction, highest bidder
   'auction_runner_up', // auction, promoted down the bid ladder
 ] as const;
@@ -151,7 +152,9 @@ export type TransactionSource = (typeof TRANSACTION_SOURCES)[number];
 
 /** Straight-sale sources walk the claim stack; auction sources walk the bid ladder. */
 export function candidateLadderFor(source: TransactionSource): 'claims' | 'bids' {
-  return source === 'claim' || source === 'claim_promotion' ? 'claims' : 'bids';
+  return source === 'claim' || source === 'claim_promotion' || source === 'offer_accept'
+    ? 'claims'
+    : 'bids';
 }
 
 // ---------------------------------------------------------------- guards

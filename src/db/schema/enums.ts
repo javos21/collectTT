@@ -70,6 +70,7 @@ export const claimStatusEnum = pgEnum('claim_status', [
   'superseded',
 ]);
 export const bidStatusEnum = pgEnum('bid_status', ['active', 'outbid', 'won', 'retracted', 'void']);
+export const offerStatusEnum = pgEnum('offer_status', ['pending', 'accepted', 'rejected']);
 export const imageStatusEnum = pgEnum('image_status', ['pending', 'processing', 'ready', 'failed']);
 export const custodyHolderEnum = pgEnum('custody_holder', ['relay_store', 'platform_courier']);
 export const storeStaffRoleEnum = pgEnum('store_staff_role', ['staff', 'manager']);

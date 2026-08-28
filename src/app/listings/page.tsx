@@ -1,10 +1,11 @@
 import Link from 'next/link';
 
-import { browseListings } from '@/services/listings';
+import { browseListings, BROWSE_SORTS, SETTLEMENT_METHODS, type BrowseSort } from '@/services/listings';
 import { CATEGORY_LIST, isCategoryKey } from '@/domain/categories/definitions';
 import { filtersFor, coerceFilters } from '@/domain/categories/filters';
 import { formatMoney } from '@/domain/money';
 import { publicUrl } from '@/lib/storage';
+import { FULFILLMENT_PATHS, type FulfillmentPath } from '@/domain/states/transaction';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,20 +27,9 @@ function readableValues(values: readonly string[], labels: Record<string, string
   return values.map((value) => labels[value] ?? value.replaceAll('_', ' ')).join(' · ');
 }
 
-function attributeSummary(attributes: unknown): Array<[string, string]> {
-  if (attributes === null || typeof attributes !== 'object' || Array.isArray(attributes)) return [];
-  return Object.entries(attributes as Record<string, unknown>)
-    .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
-    .slice(0, 3)
-    .map(([key, value]) => [key.replaceAll('_', ' '), String(value)]);
-}
-
 /**
- * Browse, filterable by category AND by category-specific attributes.
- *
- * The UI here is deliberately plain — the point being demonstrated is that the DATA
- * MODEL supports attribute filtering from day one, served by the GIN index. Polishing
- * this into a real faceted browse is the fast-follow.
+ * Browse the active catalog with sale-type tabs, practical listing facets, and stable
+ * sorting that remains encoded in the URL for shareable results.
  */
 export default async function BrowsePage({
   searchParams,
@@ -47,11 +37,29 @@ export default async function BrowsePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const query = typeof params.q === 'string' ? params.q.trim() : '';
   const category = typeof params.category === 'string' ? params.category : undefined;
   const saleType =
     params.saleType === 'straight_sale' || params.saleType === 'auction'
       ? params.saleType
       : undefined;
+  const delivery = FULFILLMENT_PATHS.includes(params.delivery as FulfillmentPath)
+    ? (params.delivery as FulfillmentPath)
+    : undefined;
+  const payment = SETTLEMENT_METHODS.includes(params.payment as (typeof SETTLEMENT_METHODS)[number])
+    ? (params.payment as (typeof SETTLEMENT_METHODS)[number])
+    : undefined;
+  const sort = BROWSE_SORTS.includes(params.sort as BrowseSort)
+    ? (params.sort as BrowseSort)
+    : 'newest';
+  const minPriceInput = typeof params.minPrice === 'string' ? params.minPrice : '';
+  const maxPriceInput = typeof params.maxPrice === 'string' ? params.maxPrice : '';
+  const minPriceCents = Number.isFinite(Number(minPriceInput)) && Number(minPriceInput) > 0
+    ? Math.round(Number(minPriceInput) * 100)
+    : undefined;
+  const maxPriceCents = Number.isFinite(Number(maxPriceInput)) && Number(maxPriceInput) > 0
+    ? Math.round(Number(maxPriceInput) * 100)
+    : undefined;
   const page = Math.max(1, Number.parseInt(String(params.page ?? '1'), 10) || 1);
 
   // Only attributes the category declares as filterable are honoured (a query string
@@ -68,38 +76,74 @@ export default async function BrowsePage({
     category !== undefined && isCategoryKey(category) ? coerceFilters(category, raw) : {};
 
   const { rows, total, pageSize } = await browseListings({
+    ...(query !== '' ? { query } : {}),
     ...(category !== undefined ? { category } : {}),
     ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
     ...(saleType !== undefined ? { saleType } : {}),
+    ...(delivery !== undefined ? { fulfillmentPath: delivery } : {}),
+    ...(payment !== undefined ? { settlementMethod: payment } : {}),
+    ...(minPriceCents !== undefined ? { minPriceCents } : {}),
+    ...(maxPriceCents !== undefined ? { maxPriceCents } : {}),
+    sort,
     page,
   });
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   // A page link that carries every active filter forward — only the page number moves.
-  const pageHref = (n: number) => {
+  const browseHref = (overrides: {
+    saleType?: 'straight_sale' | 'auction' | null;
+    sort?: BrowseSort | null;
+    delivery?: FulfillmentPath | null;
+    payment?: string | null;
+    minPrice?: string | null;
+    maxPrice?: string | null;
+    page?: number;
+  } = {}) => {
     const qs = new URLSearchParams();
+    if (query !== '') qs.set('q', query);
     if (category !== undefined) qs.set('category', category);
-    if (saleType !== undefined) qs.set('saleType', saleType);
+    const nextSaleType = 'saleType' in overrides ? overrides.saleType : saleType;
+    if (nextSaleType) qs.set('saleType', nextSaleType);
+    const nextSort = 'sort' in overrides ? overrides.sort : sort;
+    if (nextSort && nextSort !== 'newest') qs.set('sort', nextSort);
+    const nextDelivery = 'delivery' in overrides ? overrides.delivery : delivery;
+    if (nextDelivery) qs.set('delivery', nextDelivery);
+    const nextPayment = 'payment' in overrides ? overrides.payment : payment;
+    if (nextPayment) qs.set('payment', nextPayment);
+    const nextMinPrice = 'minPrice' in overrides ? overrides.minPrice : minPriceInput;
+    if (nextMinPrice) qs.set('minPrice', nextMinPrice);
+    const nextMaxPrice = 'maxPrice' in overrides ? overrides.maxPrice : maxPriceInput;
+    if (nextMaxPrice) qs.set('maxPrice', nextMaxPrice);
     for (const [key, value] of Object.entries(raw)) {
       if (value !== undefined) qs.set(`attr_${key}`, value);
     }
-    if (n > 1) qs.set('page', String(n));
+    if ((overrides.page ?? 1) > 1) qs.set('page', String(overrides.page));
     const s = qs.toString();
     return s === '' ? '/listings' : `/listings?${s}`;
   };
+  const pageHref = (n: number) => browseHref({ page: n });
 
   const activeFilters = category !== undefined && isCategoryKey(category) ? filtersFor(category) : [];
 
   const hasActiveFilters =
-    category !== undefined || saleType !== undefined || Object.keys(attributes).length > 0;
+    query !== '' || category !== undefined || saleType !== undefined || delivery !== undefined || payment !== undefined ||
+    minPriceCents !== undefined || maxPriceCents !== undefined || Object.keys(attributes).length > 0;
 
   return (
-    <main>
-      <div className="page-heading">
-        <h1>Browse listings</h1>
-        <p className="lede">Find something with a story. Filter by category, sale type, or the details that matter to you.</p>
-      </div>
+    <main className="catalog-page">
+      <section className="catalog-header">
+        <div>
+          <h1>Browse listings</h1>
+          <p>Search the local collector marketplace, then narrow by sale type, category, delivery, and payment.</p>
+        </div>
+        <form className="catalog-search" action="/listings" method="get" role="search">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2" stroke="currentColor" strokeWidth="1.8" /><path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          <label className="sr-only" htmlFor="catalog-query">Search listings</label>
+          <input id="catalog-query" name="q" type="search" defaultValue={query} placeholder="Search cards, comics, collectibles" />
+          <button type="submit">Search</button>
+        </form>
+      </section>
 
       <div className="browse-layout">
         {/* -------------------------------------------------- filter rail */}
@@ -114,6 +158,7 @@ export default async function BrowsePage({
             </svg>
           </summary>
           <form method="get" className="filter-form" aria-label="Listing filters">
+            {query !== '' && <input type="hidden" name="q" value={query} />}
             <label htmlFor="category">Category</label>
             <select id="category" name="category" defaultValue={category ?? ''}>
               <option value="">All categories</option>
@@ -126,6 +171,29 @@ export default async function BrowsePage({
               <option value="straight_sale">Straight sale</option>
               <option value="auction">Auctions</option>
             </select>
+
+            <label htmlFor="delivery">Delivery</label>
+            <select id="delivery" name="delivery" defaultValue={delivery ?? ''}>
+              <option value="">Any delivery option</option>
+              {FULFILLMENT_PATHS.map((path) => <option key={path} value={path}>{PATH_LABELS[path]}</option>)}
+            </select>
+
+            <label htmlFor="payment">Payment</label>
+            <select id="payment" name="payment" defaultValue={payment ?? ''}>
+              <option value="">Any payment method</option>
+              {SETTLEMENT_METHODS.map((method) => <option key={method} value={method}>{PAYMENT_LABELS[method] ?? method}</option>)}
+            </select>
+
+            <div className="filter-price-grid">
+              <div>
+                <label htmlFor="minPrice">Min price</label>
+                <input id="minPrice" name="minPrice" type="number" min="0" step="0.01" inputMode="decimal" placeholder="TT$0" defaultValue={minPriceInput} />
+              </div>
+              <div>
+                <label htmlFor="maxPrice">Max price</label>
+                <input id="maxPrice" name="maxPrice" type="number" min="0" step="0.01" inputMode="decimal" placeholder="No limit" defaultValue={maxPriceInput} />
+              </div>
+            </div>
 
             {activeFilters.filter((f) => f.type === 'enum').map((filter) => (
               <div key={filter.key}>
@@ -144,15 +212,40 @@ export default async function BrowsePage({
         </details>
 
         {/* -------------------------------------------------- results */}
-        <div>
-          <div className="results-head">
-            <strong className="num">{total}</strong>
-            <span className="muted">
-              listing{total === 1 ? '' : 's'}
-              {category !== undefined && ` in ${category}`}
-              {saleType !== undefined && ` · ${saleType === 'auction' ? 'auctions' : 'straight sales'}`}
-              {Object.keys(attributes).length > 0 && ` · ${Object.entries(attributes).map(([k, v]) => `${k}: ${v}`).join(', ')}`}
-            </span>
+        <div className="catalog-results">
+          <nav className="browse-type-tabs" aria-label="Browse by sale type">
+            <Link className={saleType === undefined ? 'is-active' : ''} href={browseHref({ saleType: null, page: 1 })}>All listings</Link>
+            <Link className={saleType === 'straight_sale' ? 'is-active' : ''} href={browseHref({ saleType: 'straight_sale', page: 1 })}>Fixed price</Link>
+            <Link className={saleType === 'auction' ? 'is-active' : ''} href={browseHref({ saleType: 'auction', page: 1 })}>Auctions</Link>
+          </nav>
+          <div className="results-toolbar">
+            <div className="results-head">
+              <strong className="num">{total}</strong>
+              <span className="muted">
+                listing{total === 1 ? '' : 's'}
+                {query !== '' && ` matching “${query}”`}
+                {category !== undefined && ` in ${category.replace('_', ' ')}`}
+                {saleType !== undefined && ` · ${saleType === 'auction' ? 'auctions' : 'fixed price'}`}
+              </span>
+            </div>
+            <form method="get" className="sort-form" aria-label="Sort listings">
+              {query !== '' && <input type="hidden" name="q" value={query} />}
+              {category !== undefined && <input type="hidden" name="category" value={category} />}
+              {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
+              {delivery !== undefined && <input type="hidden" name="delivery" value={delivery} />}
+              {payment !== undefined && <input type="hidden" name="payment" value={payment} />}
+              {minPriceCents !== undefined && <input type="hidden" name="minPrice" value={minPriceInput} />}
+              {maxPriceCents !== undefined && <input type="hidden" name="maxPrice" value={maxPriceInput} />}
+              {Object.entries(raw).map(([key, value]) => value !== undefined && <input key={key} type="hidden" name={`attr_${key}`} value={value} />)}
+              <label htmlFor="sort">Sort by</label>
+              <select id="sort" name="sort" defaultValue={sort}>
+                <option value="newest">Newest listed</option>
+                <option value="price_low">Price: low to high</option>
+                <option value="price_high">Price: high to low</option>
+                <option value="ending_soon">Ending soon</option>
+              </select>
+              <button type="submit" className="button secondary">Apply</button>
+            </form>
           </div>
 
           {total === 0 ? (
@@ -163,32 +256,28 @@ export default async function BrowsePage({
             </div>
           ) : (
             <>
-              <div className="listing-results">
+              <div className="catalog-results-grid">
                 {rows.map((row) => (
-                  <article className="listing-card listing-card--horizontal" key={row.id}>
-                    <div className="listing-card__image">
+                  <article className="catalog-card" key={row.id}>
+                    <Link className="catalog-card__image" href={`/listings/${row.id}`} aria-label={`View ${row.title}`}>
                       {row.primaryImageKey ? <img src={publicUrl(row.primaryImageKey)} alt="" /> : <span aria-hidden="true">Collectible preview</span>}
-                    </div>
-                    <div className="listing-card__body">
-                      <h3>{row.title}</h3>
-                      <div className="listing-card__tags"><span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span><span className={`pill tag ${row.saleType === 'auction' ? 'tag--auction' : 'tag--sale'}`}>{row.saleType === 'auction' ? 'Auction' : 'For sale'}</span></div>
-                      <div className="listing-card__seller">
-                        <span className="seller-avatar" aria-hidden="true">{row.sellerName.slice(0, 1).toUpperCase()}</span>
-                        <span><strong>{row.sellerName}</strong><small>{row.sellerRatingAvg === null ? 'New seller' : `★ ${Number(row.sellerRatingAvg).toFixed(1)} · ${row.sellerRatingCount} rating${row.sellerRatingCount === 1 ? '' : 's'}`}</small></span>
-                      </div>
-                      <dl className="listing-card__facts">
-                        <div><dt>Pickup</dt><dd>{readableValues(row.fulfillmentPaths, PATH_LABELS)}</dd></div>
+                    </Link>
+                    <div className="catalog-card__body">
+                      <div className="catalog-card__tags"><span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span><span className={`pill tag ${row.saleType === 'auction' ? 'tag--auction' : 'tag--sale'}`}>{row.saleType === 'auction' ? 'Auction' : 'Fixed price'}</span></div>
+                      <h3><Link href={`/listings/${row.id}`}>{row.title}</Link></h3>
+                      {row.description !== null && row.description !== '' && <p className="catalog-card__description">{row.description}</p>}
+                      <dl className="catalog-card__facts">
+                        <div><dt>Delivery</dt><dd>{readableValues(row.fulfillmentPaths, PATH_LABELS)}</dd></div>
                         <div><dt>Payment</dt><dd>{readableValues(row.settlementMethods, PAYMENT_LABELS)}</dd></div>
-                        {attributeSummary(row.attributes).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
                       </dl>
-                    </div>
-                    <div className="listing-card__actions">
-                      <div className="listing-card__price-block">
+                      <div className="catalog-card__footer">
+                        <div className="catalog-card__price">
                         <span>{row.saleType === 'auction' ? 'Current bid' : 'Price'}</span>
                         <strong className="num">{row.saleType === 'auction' ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0) : formatMoney(row.priceCents ?? 0)}</strong>
                         {row.saleType === 'auction' && <small>{row.bidCount} bid{row.bidCount === 1 ? '' : 's'}</small>}
+                        </div>
+                        <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : 'View listing'}</Link>
                       </div>
-                      <div className="listing-card__action-buttons"><Link className="button secondary" href={`/listings/${row.id}`}>View</Link><Link className="button" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : 'Buy now'}</Link></div>
                     </div>
                   </article>
                 ))}

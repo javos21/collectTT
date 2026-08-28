@@ -12,8 +12,9 @@ import { currentUser } from '@/lib/session';
 import { db } from '@/db/client';
 import { bids, claims } from '@/db/schema/listings';
 import { profiles } from '@/db/schema/profiles';
-import { claimAction, bidAction } from './actions';
+import { acceptOfferAction, bidAction, claimAction, rejectOfferAction, submitOfferAction } from './actions';
 import { AuctionLive } from './bid-panel';
+import { latestOfferForBuyer, pendingOffersForSeller } from '@/services/offers';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +30,7 @@ export default async function ListingPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; queued?: string; bid?: string }>;
+  searchParams: Promise<{ error?: string; queued?: string; bid?: string; offer?: string }>;
 }) {
   const { id } = await params;
   const flash = await searchParams;
@@ -41,6 +42,12 @@ export default async function ListingPage({
   const attributes = listing.attributes as Record<string, unknown>;
   const viewer = await currentUser();
   const isSeller = viewer?.userId === listing.sellerId;
+  const pendingOffers = isSeller && listing.saleType === 'straight_sale'
+    ? await pendingOffersForSeller(id, viewer.userId)
+    : [];
+  const myOffer = viewer !== null && !isSeller && listing.saleType === 'straight_sale'
+    ? await latestOfferForBuyer(id, viewer.userId)
+    : null;
 
   const isAuction = listing.saleType === 'auction';
   const isOpen = listing.status === 'active';
@@ -101,7 +108,7 @@ export default async function ListingPage({
         ? { cls: 'badge badge--claimed', text: 'Claimed' }
         : { cls: 'badge badge--ended', text: listing.status.replace(/_/g, ' ') };
 
-  const settleForm = (idPrefix: string) =>
+  const settleForm = (idPrefix: string, fieldPrefix = '') =>
     choosablePaths.length === 0 ? (
       <p className="buybox__note">
         No settlement method is available right now — the seller only offers relay
@@ -110,7 +117,7 @@ export default async function ListingPage({
     ) : (
       <>
         <label htmlFor={`${idPrefix}fulfillmentPath`}>How do you want to settle this?</label>
-        <select id={`${idPrefix}fulfillmentPath`} name="fulfillmentPath">
+        <select id={`${idPrefix}fulfillmentPath`} name={`${fieldPrefix}fulfillmentPath`}>
           {choosablePaths.map((path) => (
             <option key={path} value={path}>
               {PATH_LABELS[path] ?? path}
@@ -122,7 +129,7 @@ export default async function ListingPage({
             <label htmlFor={`${idPrefix}relayStoreId`}>Which store will you collect from?</label>
             <select
               id={`${idPrefix}relayStoreId`}
-              name="relayStoreId"
+              name={`${fieldPrefix}relayStoreId`}
               defaultValue={relayCandidates[0]!.id}
             >
               {relayCandidates.map((store) => (
@@ -190,6 +197,14 @@ export default async function ListingPage({
         <div className="alert alert--info">
           Bid placed — and it pushed the deadline out (soft close).
         </div>
+      )}
+      {flash.offer === 'sent' && (
+        <div className="alert alert--info" role="status">
+          Offer sent. The seller can accept or reject it while the listing is available.
+        </div>
+      )}
+      {flash.offer === 'rejected' && (
+        <div className="alert alert--info" role="status">Offer rejected.</div>
       )}
 
       <div className="listing-body">
@@ -260,10 +275,13 @@ export default async function ListingPage({
           {/* ------------------------------------------------ act */}
           {viewer === null ? (
             <div className="buybox__state">
-              <Link href="/sign-in">Sign in</Link> to {isAuction ? 'bid' : 'claim this'}.
+              <Link href="/sign-in">Sign in</Link> to {isAuction ? 'bid' : 'claim this or make an offer'}.
             </div>
           ) : isSeller ? (
-            <div className="buybox__state">This is your listing.</div>
+            <div className="buybox__state">
+              This is your listing.
+              {pendingOffers.length > 0 && ` ${pendingOffers.length} offer${pendingOffers.length === 1 ? '' : 's'} waiting.`}
+            </div>
           ) : isAuction ? (
             isOpen ? (
               <form className="buybox__form" action={bidAction}>
@@ -315,6 +333,35 @@ export default async function ListingPage({
             <div className="buybox__state">This listing is no longer available.</div>
           )}
 
+          {!isAuction && viewer !== null && !isSeller && listing.status === 'active' && (
+            <>
+              <hr />
+              {myOffer?.status === 'pending' ? (
+                <div className="buybox__state">
+                  Your offer of <strong>{formatMoney(myOffer.amountCents)}</strong> is waiting for
+                  the seller. You can still claim at the asking price.
+                </div>
+              ) : (
+                <form className="buybox__form" action={submitOfferAction}>
+                  <input type="hidden" name="listingId" value={id} />
+                  <p className="buybox__price-label">Make an offer</p>
+                  <label htmlFor="offerAmount">Your offer</label>
+                  <input
+                    id="offerAmount"
+                    name="offerAmount"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={(Math.max(1, (listing.priceCents ?? 1) - 1) / 100).toFixed(2)}
+                    required
+                  />
+                  <p className="buybox__note">Must be below {formatMoney(listing.priceCents ?? 0)}.</p>
+                  {settleForm('offer-', 'offer')}
+                  <button className="secondary" type="submit">Submit offer</button>
+                </form>
+              )}
+            </>
+          )}
+
           <div className="trust">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path
@@ -338,6 +385,49 @@ export default async function ListingPage({
           </div>
         </aside>
       </div>
+
+      {isSeller && !isAuction && pendingOffers.length > 0 && (
+        <section className="offers-section" aria-labelledby="offers-heading">
+          <h2 id="offers-heading" className="section-label">Offers to review</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Buyer</th>
+                  <th>Offer</th>
+                  <th>Fulfillment</th>
+                  <th>Received</th>
+                  <th><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingOffers.map((offer) => (
+                  <tr key={offer.id}>
+                    <td>{offer.buyerName}</td>
+                    <td className="num"><strong>{formatMoney(offer.amountCents)}</strong></td>
+                    <td>{offer.fulfillmentPath.replace('_', ' ')}</td>
+                    <td className="muted">{offer.createdAt.toLocaleString('en-TT')}</td>
+                    <td>
+                      <div className="offer-actions">
+                        <form action={acceptOfferAction}>
+                          <input type="hidden" name="listingId" value={id} />
+                          <input type="hidden" name="offerId" value={offer.id} />
+                          <button type="submit">Accept</button>
+                        </form>
+                        <form action={rejectOfferAction}>
+                          <input type="hidden" name="listingId" value={id} />
+                          <input type="hidden" name="offerId" value={offer.id} />
+                          <button className="secondary" type="submit">Reject</button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* ------------------------------------------------ bid history */}
       {isAuction && recentBids.length > 0 && (

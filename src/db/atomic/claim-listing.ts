@@ -21,6 +21,7 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import { db, type Tx } from '../client';
 import { listings, claims } from '../schema/listings';
+import { offers } from '../schema/offers';
 import { openTransaction, ConflictError, ForbiddenError } from '../../services/transactions';
 import { activeRestrictions } from '../../services/reputation';
 import { assertFulfillmentEligible } from '../../services/fulfillment-eligibility';
@@ -132,6 +133,25 @@ export async function claimListing(opts: {
       });
 
       await tx.update(claims).set({ transactionId: opened.id }).where(eq(claims.id, claim.id));
+
+      const pendingOffers = await tx
+        .select({ buyerId: offers.buyerId })
+        .from(offers)
+        .where(and(eq(offers.listingId, opts.listingId), eq(offers.status, 'pending')));
+      await tx
+        .update(offers)
+        .set({ status: 'rejected', respondedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(and(eq(offers.listingId, opts.listingId), eq(offers.status, 'pending')));
+      for (const offer of pendingOffers) {
+        await notify({
+          tx,
+          userId: offer.buyerId,
+          event: 'offer_rejected_buyer',
+          data: { listingTitle: listing.title },
+          linkUrl: `/listings/${opts.listingId}`,
+          idempotencyKey: `offer_rejected:claim:${claim.id}:${offer.buyerId}`,
+        });
+      }
 
       return { outcome: 'claimed' as const, transactionId: opened.id };
     }

@@ -87,6 +87,7 @@ export interface OpenTransactionInput {
   source: TransactionSource;
   claimId?: string | null;
   winningBidId?: string | null;
+  offerId?: string | null;
   listingTitle: string;
   /** Which relay store the buyer chose. Required for the `relay` path only. */
   relayStoreId?: string | null;
@@ -119,6 +120,7 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
       source: input.source,
       claimId: input.claimId ?? null,
       winningBidId: input.winningBidId ?? null,
+      offerId: input.offerId ?? null,
       amountCents: input.amountCents,
       fulfillmentPath: input.fulfillmentPath,
       state: 'open',
@@ -199,7 +201,12 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
   }
 
   const deadlineText = deadlines.paymentDeadlineAt.toLocaleString('en-TT');
-  const buyerEvent = input.source === 'auction_win' ? 'auction_won' : 'claim_confirmed_buyer';
+  const buyerEvent =
+    input.source === 'auction_win'
+      ? 'auction_won'
+      : input.source === 'offer_accept'
+        ? 'offer_accepted_buyer'
+        : 'claim_confirmed_buyer';
 
   await notify({
     tx,
@@ -218,8 +225,13 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
   await notify({
     tx,
     userId: input.sellerId,
-    event: 'listing_claimed_seller',
-    data: { listingTitle: input.listingTitle, buyerName: buyer, deadline: deadlineText },
+    event: input.source === 'offer_accept' ? 'offer_accepted_seller' : 'listing_claimed_seller',
+    data: {
+      listingTitle: input.listingTitle,
+      buyerName: buyer,
+      deadline: deadlineText,
+      amount: formatMoney(input.amountCents),
+    },
     linkUrl: `/deals/${created.id}`,
     idempotencyKey: `tx_opened_seller:${created.id}`,
   });
@@ -885,6 +897,7 @@ export interface LoadedTransaction {
   listingTitle: string;
   sellerId: string;
   buyerId: string;
+  source: (typeof transactions.$inferSelect)['source'];
   state: (typeof transactions.$inferSelect)['state'];
   paymentState: (typeof transactions.$inferSelect)['paymentState'];
   custodyState: (typeof transactions.$inferSelect)['custodyState'];
@@ -892,6 +905,7 @@ export interface LoadedTransaction {
   amountCents: number;
   paymentDeadlineAt: Date;
   claimId: string | null;
+  offerId: string | null;
 }
 
 async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {
@@ -911,6 +925,7 @@ async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {
     listingTitle: row.listingTitle,
     sellerId: row.t.sellerId,
     buyerId: row.t.buyerId,
+    source: row.t.source,
     state: row.t.state,
     paymentState: row.t.paymentState,
     custodyState: row.t.custodyState,
@@ -918,6 +933,7 @@ async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {
     amountCents: row.t.amountCents,
     paymentDeadlineAt: row.t.paymentDeadlineAt,
     claimId: row.t.claimId,
+    offerId: row.t.offerId,
   };
 }
 

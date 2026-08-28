@@ -12,6 +12,7 @@ export * from './auth';
 export * from './images';
 export * from './profiles';
 export * from './listings';
+export * from './offers';
 export * from './custody';
 export * from './transactions';
 export * from './notifications';

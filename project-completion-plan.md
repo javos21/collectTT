@@ -8,7 +8,7 @@
 
 CollectTT already has the difficult domain foundation: accounts, listings, auctions, claims and backups, transaction state, reputation, ratings, relay custody, and the store counter workflow are implemented. The automated baseline is healthy:
 
-- 169 automated tests pass across auth safety, domain, database, browse, trading, and custody suites.
+- 175 automated tests pass across auth safety, domain, database, browse, trading, and custody suites.
 - TypeScript checking passes.
 - The optimized Next.js production build succeeds.
 - The repository contains deployment definitions for a web process, worker, and Postgres.
@@ -52,7 +52,7 @@ The recommended launch target is an **invite-only beta using email and in-app no
 - [x] Added same-origin post-auth redirect validation and tests.
 - [x] Preserved validated return destinations through password recovery.
 - [x] Hardened unverified sign-in resend, provider/network error handling, and encoded redirect-path validation.
-- [x] Passed 169 tests, TypeScript checking, the UI detector, and a production build.
+- [x] Passed 175 tests, TypeScript checking, the UI detector, and a production build.
 - [ ] Authenticate the sending domain in Brevo and add a production API key/verified sender.
 - [ ] Configure and exercise Google OAuth for localhost and the production hostname.
 - [ ] Manually test new registration, verification, sign-in, account linking, forgotten
@@ -165,7 +165,7 @@ Start narrow and read-heavy. Every write must require an admin role, a reason, a
 
 #### Automated coverage
 
-- [ ] Keep the current 165 auth/domain/DB/flow tests green.
+- [ ] Keep the current 175 auth/domain/DB/flow tests green.
 - [ ] Add tests for seller edit/withdraw permissions and invalid state transitions.
 - [ ] Add admin authorization and audit-log tests for every admin action.
 - [ ] Add notification inbox/preferences and failed-delivery retry tests.
@@ -280,6 +280,6 @@ These are the next concrete tasks, in order:
 
 ## 8. Latest verification snapshot
 
-As of 26 August 2026, the authentication/Brevo cutover passes **169 automated tests**,
+As of 27 August 2026, the authentication/Brevo cutover and fixed-price offers pass **175 automated tests**,
 TypeScript checking, the frontend UI detector, and an optimized Next.js production build.
 These checks do not replace the pending live Google OAuth callback and Brevo delivery tests.

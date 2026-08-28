@@ -6,7 +6,7 @@
  * bump never invalidates existing listings.
  */
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db, type DbOrTx } from '../db/client';
@@ -16,7 +16,7 @@ import { images } from '../db/schema/images';
 import { profiles, reputationCounters } from '../db/schema/profiles';
 import { parseAttributes } from '../domain/categories/build-schema';
 import { CATEGORY_LIST } from '../domain/categories/definitions';
-import { FULFILLMENT_PATHS } from '../domain/states/transaction';
+import { FULFILLMENT_PATHS, type FulfillmentPath } from '../domain/states/transaction';
 import { SIZE_CLASSES } from '../domain/states/listing';
 import { assertListingTransition } from '../domain/states/listing';
 import { WINDOWS } from '../domain/policy/windows';
@@ -181,7 +181,12 @@ export async function publishListing(sellerId: string, listingId: string): Promi
 
 export const BROWSE_PAGE_SIZE = 24;
 
+export const BROWSE_SORTS = ['newest', 'price_low', 'price_high', 'ending_soon'] as const;
+export type BrowseSort = (typeof BROWSE_SORTS)[number];
+
 export interface BrowseFilters {
+  /** Optional text search across listing titles and descriptions. */
+  query?: string;
   category?: string;
   /**
    * Category-specific attribute filters, already coerced to their stored JSON types by
@@ -190,6 +195,14 @@ export interface BrowseFilters {
   attributes?: Record<string, string | number | boolean>;
   /** Narrow to one sale type; omitted means both. */
   saleType?: 'straight_sale' | 'auction';
+  /** Match listings that offer this delivery/fulfillment path. */
+  fulfillmentPath?: FulfillmentPath;
+  /** Match listings that accept this payment method. */
+  settlementMethod?: string;
+  /** Price filters apply to fixed prices and the current/start bid for auctions. */
+  minPriceCents?: number;
+  maxPriceCents?: number;
+  sort?: BrowseSort;
   /** 1-based page number. */
   page?: number;
   pageSize?: number;
@@ -205,6 +218,13 @@ export interface BrowsePage {
 
 function browseConditions(filters: BrowseFilters) {
   const conditions = [eq(listings.status, 'active')];
+  const query = filters.query?.trim();
+  if (query !== undefined && query !== '') {
+    const pattern = `%${query}%`;
+    conditions.push(
+      sql`(${listings.title} ilike ${pattern} or coalesce(${listings.description}, '') ilike ${pattern})`,
+    );
+  }
   if (filters.category !== undefined) {
     conditions.push(eq(listings.category, filters.category));
   }
@@ -215,14 +235,52 @@ function browseConditions(filters: BrowseFilters) {
   if (filters.saleType !== undefined) {
     conditions.push(eq(listings.saleType, filters.saleType));
   }
+  if (filters.fulfillmentPath !== undefined) {
+    conditions.push(
+      sql`${listings.fulfillmentPaths} @> ARRAY[${filters.fulfillmentPath}]::fulfillment_path[]`,
+    );
+  }
+  if (filters.settlementMethod !== undefined) {
+    conditions.push(
+      sql`${listings.settlementMethods} @> ARRAY[${filters.settlementMethod}]::text[]`,
+    );
+  }
+  const browsePrice = sql`coalesce(${listings.priceCents}, ${listings.currentBidCents}, ${listings.startBidCents})`;
+  if (filters.minPriceCents !== undefined) {
+    conditions.push(sql`${browsePrice} >= ${filters.minPriceCents}`);
+  }
+  if (filters.maxPriceCents !== undefined) {
+    conditions.push(sql`${browsePrice} <= ${filters.maxPriceCents}`);
+  }
   return conditions;
 }
 
-function selectBrowseRows(where: ReturnType<typeof and>, limit: number, offset: number) {
+function browseOrder(sort: BrowseSort = 'newest') {
+  const browsePrice = sql`coalesce(${listings.priceCents}, ${listings.currentBidCents}, ${listings.startBidCents})`;
+  switch (sort) {
+    case 'price_low':
+      return [asc(browsePrice), desc(listings.publishedAt), desc(listings.id)] as const;
+    case 'price_high':
+      return [desc(browsePrice), desc(listings.publishedAt), desc(listings.id)] as const;
+    case 'ending_soon':
+      return [sql`${listings.endsAt} asc nulls last`, desc(listings.publishedAt), desc(listings.id)] as const;
+    case 'newest':
+    default:
+      return [desc(listings.publishedAt), desc(listings.id)] as const;
+  }
+}
+
+function selectBrowseRows(
+  where: ReturnType<typeof and>,
+  limit: number,
+  offset: number,
+  sort: BrowseSort,
+) {
   return db
     .select({
       id: listings.id,
       title: listings.title,
+      description: listings.description,
       category: listings.category,
       attributes: listings.attributes,
       saleType: listings.saleType,
@@ -255,14 +313,15 @@ function selectBrowseRows(where: ReturnType<typeof and>, limit: number, offset: 
     .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
     .leftJoin(reputationCounters, eq(reputationCounters.userId, profiles.userId))
     .where(where)
-    .orderBy(desc(listings.publishedAt))
+    .orderBy(...browseOrder(sort))
     .limit(limit)
     .offset(offset);
 }
 
 /**
- * Browse. Category, attribute and sale-type filtering all resolve in one WHERE, so the
- * count and the page slice always agree. Attribute filtering is served by the GIN index.
+ * Browse. All facets resolve in one WHERE, so the count and the page slice always agree.
+ * Attribute filtering is served by the GIN index; delivery/payment facets use the
+ * listing's declared arrays.
  */
 export async function browseListings(filters: BrowseFilters = {}): Promise<BrowsePage> {
   const where = and(...browseConditions(filters));
@@ -272,7 +331,7 @@ export async function browseListings(filters: BrowseFilters = {}): Promise<Brows
   const offset = (page - 1) * pageSize;
 
   const [rows, totalRows] = await Promise.all([
-    selectBrowseRows(where, pageSize, offset),
+    selectBrowseRows(where, pageSize, offset, filters.sort ?? 'newest'),
     db
       .select({ n: sql<number>`count(*)::int` })
       .from(listings)

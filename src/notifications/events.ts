@@ -47,6 +47,30 @@ export const EVENTS = {
     title: (d) => `You're #${str(d, 'position')} in line for "${str(d, 'listingTitle')}"`,
     body: () => `If the current claimer doesn't pay in time, it comes to you automatically.`,
   },
+  offer_received_seller: {
+    type: 'offer_received_seller',
+    channels: ['in_app', 'email'],
+    title: (d) => `${str(d, 'buyerName', 'Someone')} offered ${str(d, 'amount')} for "${str(d, 'listingTitle')}"`,
+    body: () => `Review the offer and accept or reject it from your listing.`,
+  },
+  offer_accepted_buyer: {
+    type: 'offer_accepted_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `Your offer was accepted for "${str(d, 'listingTitle')}"`,
+    body: (d) => `Pay ${str(d, 'amount')} by ${str(d, 'deadline')}, then mark it paid.`,
+  },
+  offer_accepted_seller: {
+    type: 'offer_accepted_seller',
+    channels: ['in_app'],
+    title: (d) => `You accepted ${str(d, 'buyerName', 'a buyer')}'s offer for "${str(d, 'listingTitle')}"`,
+    body: (d) => `The deal is open at ${str(d, 'amount')}.`,
+  },
+  offer_rejected_buyer: {
+    type: 'offer_rejected_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `Your offer was declined for "${str(d, 'listingTitle')}"`,
+    body: () => `The seller declined this offer. You can try again while the listing is available.`,
+  },
   claim_promoted_buyer: {
     type: 'claim_promoted_buyer',
     channels: ['in_app', 'email', 'whatsapp'],

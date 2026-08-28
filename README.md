@@ -43,7 +43,7 @@ console mode, verification and password-reset links print in the terminal runnin
 ### Verifying it works
 
 ```bash
-npm test              # 165 tests: auth safety, state machine, categories, DB constraints,
+npm test              # 175 tests: auth safety, state machine, categories, DB constraints,
                       # trading flows, custody flows
 npm run typecheck
 npm run verify        # Phase 0 end-to-end: presign -> upload -> worker -> variants

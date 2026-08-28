@@ -22,11 +22,13 @@ import { db, pool } from '../../src/db/client';
 import { users } from '../../src/db/schema/auth';
 import { profiles, reputationCounters, reputationEvents, ratings } from '../../src/db/schema/profiles';
 import { listings, claims, bids } from '../../src/db/schema/listings';
+import { offers } from '../../src/db/schema/offers';
 import { transactions } from '../../src/db/schema/transactions';
 import { claimListing } from '../../src/db/atomic/claim-listing';
 import { placeBid } from '../../src/db/atomic/place-bid';
 import { markPaid, confirmPayment, disputePayment } from '../../src/services/transactions';
 import { submitRating, ratingsFor } from '../../src/services/ratings';
+import { acceptOffer, rejectOffer, submitOffer } from '../../src/services/offers';
 import { auctionClose } from '../../src/jobs/tasks/auction-close';
 import {
   paymentWindowExpired,
@@ -203,6 +205,125 @@ describe('★ atomic straight-sale claim', () => {
     });
     expect(second.outcome).toBe(first.outcome);
     expect(second.transactionId).toBe(first.transactionId);
+  });
+});
+
+describe('★ fixed-price offers', () => {
+  it('records one pending offer without reserving the listing', async () => {
+    const listingId = await makeListing({ priceCents: 10_000 });
+
+    const first = await submitOffer({
+      listingId,
+      buyerId: buyers[0]!,
+      amountCents: 8_000,
+      fulfillmentPath: 'cash_meetup',
+    });
+    const duplicate = await submitOffer({
+      listingId,
+      buyerId: buyers[0]!,
+      amountCents: 7_000,
+      fulfillmentPath: 'cash_meetup',
+    });
+
+    expect(duplicate.id).toBe(first.id);
+    const offer = (await db.select().from(offers).where(eq(offers.id, first.id)))[0];
+    const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
+    const open = await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.listingId, listingId), eq(transactions.state, 'open')));
+
+    expect(offer?.status).toBe('pending');
+    expect(offer?.amountCents).toBe(8_000);
+    expect(listing?.status).toBe('active');
+    expect(open).toHaveLength(0);
+  });
+
+  it('requires a below-asking amount and lets a buyer try again after rejection', async () => {
+    const listingId = await makeListing({ priceCents: 10_000 });
+
+    await expect(
+      submitOffer({
+        listingId,
+        buyerId: buyers[1]!,
+        amountCents: 10_000,
+        fulfillmentPath: 'cash_meetup',
+      }),
+    ).rejects.toThrow('below the asking price');
+
+    const first = await submitOffer({
+      listingId,
+      buyerId: buyers[1]!,
+      amountCents: 7_500,
+      fulfillmentPath: 'cash_meetup',
+    });
+    await rejectOffer(first.id, seller);
+
+    const second = await submitOffer({
+      listingId,
+      buyerId: buyers[1]!,
+      amountCents: 8_000,
+      fulfillmentPath: 'cash_meetup',
+    });
+
+    expect(second.id).not.toBe(first.id);
+    expect((await db.select().from(offers).where(eq(offers.id, first.id)))[0]?.status).toBe('rejected');
+    expect((await db.select().from(offers).where(eq(offers.id, second.id)))[0]?.status).toBe('pending');
+  });
+
+  it('rejects pending offers when another buyer claims at the asking price', async () => {
+    const listingId = await makeListing({ priceCents: 10_000 });
+    const offer = await submitOffer({
+      listingId,
+      buyerId: buyers[4]!,
+      amountCents: 8_000,
+      fulfillmentPath: 'cash_meetup',
+    });
+
+    await claimListing({
+      listingId,
+      claimantId: buyers[5]!,
+      fulfillmentPath: 'cash_meetup',
+    });
+
+    expect((await db.select().from(offers).where(eq(offers.id, offer.id)))[0]?.status).toBe('rejected');
+  });
+
+  it('accepts one offer atomically, rejects competitors, and opens the normal deal', async () => {
+    const listingId = await makeListing({ priceCents: 10_000 });
+    const first = await submitOffer({
+      listingId,
+      buyerId: buyers[2]!,
+      amountCents: 8_000,
+      fulfillmentPath: 'cash_meetup',
+    });
+    const second = await submitOffer({
+      listingId,
+      buyerId: buyers[3]!,
+      amountCents: 8_500,
+      fulfillmentPath: 'cash_meetup',
+    });
+
+    const result = await acceptOffer(first.id, seller);
+    const accepted = (await db.select().from(offers).where(eq(offers.id, first.id)))[0];
+    const rejected = (await db.select().from(offers).where(eq(offers.id, second.id)))[0];
+    const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
+    const opened = (await db.select().from(transactions).where(eq(transactions.id, result.transactionId)))[0];
+
+    expect(accepted?.status).toBe('accepted');
+    expect(rejected?.status).toBe('rejected');
+    expect(listing?.status).toBe('claimed');
+    expect(opened?.source).toBe('offer_accept');
+    expect(opened?.offerId).toBe(first.id);
+    expect(opened?.buyerId).toBe(buyers[2]);
+    expect(opened?.amountCents).toBe(8_000);
+
+    // An accepted offer uses the normal buyer expiry path and respects the listing's
+    // auto-relist setting, rather than leaving the listing permanently claimed.
+    await expirePaymentWindow(result.transactionId);
+    await paymentWindowExpired({ transactionId: result.transactionId }, helpers);
+    await promoteNext({ listingId, failedTransactionId: result.transactionId }, helpers);
+    expect((await db.select().from(listings).where(eq(listings.id, listingId)))[0]?.status).toBe('active');
   });
 });
 
