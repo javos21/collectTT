@@ -21,9 +21,8 @@ payment is confirmed. WhatsApp and the paid delivery rail are Phase 3.
 
 ## Running it locally
 
-The database and object storage run entirely on your machine. Google OAuth credentials
-are required to test Google sign-in; email verification and password-reset links can
-still print to your terminal with `EMAIL_ADAPTER=console`.
+The database and object storage run entirely on your machine. Email verification codes
+and password-reset links can print to your terminal with `EMAIL_ADAPTER=console`.
 
 ```bash
 docker compose up -d      # Postgres (:5434) + MinIO (:9000, console :9001)
@@ -34,10 +33,18 @@ npm run seed:dev          # optional: sample members and listings
 
 npm run dev               # web process    -> http://localhost:3000
 npm run dev:worker        # worker process (separate terminal)
+npm run dev:admin         # admin process -> http://localhost:3001
 ```
 
-Sign in at `/sign-in` with Google or create a verified email/password account. In local
-console mode, verification and password-reset links print in the terminal running
+The admin app uses the same database and authentication session, but requires the
+existing `admin` profile role. Promote a local account explicitly when needed:
+
+```bash
+npm run admin:grant -- you@example.com
+```
+
+Sign in at `/sign-in` or create a verified email/password account. In local console
+mode, verification codes and password-reset links print in the terminal running
 `npm run dev`.
 
 ### Verifying it works
@@ -75,11 +82,10 @@ connections are held open, and both processes want stable pooled connections.
 **Postgres is the centre of gravity** — database, job queue, and real-time backplane in
 one system. No Redis, no queue vendor, no realtime vendor, no payment processor.
 
-**Authentication is self-hosted through Better Auth.** Google is the primary, prominent
-sign-in path; verified email/password is the fallback. Users, sessions, provider accounts,
-and password credentials remain in CollectTT's Postgres. Verified matching-email methods
-link to one stable user ID, preserving profiles, listings, reputation, and deals. Magic
-links and Facebook login are not part of the current authentication surface.
+**Authentication is self-hosted through Better Auth.** Verified email/password is the
+current sign-in and account-creation path. Users, sessions, and password credentials
+remain in CollectTT's Postgres, preserving one stable user ID for profiles, listings,
+reputation, and deals.
 
 **Brevo is the outbound email provider.** Better Auth uses the same shared email adapter
 as deal notifications for verification and password-reset messages. `console` mode prints
@@ -238,9 +244,7 @@ not code changes, because each sits behind an adapter used from day one.
 
 Production authentication/email requires:
 
-- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the web service;
 - `APP_URL` and `BETTER_AUTH_URL` set to the canonical HTTPS origin;
-- Google's exact callback URI: `https://YOUR_DOMAIN/api/auth/callback/google`;
 - `EMAIL_ADAPTER=brevo`, `BREVO_API_KEY`, and a verified `EMAIL_FROM` on the web service;
 - the same Brevo delivery settings on the worker for queued deal notifications; and
 - Brevo domain verification/DKIM/DMARC records published at the active DNS provider.
@@ -282,7 +286,7 @@ which is why a reneged auction winner costs no extra machinery.
 ## What is built, and what is not
 
 **Phase 0 — done**
-accounts (Google-first + verified email/password, verification and password recovery) ·
+accounts (verified email/password, verification and password recovery) ·
 profiles · multi-category listing CRUD · browse with category *and* attribute filtering ·
 image upload → R2/MinIO → worker-generated responsive variants · notification dispatcher
 with in-app + console/Brevo email adapters · the full schema and state machine for every

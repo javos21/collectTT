@@ -2,7 +2,7 @@
  * Email adapter.
  *
  *   EMAIL_ADAPTER=console  -> prints to the terminal. No account, no network, no cost.
- *                             Verification and reset links stay testable offline.
+ *                             Verification codes and reset links stay testable offline.
  *   EMAIL_ADAPTER=brevo    -> real transactional delivery through Brevo. The same SDK
  *                             can power the separate SMS adapter when that ships.
  *

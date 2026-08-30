@@ -1,13 +1,13 @@
 /**
  * Better Auth, self-hosted with identity data in our own Postgres.
  *
- * Google is the primary path; verified email/password is the fallback. A verified
- * same-email Google identity can join an existing account without changing the stable
- * user ID that owns CollectTT profiles, listings, reputation and deals.
+ * Verified email/password is the account-creation and sign-in path. Authentication
+ * identity remains separate from the domain profile that owns listings and reputation.
  */
 
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { emailOTP } from 'better-auth/plugins';
 
 import { db } from '../db/client';
 import * as schema from '../db/schema/index';
@@ -30,13 +30,6 @@ export const auth = betterAuth({
   secret: config.BETTER_AUTH_SECRET,
   baseURL: config.BETTER_AUTH_URL,
   trustedOrigins: [config.APP_URL],
-  socialProviders: {
-    google: {
-      clientId: config.GOOGLE_CLIENT_ID,
-      clientSecret: config.GOOGLE_CLIENT_SECRET,
-      prompt: 'select_account',
-    },
-  },
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
@@ -61,29 +54,27 @@ export const auth = betterAuth({
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     expiresIn: 60 * 60,
-    sendVerificationEmail: async ({ user, url }) => {
-      await sendEmail({
-        to: user.email,
-        subject: 'Verify your CollectTT email',
-        text: [
-          'Verify your email address to finish creating your CollectTT account.',
-          '',
-          url,
-          '',
-          'This link expires in one hour. If you did not create an account, you can ignore this email.',
-        ].join('\n'),
-      });
-    },
   },
-  account: {
-    accountLinking: {
-      enabled: true,
-      allowDifferentEmails: false,
-      requireLocalEmailVerified: true,
-      updateUserInfoOnLink: false,
-      allowUnlinkingAll: false,
-    },
-  },
+  plugins: [
+    emailOTP({
+      overrideDefaultEmailVerification: true,
+      otpLength: 6,
+      expiresIn: 10 * 60,
+      allowedAttempts: 5,
+      sendVerificationOTP: async ({ email, otp }) => {
+        await sendEmail({
+          to: email,
+          subject: 'Your CollectTT verification code',
+          text: [
+            `Your CollectTT verification code is: ${otp}`,
+            '',
+            'Enter this code on the sign-up screen to verify your email address.',
+            'This code expires in 10 minutes. If you did not create an account, you can ignore this email.',
+          ].join('\n'),
+        });
+      },
+    }),
+  ],
   session: {
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,

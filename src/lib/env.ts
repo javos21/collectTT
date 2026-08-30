@@ -15,8 +15,6 @@ const envSchema = z.object({
 
   BETTER_AUTH_SECRET: z.string().min(1),
   BETTER_AUTH_URL: z.string().url().default('http://localhost:3000'),
-  GOOGLE_CLIENT_ID: z.string().min(1),
-  GOOGLE_CLIENT_SECRET: z.string().min(1),
 
   // Storage: MinIO locally, Cloudflare R2 in production. Same S3 API either way —
   // only these values change, never the code.

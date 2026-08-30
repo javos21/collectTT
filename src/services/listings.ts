@@ -195,6 +195,8 @@ export interface BrowseFilters {
   /** Optional text search across listing titles and descriptions. */
   query?: string;
   category?: string;
+  /** Match any selected category from a checklist facet. */
+  categories?: readonly string[];
   /**
    * Category-specific attribute filters, already coerced to their stored JSON types by
    * `coerceFilters` — JSONB containment is type-strict, so raw query strings will not do.
@@ -204,8 +206,12 @@ export interface BrowseFilters {
   saleType?: 'straight_sale' | 'auction';
   /** Match listings that offer this delivery/fulfillment path. */
   fulfillmentPath?: FulfillmentPath;
+  /** Match listings that offer any selected delivery/fulfillment path. */
+  fulfillmentPaths?: readonly FulfillmentPath[];
   /** Match listings that accept this payment method. */
   settlementMethod?: string;
+  /** Match listings that accept any selected payment method. */
+  settlementMethods?: readonly string[];
   /** Price filters apply to fixed prices and the current/start bid for auctions. */
   minPriceCents?: number;
   maxPriceCents?: number;
@@ -235,6 +241,9 @@ function browseConditions(filters: BrowseFilters) {
   if (filters.category !== undefined) {
     conditions.push(eq(listings.category, filters.category));
   }
+  if (filters.categories !== undefined && filters.categories.length > 0) {
+    conditions.push(inArray(listings.category, [...filters.categories]));
+  }
   if (filters.attributes !== undefined && Object.keys(filters.attributes).length > 0) {
     // JSONB containment — served by listings_attrs (GIN).
     conditions.push(sql`${listings.attributes} @> ${JSON.stringify(filters.attributes)}::jsonb`);
@@ -247,9 +256,25 @@ function browseConditions(filters: BrowseFilters) {
       sql`${listings.fulfillmentPaths} @> ARRAY[${filters.fulfillmentPath}]::fulfillment_path[]`,
     );
   }
+  if (filters.fulfillmentPaths !== undefined && filters.fulfillmentPaths.length > 0) {
+    conditions.push(
+      sql`${listings.fulfillmentPaths} && ARRAY[${sql.join(
+        filters.fulfillmentPaths.map((path) => sql`${path}`),
+        sql`, `,
+      )}]::fulfillment_path[]`,
+    );
+  }
   if (filters.settlementMethod !== undefined) {
     conditions.push(
       sql`${listings.settlementMethods} @> ARRAY[${filters.settlementMethod}]::text[]`,
+    );
+  }
+  if (filters.settlementMethods !== undefined && filters.settlementMethods.length > 0) {
+    conditions.push(
+      sql`${listings.settlementMethods} && ARRAY[${sql.join(
+        filters.settlementMethods.map((method) => sql`${method}`),
+        sql`, `,
+      )}]::text[]`,
     );
   }
   const browsePrice = sql`coalesce(${listings.priceCents}, ${listings.currentBidCents}, ${listings.startBidCents})`;
@@ -301,6 +326,7 @@ function selectBrowseRows(
       sellerId: profiles.userId,
       sellerRatingAvg: reputationCounters.ratingAvg,
       sellerRatingCount: reputationCounters.ratingCount,
+      sellerCompletedSales: reputationCounters.sellCompleted,
       fulfillmentPaths: listings.fulfillmentPaths,
       settlementMethods: listings.settlementMethods,
       primaryImageKey: sql<string | null>`(

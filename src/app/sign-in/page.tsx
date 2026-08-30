@@ -37,7 +37,6 @@ export default async function SignInPage({
       <AuthPanel
         callbackURL={returnTo}
         consoleMode={env().EMAIL_ADAPTER === 'console'}
-        oauthFailed={typeof params.error === 'string' || params.oauth === 'failed'}
         initialMode={initialMode}
       />
     </main>

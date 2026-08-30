@@ -25,6 +25,9 @@ Use this file as the default design direction for all new and updated site UI.
 
 - Do not use gradient colors. Prefer solid palette colors and subtle opacity changes.
 - Use indigo/purple for primary actions and links, teal for positive or marketplace-safe states, amber for caution, and red only for urgent or destructive states.
+- The canonical Soft Pop design-system tokens live in `src/styles/soft-pop-design-system.css`. Use its `--soft-pop-*` tokens when adding or migrating UI; the layer is opt-in through `data-theme="soft-pop"` until a full visual migration is explicitly requested.
+- Soft Pop uses OKLCH semantic tokens: a soft pink primary (`oklch(0.75 0.12 330)`), lavender secondary, mint accent, warm amber highlight, and restrained semantic feedback colors. Keep text/foreground tokens paired with their semantic surface tokens for contrast.
+- Prefer the design-system semantic roles (`background`, `card`, `primary`, `secondary`, `muted`, `accent`, `destructive`, `border`, `ring`) over one-off hex values. Keep the brand logo colors independent from UI status colors.
 - Keep backgrounds quiet and light. Use one contrasting solid-color panel sparingly to separate an important CTA or state.
 - Avoid adding a new color when an existing semantic palette color will work.
 - Use borders, spacing, and typography to create hierarchy before adding shadows.

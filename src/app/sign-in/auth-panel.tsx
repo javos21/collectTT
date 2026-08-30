@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, type FormEvent } from 'react';
-import { UserRound } from 'lucide-react';
+import { useRef, useState, type FormEvent } from 'react';
+import { CheckCircle2, LoaderCircle, UserRound, XCircle } from 'lucide-react';
 
 import { authClient } from '@/lib/auth-client';
 import { AuthFeedback } from '@/components/auth-feedback';
@@ -12,11 +12,22 @@ import { Button } from '@/components/ui/button';
 type Mode = 'sign-in' | 'sign-up';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_PATTERN = /^[a-zA-Z0-9_.]{3,30}$/;
+
+type AvailabilityState = 'idle' | 'checking' | 'available' | 'taken' | 'error';
+type AvailabilityField = 'username' | 'email';
+
+interface Availability {
+  state: AvailabilityState;
+  message: string;
+  value: string;
+}
+
+const EMPTY_AVAILABILITY: Availability = { state: 'idle', message: '', value: '' };
 
 interface AuthPanelProps {
   callbackURL: string;
   consoleMode: boolean;
-  oauthFailed: boolean;
   initialMode?: Mode;
 }
 
@@ -34,6 +45,12 @@ function errorMessage(error: unknown): string {
       return 'An account already uses that email. Sign in instead.';
     case 'PASSWORD_TOO_SHORT':
       return 'Use at least 12 characters for your password.';
+    case 'OTP_EXPIRED':
+      return 'That verification code expired. Request a new code and try again.';
+    case 'INVALID_OTP':
+      return 'That verification code is not correct. Check the email and try again.';
+    case 'TOO_MANY_ATTEMPTS':
+      return 'Too many incorrect codes. Request a new code before trying again.';
     default:
       return e?.message === 'Failed to fetch'
         ? 'We could not reach CollectTT. Check your connection and try again.'
@@ -41,41 +58,95 @@ function errorMessage(error: unknown): string {
   }
 }
 
-function GoogleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.06H12v3.9h5.38a4.6 4.6 0 0 1-2 3.02v2.53h3.24c1.9-1.75 2.98-4.33 2.98-7.39Z" />
-      <path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.38l-3.24-2.53c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.77-5.61-4.14H3.04v2.61A10 10 0 0 0 12 22Z" />
-      <path fill="#FBBC05" d="M6.39 13.91A6.02 6.02 0 0 1 6.08 12c0-.66.11-1.3.31-1.91V7.48H3.04A10 10 0 0 0 2 12c0 1.61.38 3.14 1.04 4.52l3.35-2.61Z" />
-      <path fill="#EA4335" d="M12 5.95c1.47 0 2.79.5 3.82 1.5l2.87-2.87A9.63 9.63 0 0 0 12 2a10 10 0 0 0-8.96 5.48l3.35 2.61C7.18 7.72 9.39 5.95 12 5.95Z" />
-    </svg>
-  );
-}
-
-export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode = 'sign-in' }: AuthPanelProps) {
+export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }: AuthPanelProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState(oauthFailed ? 'Google sign-in did not finish. Please try again.' : '');
+  const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [availability, setAvailability] = useState<Record<AvailabilityField, Availability>>({
+    username: EMPTY_AVAILABILITY,
+    email: EMPTY_AVAILABILITY,
+  });
+  const availabilityRequest = useRef<Record<AvailabilityField, number>>({ username: 0, email: 0 });
 
-  async function googleSignIn() {
-    setPending(true);
-    setError('');
-    try {
-      const result = await authClient.signIn.social({
-        provider: 'google',
-        callbackURL,
-        errorCallbackURL: '/sign-in?oauth=failed',
-      });
-      if (result.error !== null) {
-        setError(errorMessage(result.error));
-        setPending(false);
-      }
-    } catch (cause) {
-      setError(errorMessage(cause));
-      setPending(false);
+  function normalizedValue(field: AvailabilityField, rawValue: string) {
+    const value = rawValue.trim();
+    return field === 'email' ? value.toLowerCase() : value;
+  }
+
+  async function checkAvailability(field: AvailabilityField, rawValue: string): Promise<boolean> {
+    const value = normalizedValue(field, rawValue);
+    const valid = field === 'email' ? EMAIL_PATTERN.test(value) : USERNAME_PATTERN.test(value);
+
+    if (!valid) {
+      const message = field === 'email'
+        ? 'Enter a valid email address, like you@example.com.'
+        : 'Use 3–30 letters, numbers, underscores, or periods.';
+      setAvailability((current) => ({
+        ...current,
+        [field]: { state: 'error', message, value },
+      }));
+      return false;
     }
+
+    const requestId = availabilityRequest.current[field] + 1;
+    availabilityRequest.current[field] = requestId;
+    setAvailability((current) => ({
+      ...current,
+      [field]: { state: 'checking', message: '', value },
+    }));
+
+    try {
+      const response = await fetch(
+        `/api/auth/availability?field=${field}&value=${encodeURIComponent(value)}`,
+        { cache: 'no-store' },
+      );
+      const result = (await response.json()) as { available?: boolean; message?: string };
+      if (availabilityRequest.current[field] !== requestId) return false;
+
+      if (!response.ok || result.available !== true) {
+        setAvailability((current) => ({
+          ...current,
+          [field]: {
+            state: response.ok ? 'taken' : 'error',
+            message: response.ok
+              ? field === 'email'
+                ? 'That email is already registered. Sign in instead.'
+                : 'That username is already taken.'
+              : result.message ?? 'We could not check that right now. Try again.',
+            value,
+          },
+        }));
+        return false;
+      }
+
+      setAvailability((current) => ({
+        ...current,
+        [field]: {
+          state: 'available',
+          message: field === 'email' ? 'Email is available.' : 'Username is available.',
+          value,
+        },
+      }));
+      return true;
+    } catch {
+      if (availabilityRequest.current[field] !== requestId) return false;
+      setAvailability((current) => ({
+        ...current,
+        [field]: { state: 'error', message: 'We could not check that right now. Try again.', value },
+      }));
+      return false;
+    }
+  }
+
+  function updateAvailabilityField(field: AvailabilityField, value: string) {
+    setAvailability((current) => ({ ...current, [field]: EMPTY_AVAILABILITY }));
+    if (field === 'username') setUsername(value);
+    else setEmail(value);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -103,10 +174,18 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode =
       }
 
       if (mode === 'sign-up') {
-        const name = String(form.get('name') ?? '').trim();
+        const requestedUsername = String(form.get('username') ?? '').trim();
         const confirmPassword = String(form.get('confirmPassword') ?? '');
-        if (name.length < 2) {
-          setError('Enter the name other members should know you by.');
+        if (!USERNAME_PATTERN.test(requestedUsername)) {
+          setError('Use 3–30 letters, numbers, underscores, or periods for your username.');
+          return;
+        }
+        if (!(await checkAvailability('username', requestedUsername))) {
+          setError('Choose another username before creating your account.');
+          return;
+        }
+        if (!(await checkAvailability('email', email))) {
+          setError('Use another email address or sign in to the existing account.');
           return;
         }
         if (password !== confirmPassword) {
@@ -114,12 +193,13 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode =
           return;
         }
 
-        const result = await authClient.signUp.email({ name, email, password, callbackURL });
+        const result = await authClient.signUp.email({ name: requestedUsername, email, password, callbackURL });
         if (result.error !== null) {
           setError(errorMessage(result.error));
         } else {
-          setNotice('Check your email to verify your account. The link expires in one hour.');
+          setNotice(`We sent a 6-digit verification code to ${email}.`);
           setVerificationEmail(email);
+          setVerificationCode('');
         }
         return;
       }
@@ -143,12 +223,42 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode =
     setPending(true);
     setError('');
     try {
-      const result = await authClient.sendVerificationEmail({
+      const result = await authClient.emailOtp.sendVerificationOtp({
         email: verificationEmail,
-        callbackURL,
+        type: 'email-verification',
       });
       if (result.error !== null) setError(errorMessage(result.error));
-      else setNotice('Verification email sent. The link expires in one hour.');
+      else {
+        setVerificationCode('');
+        setNotice('A new verification code is on its way. It expires in 10 minutes.');
+      }
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function verifyEmailCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const otp = verificationCode.trim();
+    if (!/^\d{6}$/.test(otp)) {
+      setError('Enter the 6-digit verification code from your email.');
+      return;
+    }
+
+    setPending(true);
+    setError('');
+    try {
+      const result = await authClient.emailOtp.verifyEmail({
+        email: verificationEmail,
+        otp,
+      });
+      if (result.error !== null) {
+        setError(errorMessage(result.error));
+        return;
+      }
+      window.location.assign(callbackURL);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -161,6 +271,30 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode =
     setError('');
     setNotice('');
     setVerificationEmail('');
+    setVerificationCode('');
+    setUsername('');
+    setEmail('');
+    setAvailability({ username: EMPTY_AVAILABILITY, email: EMPTY_AVAILABILITY });
+  }
+
+  function availabilityMessage(field: AvailabilityField) {
+    const result = availability[field];
+    if (result.state === 'idle') return null;
+    const Icon = result.state === 'checking'
+      ? LoaderCircle
+      : result.state === 'available'
+        ? CheckCircle2
+        : XCircle;
+    return (
+      <small
+        id={`auth-${field}-feedback`}
+        className={`field-feedback field-feedback--${result.state}`}
+        aria-live="polite"
+      >
+        <Icon aria-hidden="true" className={result.state === 'checking' ? 'field-feedback__spinner' : undefined} />
+        <span>{result.state === 'checking' ? 'Checking availability…' : result.message}</span>
+      </small>
+    );
   }
 
   return (
@@ -170,36 +304,78 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode =
         <h2 id="auth-form-title">{mode === 'sign-in' ? 'Welcome back' : 'Create your account'}</h2>
       </div>
 
-      <Button className="google-button" color="secondary" type="button" onPress={googleSignIn} isDisabled={pending}>
-        <GoogleIcon />
-        Continue with Google
-      </Button>
-
-      <div className="auth-divider"><span>or use email</span></div>
-
       {error !== '' && <AuthFeedback tone="error">{error}</AuthFeedback>}
       {notice !== '' && <AuthFeedback tone="info">{notice}</AuthFeedback>}
 
       {verificationEmail !== '' ? (
         <div className="auth-verification">
+          <form className="auth-code-form" noValidate onSubmit={verifyEmailCode}>
+            <label htmlFor="auth-verification-code">Verification code</label>
+            <input
+              id="auth-verification-code"
+              name="verificationCode"
+              type="text"
+              value={verificationCode}
+              onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              aria-describedby="verification-code-help"
+              required
+            />
+            <small id="verification-code-help" className="field-help">Enter the 6-digit code from your email.</small>
+            <Button className="auth-submit" type="submit" isDisabled={pending}>
+              {pending ? 'Verifying…' : 'Verify email'}
+            </Button>
+          </form>
           <Button color="secondary" type="button" onPress={resendVerification} isDisabled={pending}>
-            Resend verification email
+            Resend code
           </Button>
           <Button className="auth-text-button" color="link" type="button" onPress={() => switchMode('sign-in')}>
-            Return to sign in
+            Use a different account
           </Button>
         </div>
       ) : (
         <form className="auth-form" noValidate onSubmit={submit}>
           {mode === 'sign-up' && (
             <div>
-              <label htmlFor="auth-name">Display name</label>
-              <input id="auth-name" name="name" type="text" autoComplete="name" minLength={2} maxLength={80} required />
+              <label htmlFor="auth-username">Username</label>
+              <input
+                id="auth-username"
+                name="username"
+                type="text"
+                value={username}
+                onChange={(event) => updateAvailabilityField('username', event.target.value)}
+                onBlur={() => void checkAvailability('username', username)}
+                autoComplete="username"
+                minLength={3}
+                maxLength={30}
+                pattern="[A-Za-z0-9_.]{3,30}"
+                aria-describedby={`auth-username-help${availability.username.state !== 'idle' ? ' auth-username-feedback' : ''}`}
+                required
+              />
+              <small id="auth-username-help" className="field-help">3–30 letters, numbers, underscores, or periods.</small>
+              {availabilityMessage('username')}
             </div>
           )}
           <div>
             <label htmlFor="auth-email">Email</label>
-            <input id="auth-email" name="email" type="email" autoComplete="email" maxLength={254} required />
+            <input
+              id="auth-email"
+              name="email"
+              type="email"
+              value={email}
+              onChange={(event) => updateAvailabilityField('email', event.target.value)}
+              onBlur={() => {
+                if (mode === 'sign-up') void checkAvailability('email', email);
+              }}
+              autoComplete="email"
+              maxLength={254}
+              aria-describedby={mode === 'sign-up' && availability.email.state !== 'idle' ? 'auth-email-feedback' : undefined}
+              required
+            />
+            {mode === 'sign-up' && availabilityMessage('email')}
           </div>
           <div>
             <label htmlFor="auth-password">Password</label>
@@ -253,7 +429,7 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode =
 
       {consoleMode && (
         <p className="auth-dev-note">
-          Local email mode is active. Verification and reset links print in the dev-server terminal.
+          Local email mode is active. Verification codes and reset links print in the dev-server terminal.
         </p>
       )}
     </section>

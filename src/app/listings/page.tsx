@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Banknote, BadgeCheck, Check, Clock3, Truck, UserRound } from 'lucide-react';
 
 import { browseListings, BROWSE_SORTS, SETTLEMENT_METHODS, type BrowseSort } from '@/services/listings';
 import { CATEGORY_LIST, isCategoryKey } from '@/domain/categories/definitions';
@@ -6,6 +7,7 @@ import { filtersFor, coerceFilters } from '@/domain/categories/filters';
 import { formatMoney } from '@/domain/money';
 import { publicUrl } from '@/lib/storage';
 import { FULFILLMENT_PATHS, type FulfillmentPath } from '@/domain/states/transaction';
+import { FilterPanel } from './filter-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,8 +25,38 @@ const PAYMENT_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
-function readableValues(values: readonly string[], labels: Record<string, string>): string {
-  return values.map((value) => labels[value] ?? value.replaceAll('_', ' ')).join(' · ');
+type SettlementMethod = (typeof SETTLEMENT_METHODS)[number];
+
+function stringValues(value: string | string[] | undefined): string[] {
+  if (Array.isArray(value)) return value;
+  return value === undefined ? [] : [value];
+}
+
+function isFulfillmentPath(value: string): value is FulfillmentPath {
+  return FULFILLMENT_PATHS.includes(value as FulfillmentPath);
+}
+
+function isSettlementMethod(value: string): value is SettlementMethod {
+  return SETTLEMENT_METHODS.includes(value as SettlementMethod);
+}
+
+function timeLeft(endsAt: Date | null): string {
+  if (endsAt === null) return 'Ends soon';
+  const minutes = Math.max(0, Math.floor((endsAt.getTime() - Date.now()) / 60_000));
+  if (minutes < 1) return 'Ending now';
+  if (minutes < 60) return `${minutes}m left`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m left`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h left`;
+}
+
+function auctionUrgency(endsAt: Date | null): 'urgent' | 'soon' | 'healthy' {
+  if (endsAt === null) return 'soon';
+  const hours = (endsAt.getTime() - Date.now()) / 3_600_000;
+  if (hours < 12) return 'urgent';
+  if (hours < 24) return 'soon';
+  return 'healthy';
 }
 
 /**
@@ -38,17 +70,14 @@ export default async function BrowsePage({
 }) {
   const params = await searchParams;
   const query = typeof params.q === 'string' ? params.q.trim() : '';
-  const category = typeof params.category === 'string' ? params.category : undefined;
+  const selectedCategories = stringValues(params.category).filter(isCategoryKey);
+  const activeCategory = selectedCategories.length === 1 ? selectedCategories[0] : undefined;
   const saleType =
     params.saleType === 'straight_sale' || params.saleType === 'auction'
       ? params.saleType
-      : undefined;
-  const delivery = FULFILLMENT_PATHS.includes(params.delivery as FulfillmentPath)
-    ? (params.delivery as FulfillmentPath)
-    : undefined;
-  const payment = SETTLEMENT_METHODS.includes(params.payment as (typeof SETTLEMENT_METHODS)[number])
-    ? (params.payment as (typeof SETTLEMENT_METHODS)[number])
-    : undefined;
+      : 'straight_sale';
+  const delivery = stringValues(params.delivery).filter(isFulfillmentPath);
+  const payment = stringValues(params.payment).filter(isSettlementMethod);
   const sort = BROWSE_SORTS.includes(params.sort as BrowseSort)
     ? (params.sort as BrowseSort)
     : 'newest';
@@ -66,22 +95,22 @@ export default async function BrowsePage({
   // cannot smuggle arbitrary JSONB predicates in), and each value is coerced to the
   // JSON type it is actually stored as — containment is type-strict.
   const raw: Record<string, string | undefined> = {};
-  if (category !== undefined && isCategoryKey(category)) {
-    for (const filter of filtersFor(category)) {
+  if (activeCategory !== undefined) {
+    for (const filter of filtersFor(activeCategory)) {
       const value = params[`attr_${filter.key}`];
       if (typeof value === 'string' && value !== '') raw[filter.key] = value;
     }
   }
   const attributes =
-    category !== undefined && isCategoryKey(category) ? coerceFilters(category, raw) : {};
+    activeCategory !== undefined ? coerceFilters(activeCategory, raw) : {};
 
   const { rows, total, pageSize } = await browseListings({
     ...(query !== '' ? { query } : {}),
-    ...(category !== undefined ? { category } : {}),
+    ...(selectedCategories.length > 0 ? { categories: selectedCategories } : {}),
     ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
     ...(saleType !== undefined ? { saleType } : {}),
-    ...(delivery !== undefined ? { fulfillmentPath: delivery } : {}),
-    ...(payment !== undefined ? { settlementMethod: payment } : {}),
+    ...(delivery.length > 0 ? { fulfillmentPaths: delivery } : {}),
+    ...(payment.length > 0 ? { settlementMethods: payment } : {}),
     ...(minPriceCents !== undefined ? { minPriceCents } : {}),
     ...(maxPriceCents !== undefined ? { maxPriceCents } : {}),
     sort,
@@ -94,23 +123,23 @@ export default async function BrowsePage({
   const browseHref = (overrides: {
     saleType?: 'straight_sale' | 'auction' | null;
     sort?: BrowseSort | null;
-    delivery?: FulfillmentPath | null;
-    payment?: string | null;
+    delivery?: readonly FulfillmentPath[] | null;
+    payment?: readonly string[] | null;
     minPrice?: string | null;
     maxPrice?: string | null;
     page?: number;
   } = {}) => {
     const qs = new URLSearchParams();
     if (query !== '') qs.set('q', query);
-    if (category !== undefined) qs.set('category', category);
+    for (const selectedCategory of selectedCategories) qs.append('category', selectedCategory);
     const nextSaleType = 'saleType' in overrides ? overrides.saleType : saleType;
     if (nextSaleType) qs.set('saleType', nextSaleType);
     const nextSort = 'sort' in overrides ? overrides.sort : sort;
     if (nextSort && nextSort !== 'newest') qs.set('sort', nextSort);
     const nextDelivery = 'delivery' in overrides ? overrides.delivery : delivery;
-    if (nextDelivery) qs.set('delivery', nextDelivery);
+    nextDelivery?.forEach((path) => qs.append('delivery', path));
     const nextPayment = 'payment' in overrides ? overrides.payment : payment;
-    if (nextPayment) qs.set('payment', nextPayment);
+    nextPayment?.forEach((method) => qs.append('payment', method));
     const nextMinPrice = 'minPrice' in overrides ? overrides.minPrice : minPriceInput;
     if (nextMinPrice) qs.set('minPrice', nextMinPrice);
     const nextMaxPrice = 'maxPrice' in overrides ? overrides.maxPrice : maxPriceInput;
@@ -124,10 +153,10 @@ export default async function BrowsePage({
   };
   const pageHref = (n: number) => browseHref({ page: n });
 
-  const activeFilters = category !== undefined && isCategoryKey(category) ? filtersFor(category) : [];
+  const activeFilters = activeCategory !== undefined ? filtersFor(activeCategory) : [];
 
   const hasActiveFilters =
-    query !== '' || category !== undefined || saleType !== undefined || delivery !== undefined || payment !== undefined ||
+    query !== '' || selectedCategories.length > 0 || delivery.length > 0 || payment.length > 0 ||
     minPriceCents !== undefined || maxPriceCents !== undefined || Object.keys(attributes).length > 0;
 
   return (
@@ -138,6 +167,7 @@ export default async function BrowsePage({
           <p>Find cards, comics, and collectibles from local sellers.</p>
         </div>
         <form className="catalog-search" action="/listings" method="get" role="search">
+          <input type="hidden" name="saleType" value={saleType} />
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2" stroke="currentColor" strokeWidth="1.8" /><path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
           <label className="sr-only" htmlFor="catalog-query">Search listings</label>
           <input id="catalog-query" name="q" type="search" defaultValue={query} placeholder="Search listings" />
@@ -147,7 +177,7 @@ export default async function BrowsePage({
 
       <div className="browse-layout">
         {/* -------------------------------------------------- filter rail */}
-        <details className="filter-panel" open={hasActiveFilters}>
+        <FilterPanel>
           <summary>
             <svg className="filter-ic" width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -159,30 +189,36 @@ export default async function BrowsePage({
           </summary>
           <form method="get" className="filter-form" aria-label="Listing filters">
             {query !== '' && <input type="hidden" name="q" value={query} />}
-            <label htmlFor="category">Category</label>
-            <select id="category" name="category" defaultValue={category ?? ''}>
-              <option value="">All categories</option>
-              {CATEGORY_LIST.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-            </select>
+            <input type="hidden" name="saleType" value={saleType} />
+            <fieldset className="filter-checklist">
+              <legend>Category</legend>
+              {CATEGORY_LIST.map((c) => (
+                <label key={c.key}>
+                  <input type="checkbox" name="category" value={c.key} defaultChecked={selectedCategories.includes(c.key as (typeof selectedCategories)[number])} />
+                  <span>{c.label}</span>
+                </label>
+              ))}
+            </fieldset>
 
-            <label htmlFor="saleType">Sale type</label>
-            <select id="saleType" name="saleType" defaultValue={saleType ?? ''}>
-              <option value="">Everything</option>
-              <option value="straight_sale">Straight sale</option>
-              <option value="auction">Auctions</option>
-            </select>
+            <fieldset className="filter-checklist">
+              <legend>Delivery</legend>
+              {FULFILLMENT_PATHS.map((path) => (
+                <label key={path}>
+                  <input type="checkbox" name="delivery" value={path} defaultChecked={delivery.includes(path)} />
+                  <span>{PATH_LABELS[path]}</span>
+                </label>
+              ))}
+            </fieldset>
 
-            <label htmlFor="delivery">Delivery</label>
-            <select id="delivery" name="delivery" defaultValue={delivery ?? ''}>
-              <option value="">Any delivery option</option>
-              {FULFILLMENT_PATHS.map((path) => <option key={path} value={path}>{PATH_LABELS[path]}</option>)}
-            </select>
-
-            <label htmlFor="payment">Payment</label>
-            <select id="payment" name="payment" defaultValue={payment ?? ''}>
-              <option value="">Any payment method</option>
-              {SETTLEMENT_METHODS.map((method) => <option key={method} value={method}>{PAYMENT_LABELS[method] ?? method}</option>)}
-            </select>
+            <fieldset className="filter-checklist">
+              <legend>Payment</legend>
+              {SETTLEMENT_METHODS.map((method) => (
+                <label key={method}>
+                  <input type="checkbox" name="payment" value={method} defaultChecked={payment.includes(method)} />
+                  <span>{PAYMENT_LABELS[method] ?? method}</span>
+                </label>
+              ))}
+            </fieldset>
 
             <div className="filter-price-grid">
               <div>
@@ -206,15 +242,14 @@ export default async function BrowsePage({
             ))}
             <button type="submit">Apply filters</button>
             {hasActiveFilters && (
-              <Link className="filter-reset" href="/listings">Clear all filters</Link>
+              <Link className="filter-reset" href={saleType === 'auction' ? '/listings?saleType=auction' : '/listings'}>Clear all filters</Link>
             )}
           </form>
-        </details>
+        </FilterPanel>
 
         {/* -------------------------------------------------- results */}
         <div className="catalog-results">
           <nav className="browse-type-tabs" aria-label="Browse by sale type">
-            <Link className={saleType === undefined ? 'is-active' : ''} href={browseHref({ saleType: null, page: 1 })}>All listings</Link>
             <Link className={saleType === 'straight_sale' ? 'is-active' : ''} href={browseHref({ saleType: 'straight_sale', page: 1 })}>Fixed price</Link>
             <Link className={saleType === 'auction' ? 'is-active' : ''} href={browseHref({ saleType: 'auction', page: 1 })}>Auctions</Link>
           </nav>
@@ -224,16 +259,16 @@ export default async function BrowsePage({
               <span className="muted">
                 listing{total === 1 ? '' : 's'}
                 {query !== '' && ` matching “${query}”`}
-                {category !== undefined && ` in ${category.replace('_', ' ')}`}
+                {selectedCategories.length > 0 && ` in ${selectedCategories.map((value) => value.replace('_', ' ')).join(', ')}`}
                 {saleType !== undefined && ` · ${saleType === 'auction' ? 'auctions' : 'fixed price'}`}
               </span>
             </div>
             <form method="get" className="sort-form" aria-label="Sort listings">
               {query !== '' && <input type="hidden" name="q" value={query} />}
-              {category !== undefined && <input type="hidden" name="category" value={category} />}
-              {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
-              {delivery !== undefined && <input type="hidden" name="delivery" value={delivery} />}
-              {payment !== undefined && <input type="hidden" name="payment" value={payment} />}
+              {selectedCategories.map((value) => <input key={value} type="hidden" name="category" value={value} />)}
+              <input type="hidden" name="saleType" value={saleType} />
+              {delivery.map((value) => <input key={value} type="hidden" name="delivery" value={value} />)}
+              {payment.map((value) => <input key={value} type="hidden" name="payment" value={value} />)}
               {minPriceCents !== undefined && <input type="hidden" name="minPrice" value={minPriceInput} />}
               {maxPriceCents !== undefined && <input type="hidden" name="maxPrice" value={maxPriceInput} />}
               {Object.entries(raw).map(([key, value]) => value !== undefined && <input key={key} type="hidden" name={`attr_${key}`} value={value} />)}
@@ -263,18 +298,44 @@ export default async function BrowsePage({
                       {row.primaryImageKey ? <img src={publicUrl(row.primaryImageKey)} alt="" /> : <span aria-hidden="true">Collectible preview</span>}
                     </Link>
                     <div className="catalog-card__body">
-                      <div className="catalog-card__tags"><span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span><span className={`pill tag ${row.saleType === 'auction' ? 'tag--auction' : 'tag--sale'}`}>{row.saleType === 'auction' ? 'Auction' : 'Fixed price'}</span></div>
                       <h3><Link href={`/listings/${row.id}`}>{row.title}</Link></h3>
-                      <p className="catalog-card__meta">
-                        {readableValues(row.fulfillmentPaths, PATH_LABELS)}
-                        <span aria-hidden="true"> • </span>
-                        {readableValues(row.settlementMethods, PAYMENT_LABELS)}
-                      </p>
+                      <div className="catalog-card__tags">
+                        <span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span>
+                      </div>
+                      <div className="catalog-card__seller">
+                        <UserRound aria-hidden="true" />
+                        <div>
+                          <Link href={`/members/${row.sellerId}`}>{row.sellerName}</Link>
+                          <span className="catalog-card__seller-rating">
+                            {row.sellerRatingAvg !== null ? `${Number(row.sellerRatingAvg).toFixed(1)} rating` : 'New seller'}
+                            {(row.sellerRatingCount ?? 0) > 0 && ` · ${row.sellerRatingCount} rating${row.sellerRatingCount === 1 ? '' : 's'}`}
+                            {(row.sellerCompletedSales ?? 0) > 0 && ` · ${row.sellerCompletedSales} sale${row.sellerCompletedSales === 1 ? '' : 's'}`}
+                          </span>
+                        </div>
+                      </div>
+                      <dl className="catalog-card__meta">
+                        <div>
+                          <dt><Truck aria-hidden="true" /><span className="sr-only">Delivery</span></dt>
+                          <dd>{row.fulfillmentPaths.map((path) => <span key={path}><Check aria-hidden="true" />{PATH_LABELS[path]}</span>)}</dd>
+                        </div>
+                        <div>
+                          <dt><Banknote aria-hidden="true" /><span className="sr-only">Payment</span></dt>
+                          <dd>{row.settlementMethods.map((method) => <span key={method}><Check aria-hidden="true" />{PAYMENT_LABELS[method] ?? method}</span>)}</dd>
+                        </div>
+                      </dl>
                       <div className="catalog-card__footer">
                         <div className="catalog-card__price">
-                        <span>{row.saleType === 'auction' ? 'Current bid' : 'Price'}</span>
-                        <strong className="num">{row.saleType === 'auction' ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0) : formatMoney(row.priceCents ?? 0)}</strong>
-                        {row.saleType === 'auction' && <small>{row.bidCount} bid{row.bidCount === 1 ? '' : 's'}</small>}
+                          <span className="catalog-card__price-label">{row.saleType === 'auction' ? 'Current bid' : 'Sale price'}</span>
+                          <strong className="num">{row.saleType === 'auction' ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0) : formatMoney(row.priceCents ?? 0)}</strong>
+                          {row.saleType === 'straight_sale' && (
+                            <span className="catalog-card__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
+                          )}
+                          {row.saleType === 'auction' && <small>{row.bidCount} bid{row.bidCount === 1 ? '' : 's'}</small>}
+                          {row.saleType === 'auction' && (
+                            <span className={`catalog-card__time catalog-card__time--${auctionUrgency(row.endsAt)}`}>
+                              <Clock3 aria-hidden="true" />{timeLeft(row.endsAt)}
+                            </span>
+                          )}
                         </div>
                         <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : 'View listing'}</Link>
                       </div>
