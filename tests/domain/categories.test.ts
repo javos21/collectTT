@@ -58,59 +58,44 @@ describe('derived Zod validation', () => {
   it('accepts a well-formed trading card', () => {
     const result = parseAttributes('trading_card', {
       game: 'pokemon',
-      set: 'Base Set',
-      card_name: 'Charizard',
       condition: 'NM',
-      graded: true,
-      grader: 'PSA',
-      grade: 9,
     });
-    expect(result.version).toBe(1);
-    expect(result.attributes.card_name).toBe('Charizard');
+    expect(result.version).toBe(2);
+    expect(result.attributes.game).toBe('pokemon');
   });
 
   it('accepts a well-formed comic', () => {
     const result = parseAttributes('comic', {
-      title: 'Amazing Fantasy',
-      issue: '15',
       publisher: 'marvel',
-      year: 1962,
-      key_issue: true,
-      graded: true,
-      grade: 4.5,
+      condition: 'good',
     });
-    expect(result.attributes.title).toBe('Amazing Fantasy');
+    expect(result.attributes.publisher).toBe('marvel');
   });
 
   it('accepts a freeform collectible', () => {
     const result = parseAttributes('collectible', {
-      item_type: 'Sealed booster box',
       brand: 'The Pokémon Company',
-      sealed: true,
+      condition: 'sealed',
     });
-    expect(result.attributes.sealed).toBe(true);
+    expect(result.attributes.condition).toBe('sealed');
   });
 
   it('rejects a missing required attribute', () => {
-    const result = safeParseAttributes('trading_card', { set: 'Base Set' });
+    const result = safeParseAttributes('trading_card', { game: 'pokemon' });
     expect(result.success).toBe(false);
   });
 
   it('rejects a value outside a declared enum', () => {
     const result = safeParseAttributes('trading_card', {
       game: 'warhammer',
-      set: 'x',
-      card_name: 'y',
       condition: 'NM',
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects a grade outside the declared range', () => {
+  it('rejects removed card fields', () => {
     const result = safeParseAttributes('trading_card', {
       game: 'pokemon',
-      set: 'x',
-      card_name: 'y',
       condition: 'NM',
       grade: 11,
     });
@@ -120,18 +105,16 @@ describe('derived Zod validation', () => {
   it('★ rejects UNDECLARED keys — the JSONB column cannot accumulate junk', () => {
     const result = safeParseAttributes('trading_card', {
       game: 'pokemon',
-      set: 'x',
-      card_name: 'y',
       condition: 'NM',
       totally_made_up_field: 'whatever',
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects a future year', () => {
+  it('rejects removed comic fields', () => {
     const result = safeParseAttributes('comic', {
-      title: 'x',
-      issue: '1',
+      publisher: 'marvel',
+      condition: 'good',
       year: new Date().getUTCFullYear() + 5,
     });
     expect(result.success).toBe(false);
@@ -159,8 +142,8 @@ describe('derived filters', () => {
   });
 
   it('numeric filters carry their range', () => {
-    const gradeFilter = filtersFor('comic').find((f) => f.key === 'grade');
-    expect(gradeFilter?.range).toEqual({ min: 0.5, max: 10 });
+    const conditionFilter = filtersFor('comic').find((f) => f.key === 'condition');
+    expect(conditionFilter?.options).toContain('good');
   });
 
   it('every filter maps to a recommended index', () => {
@@ -173,15 +156,8 @@ describe('★ filter value coercion (JSONB containment is type-strict)', () => {
   // Uncoerced, every boolean and numeric filter matched NOTHING — and looked like an
   // empty result set rather than a bug.
   it('coerces booleans, not strings', () => {
-    expect(coerceFilterValue('comic', 'key_issue', 'true')).toBe(true);
-    expect(coerceFilterValue('comic', 'key_issue', 'false')).toBe(false);
-    expect(coerceFilterValue('comic', 'key_issue', 'yes')).toBeNull();
-  });
-
-  it('coerces numbers and years', () => {
-    expect(coerceFilterValue('comic', 'year', '1974')).toBe(1974);
-    expect(coerceFilterValue('comic', 'grade', '6')).toBe(6);
-    expect(coerceFilterValue('comic', 'grade', 'six')).toBeNull();
+    expect(coerceFilterValue('comic', 'condition', 'good')).toBe('good');
+    expect(coerceFilterValue('comic', 'condition', 'unknown')).toBeNull();
   });
 
   it('passes through valid enum values and rejects invalid ones', () => {
@@ -191,7 +167,7 @@ describe('★ filter value coercion (JSONB containment is type-strict)', () => {
 
   it('rejects attributes that are not declared filterable', () => {
     // card_name is a real attribute but not filterable
-    expect(coerceFilterValue('trading_card', 'card_name', 'Charizard')).toBeNull();
+    expect(coerceFilterValue('trading_card', 'not_a_field', 'Charizard')).toBeNull();
     expect(coerceFilterValue('trading_card', 'not_a_field', 'x')).toBeNull();
   });
 
@@ -199,12 +175,9 @@ describe('★ filter value coercion (JSONB containment is type-strict)', () => {
     expect(
       coerceFilters('comic', {
         publisher: 'marvel',
-        key_issue: 'true',
-        year: '1974',
-        grade: 'nonsense',
         not_declared: 'x',
       }),
-    ).toEqual({ publisher: 'marvel', key_issue: true, year: 1974 });
+    ).toEqual({ publisher: 'marvel' });
   });
 });
 

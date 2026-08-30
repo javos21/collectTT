@@ -1,0 +1,155 @@
+- generic [active] [ref=f3e1]:
+  - banner [ref=f3e2]:
+    - link "CollectTT home" [ref=f3e3] [cursor=pointer]:
+      - /url: /
+      - img "CollectTT" [ref=f3e4]
+    - navigation "Primary navigation" [ref=f3e5]:
+      - link "Browse" [ref=f3e6] [cursor=pointer]:
+        - /url: /listings
+      - link "Sell" [ref=f3e9] [cursor=pointer]:
+        - /url: /listings/new
+      - link "My deals" [ref=f3e12] [cursor=pointer]:
+        - /url: /deals
+      - link "Sign in" [ref=f3e15] [cursor=pointer]:
+        - /url: /sign-in
+  - main [ref=f3e17]:
+    - generic [ref=f3e18]:
+      - generic [ref=f3e19]:
+        - heading "Browse listings" [level=1] [ref=f3e20]
+        - paragraph [ref=f3e21]: Find cards, comics, and collectibles from local sellers.
+      - search [ref=f3e22]:
+        - generic [ref=f3e26]: Search listings
+        - searchbox "Search listings" [ref=f3e27]
+        - button "Search" [ref=f3e28] [cursor=pointer]
+    - generic [ref=f3e29]:
+      - group [ref=f3e30]:
+        - generic "Filters" [ref=f3e31] [cursor=pointer]
+        - option "All categories" [selected]
+        - option "Trading Card"
+        - option "Comic"
+        - option "Collectible"
+        - option "Everything" [selected]
+        - option "Straight sale"
+        - option "Auctions"
+        - option "Any delivery option" [selected]
+        - option "Cash meetup"
+        - option "Ship to you"
+        - option "Relay store"
+        - option "Full-service delivery"
+        - option "Any payment method" [selected]
+        - option "Cash"
+        - option "Bank transfer"
+        - option "LINX"
+        - option "Other"
+      - generic [ref=f3e36]:
+        - navigation "Browse by sale type" [ref=f3e37]:
+          - link "All listings" [ref=f3e38] [cursor=pointer]:
+            - /url: /listings
+          - link "Fixed price" [ref=f3e39] [cursor=pointer]:
+            - /url: /listings?saleType=straight_sale
+          - link "Auctions" [ref=f3e40] [cursor=pointer]:
+            - /url: /listings?saleType=auction
+        - generic [ref=f3e41]:
+          - generic [ref=f3e42]:
+            - strong [ref=f3e43]: "5"
+            - generic [ref=f3e44]: listings
+          - form "Sort listings" [ref=f3e45]:
+            - combobox "Sort listings" [ref=f3e47]:
+              - option "Newest listed" [selected]
+              - 'option "Price: low to high"'
+              - 'option "Price: high to low"'
+              - option "Ending soon"
+            - button "Apply" [ref=f3e48] [cursor=pointer]
+        - generic [ref=f3e49]:
+          - article [ref=f3e50]:
+            - link "View Sealed Pokémon Evolving Skies booster box" [ref=f3e51] [cursor=pointer]:
+              - /url: /listings/55bed4ba-b267-461b-ae92-c6f2f0533d8e
+              - generic [ref=f3e52]: Collectible preview
+            - generic [ref=f3e53]:
+              - generic [ref=f3e54]:
+                - generic [ref=f3e55]: collectible
+                - generic [ref=f3e56]: Fixed price
+              - heading [level=3] [ref=f3e57]:
+                - link "Sealed Pokémon Evolving Skies booster box" [ref=f3e58] [cursor=pointer]:
+                  - /url: /listings/55bed4ba-b267-461b-ae92-c6f2f0533d8e
+              - paragraph [ref=f3e59]: Cash meetup · Relay store • Cash · Bank transfer
+              - generic [ref=f3e60]:
+                - generic [ref=f3e61]:
+                  - generic [ref=f3e62]: Price
+                  - strong [ref=f3e63]: TT$3,500.00
+                - link "View listing" [ref=f3e64] [cursor=pointer]:
+                  - /url: /listings/55bed4ba-b267-461b-ae92-c6f2f0533d8e#buy-panel
+          - article [ref=f3e65]:
+            - link "View Saga vol. 1–9 — raw run" [ref=f3e66] [cursor=pointer]:
+              - /url: /listings/92750f64-cc47-4153-8c4e-767ce4f4799f
+              - generic [ref=f3e67]: Collectible preview
+            - generic [ref=f3e68]:
+              - generic [ref=f3e69]:
+                - generic [ref=f3e70]: comic
+                - generic [ref=f3e71]: Fixed price
+              - heading [level=3] [ref=f3e72]:
+                - link "Saga vol. 1–9 — raw run" [ref=f3e73] [cursor=pointer]:
+                  - /url: /listings/92750f64-cc47-4153-8c4e-767ce4f4799f
+              - paragraph [ref=f3e74]: Cash meetup · Relay store • Cash · Bank transfer
+              - generic [ref=f3e75]:
+                - generic [ref=f3e76]:
+                  - generic [ref=f3e77]: Price
+                  - strong [ref=f3e78]: TT$450.00
+                - link "View listing" [ref=f3e79] [cursor=pointer]:
+                  - /url: /listings/92750f64-cc47-4153-8c4e-767ce4f4799f#buy-panel
+          - article [ref=f3e80]:
+            - 'link "View Amazing Fantasy #15 — CGC 4.5" [ref=f3e81] [cursor=pointer]':
+              - /url: /listings/12a7b649-cb2f-4486-82b6-26d27fac2d06
+              - generic [ref=f3e82]: Collectible preview
+            - generic [ref=f3e83]:
+              - generic [ref=f3e84]:
+                - generic [ref=f3e85]: comic
+                - generic [ref=f3e86]: Auction
+              - heading [level=3] [ref=f3e87]:
+                - 'link "Amazing Fantasy #15 — CGC 4.5" [ref=f3e88] [cursor=pointer]':
+                  - /url: /listings/12a7b649-cb2f-4486-82b6-26d27fac2d06
+              - paragraph [ref=f3e89]: Cash meetup · Relay store • Cash · Bank transfer
+              - generic [ref=f3e90]:
+                - generic [ref=f3e91]:
+                  - generic [ref=f3e92]: Current bid
+                  - strong [ref=f3e93]: TT$20,000.00
+                  - generic [ref=f3e94]: 0 bids
+                - link "Bid now" [ref=f3e95] [cursor=pointer]:
+                  - /url: /listings/12a7b649-cb2f-4486-82b6-26d27fac2d06#buy-panel
+          - article [ref=f3e96]:
+            - link "View Black Lotus proxy set — 5 cards" [ref=f3e97] [cursor=pointer]:
+              - /url: /listings/6784b3fc-9fc9-4112-af89-0279d1972acd
+              - generic [ref=f3e98]: Collectible preview
+            - generic [ref=f3e99]:
+              - generic [ref=f3e100]:
+                - generic [ref=f3e101]: trading card
+                - generic [ref=f3e102]: Fixed price
+              - heading [level=3] [ref=f3e103]:
+                - link "Black Lotus proxy set — 5 cards" [ref=f3e104] [cursor=pointer]:
+                  - /url: /listings/6784b3fc-9fc9-4112-af89-0279d1972acd
+              - paragraph [ref=f3e105]: Cash meetup · Relay store • Cash · Bank transfer
+              - generic [ref=f3e106]:
+                - generic [ref=f3e107]:
+                  - generic [ref=f3e108]: Price
+                  - strong [ref=f3e109]: TT$120.00
+                - link "View listing" [ref=f3e110] [cursor=pointer]:
+                  - /url: /listings/6784b3fc-9fc9-4112-af89-0279d1972acd#buy-panel
+          - article [ref=f3e111]:
+            - link "View Charizard — Base Set, PSA 8" [ref=f3e112] [cursor=pointer]:
+              - /url: /listings/dd1ee963-0ff5-493a-8fcc-247758bd5d7e
+              - generic [ref=f3e113]: Collectible preview
+            - generic [ref=f3e114]:
+              - generic [ref=f3e115]:
+                - generic [ref=f3e116]: trading card
+                - generic [ref=f3e117]: Auction
+              - heading [level=3] [ref=f3e118]:
+                - link "Charizard — Base Set, PSA 8" [ref=f3e119] [cursor=pointer]:
+                  - /url: /listings/dd1ee963-0ff5-493a-8fcc-247758bd5d7e
+              - paragraph [ref=f3e120]: Cash meetup · Relay store • Cash · Bank transfer
+              - generic [ref=f3e121]:
+                - generic [ref=f3e122]:
+                  - generic [ref=f3e123]: Current bid
+                  - strong [ref=f3e124]: TT$1,500.00
+                  - generic [ref=f3e125]: 0 bids
+                - link "Bid now" [ref=f3e126] [cursor=pointer]:
+                  - /url: /listings/dd1ee963-0ff5-493a-8fcc-247758bd5d7e#buy-panel

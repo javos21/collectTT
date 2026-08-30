@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 
 import { authClient } from '@/lib/auth-client';
 import { AuthFeedback } from '@/components/auth-feedback';
+import { Button } from '@/components/ui/button';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -56,7 +57,7 @@ export function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
         <label htmlFor="reset-email">Email</label>
         <input id="reset-email" name="email" type="email" autoComplete="email" maxLength={254} required />
       </div>
-      <button className="auth-submit" type="submit" disabled={pending}>{pending ? 'Sending…' : 'Send reset link'}</button>
+      <Button className="auth-submit" type="submit" isDisabled={pending}>{pending ? 'Sending…' : 'Send reset link'}</Button>
     </form>
   );
 }

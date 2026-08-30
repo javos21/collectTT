@@ -6,7 +6,7 @@
  * bump never invalidates existing listings.
  */
 
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db, type DbOrTx } from '../db/client';
@@ -130,7 +130,7 @@ export async function createListing(
     const listing = inserted[0];
     if (listing === undefined) throw new Error('Failed to create listing');
 
-    await attachImages(tx, listing.id, input.imageIds);
+    await attachImages(tx, listing.id, sellerId, input.imageIds);
 
     if (input.relayStoreIds.length > 0) {
       await tx.insert(listingRelayStores).values(
@@ -154,8 +154,15 @@ export async function createListing(
   });
 }
 
-async function attachImages(tx: DbOrTx, listingId: string, imageIds: string[]): Promise<void> {
+async function attachImages(tx: DbOrTx, listingId: string, ownerUserId: string, imageIds: string[]): Promise<void> {
   if (imageIds.length === 0) return;
+
+  const ownedImages = await tx
+    .select({ id: images.id })
+    .from(images)
+    .where(and(inArray(images.id, imageIds), eq(images.ownerUserId, ownerUserId)));
+  if (ownedImages.length !== imageIds.length) throw new Error('One or more images do not belong to you');
+
   await tx.insert(listingImages).values(
     imageIds.map((imageId, index) => ({ listingId, imageId, position: index })),
   );
@@ -359,7 +366,12 @@ export async function getListing(id: string) {
   if (row === undefined) return null;
 
   const imageRows = await db
-    .select({ id: images.id, variants: images.variants, status: images.status })
+    .select({
+      id: images.id,
+      variants: images.variants,
+      r2KeyOriginal: images.r2KeyOriginal,
+      status: images.status,
+    })
     .from(listingImages)
     .innerJoin(images, eq(images.id, listingImages.imageId))
     .where(eq(listingImages.listingId, id))

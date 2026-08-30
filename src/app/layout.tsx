@@ -1,5 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { UserRound } from 'lucide-react';
+import { Building05, CoinsSwap01, Plus, SearchLg, UserCircle } from '@untitledui/icons';
+import '@fontsource-variable/inter';
+import '@fontsource/space-mono/400.css';
 import './globals.css';
 
 import { db } from '@/db/client';
@@ -28,12 +32,12 @@ async function SiteNavigation() {
 
   return (
     <nav aria-label="Primary navigation">
-      <Link href="/listings">Browse</Link>
-      <Link href="/listings/new">Sell</Link>
-      <Link href="/deals">My deals</Link>
-      {stores.length > 0 && <Link href="/store">Store</Link>}
+      <Link href="/listings"><SearchLg className="nav-icon" aria-hidden="true" />Browse</Link>
+      <Link href="/listings/new"><Plus className="nav-icon" aria-hidden="true" />Sell</Link>
+      <Link href="/deals"><CoinsSwap01 className="nav-icon" aria-hidden="true" />My deals</Link>
+      {stores.length > 0 && <Link href="/store"><Building05 className="nav-icon" aria-hidden="true" />Store</Link>}
       {viewer === null ? (
-        <Link href="/sign-in">Sign in</Link>
+        <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
       ) : (
         <Link className="user-nav" href="/me" aria-label={`Open ${viewer.displayName} profile`}>
           {viewer.image === null ? (
@@ -60,11 +64,50 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <SiteNavigation />
         </header>
         <div className="wrap">{children}</div>
+        <footer className="site-footer">
+          <div className="site-footer__inner">
+            <div className="site-footer__top">
+              <div className="site-footer__brand">
+                <Link className="site-footer__brand-link" href="/" aria-label="CollectTT home">
+                  <img className="site-footer__logo" src="/assets/collecttt_logo.png" alt="CollectTT" />
+                </Link>
+                <p>Collect with confidence across Trinidad &amp; Tobago.</p>
+              </div>
+              <nav className="site-footer__nav" aria-labelledby="footer-explore-title">
+                <h2 id="footer-explore-title">Explore</h2>
+                <Link href="/listings">Browse</Link>
+                <Link href="/listings?category=trading_card">Trading Cards</Link>
+                <Link href="/listings?category=comic">Comics</Link>
+                <Link href="/listings?category=collectible">Collectibles</Link>
+              </nav>
+              <nav className="site-footer__nav" aria-labelledby="footer-account-title">
+                <h2 id="footer-account-title">Account</h2>
+                <Link href="/listings/new">Sell</Link>
+                <Link href="/deals">My Deals</Link>
+                <Link href="/sign-in">Sign In</Link>
+              </nav>
+              <nav className="site-footer__nav" aria-labelledby="footer-legal-title">
+                <h2 id="footer-legal-title">Legal</h2>
+                <Link href="/privacy-policy">Privacy Policy</Link>
+                <Link href="/terms-of-service">Terms of Service</Link>
+              </nav>
+            </div>
+            <div className="site-footer__bottom">
+              <span>© {new Date().getFullYear()} CollectTT</span>
+              <span className="site-footer__powered-by">
+                <span>Powered by</span>
+                <a href="https://www.chaconialabs.com" target="_blank" rel="noreferrer" aria-label="Chaconia Labs website">
+                  <img src="/assets/chaconia-labs-lockup.png" alt="Chaconia Labs" />
+                </a>
+              </span>
+            </div>
+          </div>
+        </footer>
         <nav className="mobile-tabs" aria-label="Mobile navigation">
-          <Link href="/listings"><span>⌕</span><span>Browse</span></Link>
-          <Link href="/listings/new"><span>＋</span><span>Sell</span></Link>
-          <Link href="/deals"><span>◷</span><span>Deals</span></Link>
-          <Link href="/me"><span>●</span><span>Profile</span></Link>
+          <Link href="/listings"><SearchLg aria-hidden="true" /><span>Browse</span></Link>
+          <Link href="/listings/new"><Plus aria-hidden="true" /><span>Sell</span></Link>
+          <Link href="/deals"><CoinsSwap01 aria-hidden="true" /><span>Deals</span></Link>
+          <Link href="/me"><UserCircle aria-hidden="true" /><span>Profile</span></Link>
         </nav>
       </body>
     </html>

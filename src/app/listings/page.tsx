@@ -135,19 +135,19 @@ export default async function BrowsePage({
       <section className="catalog-header">
         <div>
           <h1>Browse listings</h1>
-          <p>Search the local collector marketplace, then narrow by sale type, category, delivery, and payment.</p>
+          <p>Find cards, comics, and collectibles from local sellers.</p>
         </div>
         <form className="catalog-search" action="/listings" method="get" role="search">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2" stroke="currentColor" strokeWidth="1.8" /><path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
           <label className="sr-only" htmlFor="catalog-query">Search listings</label>
-          <input id="catalog-query" name="q" type="search" defaultValue={query} placeholder="Search cards, comics, collectibles" />
+          <input id="catalog-query" name="q" type="search" defaultValue={query} placeholder="Search listings" />
           <button type="submit">Search</button>
         </form>
       </section>
 
       <div className="browse-layout">
         {/* -------------------------------------------------- filter rail */}
-        <details className="filter-panel" open>
+        <details className="filter-panel" open={hasActiveFilters}>
           <summary>
             <svg className="filter-ic" width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -237,7 +237,7 @@ export default async function BrowsePage({
               {minPriceCents !== undefined && <input type="hidden" name="minPrice" value={minPriceInput} />}
               {maxPriceCents !== undefined && <input type="hidden" name="maxPrice" value={maxPriceInput} />}
               {Object.entries(raw).map(([key, value]) => value !== undefined && <input key={key} type="hidden" name={`attr_${key}`} value={value} />)}
-              <label htmlFor="sort">Sort by</label>
+              <label className="sr-only" htmlFor="sort">Sort listings</label>
               <select id="sort" name="sort" defaultValue={sort}>
                 <option value="newest">Newest listed</option>
                 <option value="price_low">Price: low to high</option>
@@ -265,11 +265,11 @@ export default async function BrowsePage({
                     <div className="catalog-card__body">
                       <div className="catalog-card__tags"><span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span><span className={`pill tag ${row.saleType === 'auction' ? 'tag--auction' : 'tag--sale'}`}>{row.saleType === 'auction' ? 'Auction' : 'Fixed price'}</span></div>
                       <h3><Link href={`/listings/${row.id}`}>{row.title}</Link></h3>
-                      {row.description !== null && row.description !== '' && <p className="catalog-card__description">{row.description}</p>}
-                      <dl className="catalog-card__facts">
-                        <div><dt>Delivery</dt><dd>{readableValues(row.fulfillmentPaths, PATH_LABELS)}</dd></div>
-                        <div><dt>Payment</dt><dd>{readableValues(row.settlementMethods, PAYMENT_LABELS)}</dd></div>
-                      </dl>
+                      <p className="catalog-card__meta">
+                        {readableValues(row.fulfillmentPaths, PATH_LABELS)}
+                        <span aria-hidden="true"> • </span>
+                        {readableValues(row.settlementMethods, PAYMENT_LABELS)}
+                      </p>
                       <div className="catalog-card__footer">
                         <div className="catalog-card__price">
                         <span>{row.saleType === 'auction' ? 'Current bid' : 'Price'}</span>

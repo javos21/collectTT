@@ -1,0 +1,151 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "CollectTT home" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - img "CollectTT" [ref=e4]
+    - navigation "Primary navigation" [ref=e5]:
+      - link "Browse" [ref=e6] [cursor=pointer]:
+        - /url: /listings
+      - link "Sell" [ref=e9] [cursor=pointer]:
+        - /url: /listings/new
+      - link "My deals" [ref=e12] [cursor=pointer]:
+        - /url: /deals
+      - link "Sign in" [ref=e15] [cursor=pointer]:
+        - /url: /sign-in
+  - main [ref=e17]:
+    - region [ref=e18]:
+      - generic [ref=e20]:
+        - heading "Find your next great collectible." [level=1] [ref=e21]
+        - paragraph [ref=e22]: Trade cards, comics, and collectibles with collectors across Trinidad & Tobago.
+        - search [ref=e23]:
+          - generic [ref=e27]: Search listings
+          - searchbox "Search listings" [ref=e28]
+          - button "Search" [ref=e29] [cursor=pointer]
+      - generic "Shop by sale type" [ref=e30]:
+        - link "Live auctions 2 running now" [ref=e31] [cursor=pointer]:
+          - /url: /listings?saleType=auction
+          - generic [ref=e36]:
+            - strong [ref=e37]: Live auctions
+            - generic [ref=e38]: 2 running now
+          - generic [ref=e39]: ↗
+        - link "Fixed price 3 ready to claim" [ref=e40] [cursor=pointer]:
+          - /url: /listings?saleType=straight_sale
+          - generic [ref=e45]:
+            - strong [ref=e46]: Fixed price
+            - generic [ref=e47]: 3 ready to claim
+          - generic [ref=e48]: ↗
+    - region [ref=e49]:
+      - generic [ref=e50]:
+        - heading "Explore categories" [level=2] [ref=e52]
+        - link "View all" [ref=e53] [cursor=pointer]:
+          - /url: /listings
+          - text: View all
+          - generic [ref=e54]: →
+      - generic [ref=e55]:
+        - link "Trading Cards 2 listings" [ref=e56] [cursor=pointer]:
+          - /url: /listings?category=trading_card
+          - generic [ref=e62]:
+            - strong [ref=e63]: Trading Cards
+            - generic [ref=e64]: 2 listings
+          - generic [ref=e65]: ↗
+        - link "Comics 2 listings" [ref=e66] [cursor=pointer]:
+          - /url: /listings?category=comic
+          - generic [ref=e72]:
+            - strong [ref=e73]: Comics
+            - generic [ref=e74]: 2 listings
+          - generic [ref=e75]: ↗
+        - link "Collectibles 1 listings" [ref=e76] [cursor=pointer]:
+          - /url: /listings?category=collectible
+          - generic [ref=e82]:
+            - strong [ref=e83]: Collectibles
+            - generic [ref=e84]: 1 listings
+          - generic [ref=e85]: ↗
+    - region [ref=e86]:
+      - generic [ref=e87]:
+        - heading "Live auctions" [level=2] [ref=e89]
+        - link "See all" [ref=e90] [cursor=pointer]:
+          - /url: /listings?saleType=auction
+          - text: See all
+          - generic [ref=e91]: →
+      - generic [ref=e92]:
+        - link "trading card Auction Charizard — Base Set, PSA 8 TT$1,500.00 0 bids" [ref=e93] [cursor=pointer]:
+          - /url: /listings/dd1ee963-0ff5-493a-8fcc-247758bd5d7e
+          - generic [ref=e94]: Collectible preview
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - generic [ref=e98]: trading card
+              - generic [ref=e99]: Auction
+            - heading "Charizard — Base Set, PSA 8" [level=3] [ref=e100]
+            - generic [ref=e101]:
+              - strong [ref=e102]: TT$1,500.00
+              - generic [ref=e103]: 0 bids
+        - 'link "comic Auction Amazing Fantasy #15 — CGC 4.5 TT$20,000.00 0 bids" [ref=e104] [cursor=pointer]':
+          - /url: /listings/12a7b649-cb2f-4486-82b6-26d27fac2d06
+          - generic [ref=e105]: Collectible preview
+          - generic [ref=e107]:
+            - generic [ref=e108]:
+              - generic [ref=e109]: comic
+              - generic [ref=e110]: Auction
+            - 'heading "Amazing Fantasy #15 — CGC 4.5" [level=3] [ref=e111]'
+            - generic [ref=e112]:
+              - strong [ref=e113]: TT$20,000.00
+              - generic [ref=e114]: 0 bids
+    - region [ref=e115]:
+      - generic [ref=e116]:
+        - heading "Recent listings" [level=2] [ref=e118]
+        - link "Browse everything" [ref=e119] [cursor=pointer]:
+          - /url: /listings
+          - text: Browse everything
+          - generic [ref=e120]: →
+      - generic [ref=e121]:
+        - link "collectible For sale Sealed Pokémon Evolving Skies booster box TT$3,500.00" [ref=e122] [cursor=pointer]:
+          - /url: /listings/55bed4ba-b267-461b-ae92-c6f2f0533d8e
+          - generic [ref=e123]: Collectible preview
+          - generic [ref=e125]:
+            - generic [ref=e126]:
+              - generic [ref=e127]: collectible
+              - generic [ref=e128]: For sale
+            - heading "Sealed Pokémon Evolving Skies booster box" [level=3] [ref=e129]
+            - strong [ref=e131]: TT$3,500.00
+        - link "comic For sale Saga vol. 1–9 — raw run TT$450.00" [ref=e132] [cursor=pointer]:
+          - /url: /listings/92750f64-cc47-4153-8c4e-767ce4f4799f
+          - generic [ref=e133]: Collectible preview
+          - generic [ref=e135]:
+            - generic [ref=e136]:
+              - generic [ref=e137]: comic
+              - generic [ref=e138]: For sale
+            - heading "Saga vol. 1–9 — raw run" [level=3] [ref=e139]
+            - strong [ref=e141]: TT$450.00
+        - 'link "comic Auction Amazing Fantasy #15 — CGC 4.5 TT$20,000.00 0 bids" [ref=e142] [cursor=pointer]':
+          - /url: /listings/12a7b649-cb2f-4486-82b6-26d27fac2d06
+          - generic [ref=e143]: Collectible preview
+          - generic [ref=e145]:
+            - generic [ref=e146]:
+              - generic [ref=e147]: comic
+              - generic [ref=e148]: Auction
+            - 'heading "Amazing Fantasy #15 — CGC 4.5" [level=3] [ref=e149]'
+            - generic [ref=e150]:
+              - strong [ref=e151]: TT$20,000.00
+              - generic [ref=e152]: 0 bids
+        - link "trading card For sale Black Lotus proxy set — 5 cards TT$120.00" [ref=e153] [cursor=pointer]:
+          - /url: /listings/6784b3fc-9fc9-4112-af89-0279d1972acd
+          - generic [ref=e154]: Collectible preview
+          - generic [ref=e156]:
+            - generic [ref=e157]:
+              - generic [ref=e158]: trading card
+              - generic [ref=e159]: For sale
+            - heading "Black Lotus proxy set — 5 cards" [level=3] [ref=e160]
+            - strong [ref=e162]: TT$120.00
+        - link "trading card Auction Charizard — Base Set, PSA 8 TT$1,500.00 0 bids" [ref=e163] [cursor=pointer]:
+          - /url: /listings/dd1ee963-0ff5-493a-8fcc-247758bd5d7e
+          - generic [ref=e164]: Collectible preview
+          - generic [ref=e166]:
+            - generic [ref=e167]:
+              - generic [ref=e168]: trading card
+              - generic [ref=e169]: Auction
+            - heading "Charizard — Base Set, PSA 8" [level=3] [ref=e170]
+            - generic [ref=e171]:
+              - strong [ref=e172]: TT$1,500.00
+              - generic [ref=e173]: 0 bids
+  - button "Open Next.js Dev Tools" [ref=e179] [cursor=pointer]
+  - alert [ref=e183]

@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
+import { UserRound } from 'lucide-react';
 
 import { authClient } from '@/lib/auth-client';
 import { AuthFeedback } from '@/components/auth-feedback';
 import { PasswordField } from '@/components/password-field';
+import { Button } from '@/components/ui/button';
 
 type Mode = 'sign-in' | 'sign-up';
 
@@ -15,6 +17,7 @@ interface AuthPanelProps {
   callbackURL: string;
   consoleMode: boolean;
   oauthFailed: boolean;
+  initialMode?: Mode;
 }
 
 function errorMessage(error: unknown): string {
@@ -49,8 +52,8 @@ function GoogleIcon() {
   );
 }
 
-export function AuthPanel({ callbackURL, consoleMode, oauthFailed }: AuthPanelProps) {
-  const [mode, setMode] = useState<Mode>('sign-in');
+export function AuthPanel({ callbackURL, consoleMode, oauthFailed, initialMode = 'sign-in' }: AuthPanelProps) {
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(oauthFailed ? 'Google sign-in did not finish. Please try again.' : '');
   const [notice, setNotice] = useState('');
@@ -163,14 +166,14 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed }: AuthPanelPr
   return (
     <section className="auth-panel" aria-labelledby="auth-form-title">
       <div className="auth-panel__head">
+        <span className="auth-panel__icon" aria-hidden="true"><UserRound /></span>
         <h2 id="auth-form-title">{mode === 'sign-in' ? 'Welcome back' : 'Create your account'}</h2>
-        <p>{mode === 'sign-in' ? 'Continue with Google for the quickest sign-in.' : 'Google is the fastest way to join CollectTT.'}</p>
       </div>
 
-      <button className="google-button" type="button" onClick={googleSignIn} disabled={pending}>
+      <Button className="google-button" color="secondary" type="button" onPress={googleSignIn} isDisabled={pending}>
         <GoogleIcon />
         Continue with Google
-      </button>
+      </Button>
 
       <div className="auth-divider"><span>or use email</span></div>
 
@@ -179,12 +182,12 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed }: AuthPanelPr
 
       {verificationEmail !== '' ? (
         <div className="auth-verification">
-          <button className="secondary" type="button" onClick={resendVerification} disabled={pending}>
+          <Button color="secondary" type="button" onPress={resendVerification} isDisabled={pending}>
             Resend verification email
-          </button>
-          <button className="auth-text-button" type="button" onClick={() => switchMode('sign-in')}>
+          </Button>
+          <Button className="auth-text-button" color="link" type="button" onPress={() => switchMode('sign-in')}>
             Return to sign in
-          </button>
+          </Button>
         </div>
       ) : (
         <form className="auth-form" noValidate onSubmit={submit}>
@@ -235,17 +238,17 @@ export function AuthPanel({ callbackURL, consoleMode, oauthFailed }: AuthPanelPr
               Forgot password?
             </Link>
           )}
-          <button className="auth-submit" type="submit" disabled={pending}>
+          <Button className="auth-submit" type="submit" isDisabled={pending}>
             {pending ? 'Please wait…' : mode === 'sign-in' ? 'Sign in with email' : 'Create account with email'}
-          </button>
+          </Button>
         </form>
       )}
 
       <p className="auth-switch">
         {mode === 'sign-in' ? 'New to CollectTT?' : 'Already have an account?'}{' '}
-        <button className="auth-text-button" type="button" onClick={() => switchMode(mode === 'sign-in' ? 'sign-up' : 'sign-in')}>
+        <Button className="auth-text-button" color="link" type="button" onPress={() => switchMode(mode === 'sign-in' ? 'sign-up' : 'sign-in')}>
           {mode === 'sign-in' ? 'Create an account' : 'Sign in'}
-        </button>
+        </Button>
       </p>
 
       {consoleMode && (

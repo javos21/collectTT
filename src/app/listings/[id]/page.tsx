@@ -15,6 +15,7 @@ import { profiles } from '@/db/schema/profiles';
 import { acceptOfferAction, bidAction, claimAction, rejectOfferAction, submitOfferAction } from './actions';
 import { AuctionLive } from './bid-panel';
 import { latestOfferForBuyer, pendingOffersForSeller } from '@/services/offers';
+import { SignInRequiredModal } from '@/components/sign-in-required-modal';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,7 @@ export default async function ListingPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; queued?: string; bid?: string; offer?: string }>;
+  searchParams: Promise<{ error?: string; queued?: string; bid?: string; offer?: string; auth?: string }>;
 }) {
   const { id } = await params;
   const flash = await searchParams;
@@ -41,6 +42,7 @@ export default async function ListingPage({
   const category = getCategory(listing.category);
   const attributes = listing.attributes as Record<string, unknown>;
   const viewer = await currentUser();
+  const showSignInModal = viewer === null && flash.auth === 'buy';
   const isSeller = viewer?.userId === listing.sellerId;
   const pendingOffers = isSeller && listing.saleType === 'straight_sale'
     ? await pendingOffersForSeller(id, viewer.userId)
@@ -150,6 +152,13 @@ export default async function ListingPage({
 
   return (
     <main>
+      {showSignInModal && (
+        <SignInRequiredModal
+          intent="buy"
+          returnTo={`/listings/${id}#buy-panel`}
+          cancelTo={`/listings/${id}#buy-panel`}
+        />
+      )}
       <div className="listing-head">
         <Link className="breadcrumb" href="/listings">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -213,14 +222,14 @@ export default async function ListingPage({
           {images.length > 0 ? (
             <>
               <div className="gallery__track">
-                {images.map((image) => {
+                {images.map((image, index) => {
                   const variants = imageVariants(image.variants);
-                  const key = variants.large ?? variants.card ?? variants.thumb;
+                  const key = variants.large ?? variants.card ?? variants.thumb ?? image.r2KeyOriginal;
                   return (
                     <div className="gallery__slide" key={image.id} id={`img-${image.id}`}>
                       {key !== undefined ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={publicUrl(key)} alt="" />
+                        <img src={publicUrl(key)} alt={`${listing.title} — photo ${index + 1}`} />
                       ) : null}
                     </div>
                   );
@@ -228,11 +237,16 @@ export default async function ListingPage({
               </div>
               {images.length > 1 && (
                 <div className="gallery__rail">
-                  {images.map((image) => {
+                  {images.map((image, index) => {
                     const variants = imageVariants(image.variants);
-                    const key = variants.thumb ?? variants.card;
+                    const key = variants.thumb ?? variants.card ?? image.r2KeyOriginal;
                     return (
-                      <a className="gallery__thumb" key={image.id} href={`#img-${image.id}`}>
+                      <a
+                        className="gallery__thumb"
+                        key={image.id}
+                        href={`#img-${image.id}`}
+                        aria-label={`View photo ${index + 1}`}
+                      >
                         {key !== undefined ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={publicUrl(key)} alt="" />
@@ -249,7 +263,7 @@ export default async function ListingPage({
         </div>
 
         {/* ------------------------------------------------ buy box */}
-          <aside id="buy-panel" className="buybox">
+        <aside id="buy-panel" className="buybox">
           {isAuction ? (
             <>
               <p className="buybox__price-label">Current bid</p>
@@ -275,7 +289,7 @@ export default async function ListingPage({
           {/* ------------------------------------------------ act */}
           {viewer === null ? (
             <div className="buybox__state">
-              <Link href="/sign-in">Sign in</Link> to {isAuction ? 'bid' : 'claim this or make an offer'}.
+              <Link href={`/listings/${id}?auth=buy#buy-panel`}>sign in</Link> to {isAuction ? 'bid' : 'claim this or make an offer'}.
             </div>
           ) : isSeller ? (
             <div className="buybox__state">

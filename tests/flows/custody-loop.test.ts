@@ -355,8 +355,6 @@ describe('relay store nomination', () => {
         relayStoreIds: [storeId],
         attributes: {
           game: 'pokemon',
-          set: 'base',
-          card_name: 'Pikachu',
           condition: 'NM',
         },
       },

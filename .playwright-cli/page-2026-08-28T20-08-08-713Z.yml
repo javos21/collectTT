@@ -1,0 +1,43 @@
+- generic [active] [ref=f3e1]:
+  - banner [ref=f3e2]:
+    - link "CollectTT home" [ref=f3e3] [cursor=pointer]:
+      - /url: /
+      - img "CollectTT" [ref=f3e4]
+    - navigation "Primary navigation" [ref=f3e5]:
+      - link "Browse" [ref=f3e6] [cursor=pointer]:
+        - /url: /listings
+      - link "Sell" [ref=f3e9] [cursor=pointer]:
+        - /url: /listings/new
+      - link "My deals" [ref=f3e12] [cursor=pointer]:
+        - /url: /deals
+      - link "Sign in" [ref=f3e15] [cursor=pointer]:
+        - /url: /sign-in
+  - main [ref=f3e17]:
+    - region [ref=f3e18]:
+      - generic [ref=f3e19]:
+        - generic [ref=f3e20]: C
+        - heading "Your collection, in one place." [level=1] [ref=f3e21]
+        - paragraph [ref=f3e22]: Buy and sell locally with a clear record of every deal.
+    - region [ref=f3e23]:
+      - generic [ref=f3e24]:
+        - heading "Welcome back" [level=2] [ref=f3e25]
+        - paragraph [ref=f3e26]: Use Google or email.
+      - button "Continue with Google" [ref=f3e27] [cursor=pointer]
+      - generic [ref=f3e34]: or use email
+      - generic [ref=f3e36]:
+        - generic [ref=f3e37]:
+          - generic [ref=f3e38]: Email
+          - textbox "Email" [ref=f3e39]
+        - generic [ref=f3e40]:
+          - generic [ref=f3e41]: Password
+          - generic [ref=f3e42]:
+            - textbox "Password" [ref=f3e43]
+            - button "Show Password" [ref=f3e44] [cursor=pointer]
+        - link "Forgot password?" [ref=f3e49] [cursor=pointer]:
+          - /url: /forgot-password?returnTo=%2F
+        - button "Sign in with email" [ref=f3e50] [cursor=pointer]
+      - paragraph [ref=f3e52]:
+        - text: New to CollectTT?
+        - button "Create an account" [ref=f3e53] [cursor=pointer]
+      - paragraph [ref=f3e55]: Local email mode is active. Verification and reset links print in the dev-server terminal.
+  - alert [ref=f3e56]

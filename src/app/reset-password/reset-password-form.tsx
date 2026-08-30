@@ -5,6 +5,7 @@ import { useState, type FormEvent } from 'react';
 import { authClient } from '@/lib/auth-client';
 import { AuthFeedback } from '@/components/auth-feedback';
 import { PasswordField } from '@/components/password-field';
+import { Button } from '@/components/ui/button';
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const [pending, setPending] = useState(false);
@@ -67,7 +68,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
           required
         />
       </div>
-      <button className="auth-submit" type="submit" disabled={pending}>{pending ? 'Updating…' : 'Update password'}</button>
+      <Button className="auth-submit" type="submit" isDisabled={pending}>{pending ? 'Updating…' : 'Update password'}</Button>
     </form>
   );
 }

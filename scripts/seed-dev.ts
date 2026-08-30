@@ -46,16 +46,7 @@ const SEED_LISTINGS = [
     durationHours: 48,
     attributes: {
       game: 'pokemon',
-      set: 'Base Set',
-      card_name: 'Charizard',
-      card_number: '4/102',
-      rarity: 'Holo Rare',
       condition: 'NM',
-      graded: true,
-      grader: 'PSA',
-      grade: 8,
-      foil: true,
-      language: 'English',
     },
   },
   {
@@ -67,10 +58,7 @@ const SEED_LISTINGS = [
     priceCents: 12_000,
     attributes: {
       game: 'magic',
-      set: 'Proxy',
-      card_name: 'Black Lotus (proxy)',
       condition: 'NM',
-      graded: false,
     },
   },
   {
@@ -82,14 +70,8 @@ const SEED_LISTINGS = [
     startBidCents: 2_000_000,
     durationHours: 72,
     attributes: {
-      title: 'Amazing Fantasy',
-      issue: '15',
       publisher: 'marvel',
-      year: 1962,
-      key_issue: true,
-      graded: true,
-      grader: 'CGC',
-      grade: 4.5,
+      condition: 'good',
     },
   },
   {
@@ -99,12 +81,7 @@ const SEED_LISTINGS = [
     saleType: 'straight_sale' as const,
     priceCents: 45_000,
     attributes: {
-      title: 'Saga',
-      issue: 'vol 1-9',
       publisher: 'image',
-      year: 2012,
-      key_issue: false,
-      graded: false,
       condition: 'very_fine',
     },
   },
@@ -116,11 +93,8 @@ const SEED_LISTINGS = [
     saleType: 'straight_sale' as const,
     priceCents: 350_000,
     attributes: {
-      item_type: 'Sealed booster box',
       brand: 'The Pokémon Company',
-      franchise: 'Pokémon',
-      year: 2021,
-      sealed: true,
+      condition: 'Sealed',
     },
   },
 ];

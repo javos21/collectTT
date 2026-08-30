@@ -15,30 +15,30 @@ export default async function SignInPage({
   const user = await currentUser();
   const params = await searchParams;
   const returnTo = safeAuthReturnTo(params.returnTo);
+  const initialMode = params.mode === 'sign-up' ? 'sign-up' : 'sign-in';
   if (user !== null) redirect(returnTo);
 
   return (
     <main className="auth-page">
       <section className="auth-context" aria-labelledby="auth-title">
         <div>
-          <span className="auth-mark" aria-hidden="true">C</span>
-          <h1 id="auth-title">Your collection has a trusted place.</h1>
-          <p>
-            Buy, sell and coordinate handoffs with a record that follows every deal from
-            first claim to final collection.
-          </p>
+          <div className="auth-brand">
+            <img className="auth-logo" src="/assets/collecttt_logo.png" alt="CollectTT" />
+          </div>
+          <h1 id="auth-title">Your collection, in one place.</h1>
+          <p>Buy and sell locally with a clear record of every deal.</p>
         </div>
-        <ul className="auth-proof" aria-label="CollectTT trust features">
-          <li>Payments stay between buyer and seller</li>
-          <li>Claims, bids and deadlines use server time</li>
-          <li>Relay releases require confirmed payment</li>
-        </ul>
+        <a className="auth-powered-by" href="https://www.chaconialabs.com" target="_blank" rel="noreferrer">
+          <span>Powered by</span>
+          <img src="/assets/chaconia-labs-lockup.png" alt="Chaconia Labs" />
+        </a>
       </section>
 
       <AuthPanel
         callbackURL={returnTo}
         consoleMode={env().EMAIL_ADAPTER === 'console'}
         oauthFailed={typeof params.error === 'string' || params.oauth === 'failed'}
+        initialMode={initialMode}
       />
     </main>
   );
