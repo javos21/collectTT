@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 const PATH_LABELS: Record<string, string> = {
   cash_meetup: 'Cash meetup',
   remote_ship: 'Ship to you',
-  relay: 'Relay store',
+  relay: 'Store',
   full_service: 'Full-service delivery',
 };
 

@@ -17,7 +17,9 @@ export default async function StoreEntryPage() {
     return (
       <main>
         <h1>Store</h1>
-        <p>You&apos;re not registered as store staff.</p>
+        <p>You&apos;re not registered as Store staff yet.</p>
+        <p>Have a staffed storefront that can hold collector inventory?</p>
+        <Link className="button" href="/store/apply">Apply to become a Store</Link>
       </main>
     );
   }

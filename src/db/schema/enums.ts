@@ -74,6 +74,11 @@ export const offerStatusEnum = pgEnum('offer_status', ['pending', 'accepted', 'r
 export const imageStatusEnum = pgEnum('image_status', ['pending', 'processing', 'ready', 'failed']);
 export const custodyHolderEnum = pgEnum('custody_holder', ['relay_store', 'platform_courier']);
 export const storeStaffRoleEnum = pgEnum('store_staff_role', ['staff', 'manager']);
+export const storeApplicationStatusEnum = pgEnum('store_application_status', [
+  'pending',
+  'confirmed',
+  'declined',
+]);
 export const ratingDirectionEnum = pgEnum('rating_direction', [
   'buyer_rates_seller',
   'seller_rates_buyer',

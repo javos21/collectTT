@@ -8,9 +8,9 @@ web
 
 ## Users
 
-Collectors, buyers, sellers, relay-store staff, and platform administrators in Trinidad
+Collectors, buyers, sellers, Store owners and staff, and platform administrators in Trinidad
 & Tobago. Buyers and sellers use the product to discover and coordinate collectible
-deals; store staff use the custody board to receive, hold, and release items; platform
+deals; Store staff use the custody board to receive, hold, and release items; platform
 administrators will operate the support and moderation console required for launch.
 
 ## Product Purpose
@@ -22,22 +22,45 @@ peer: the platform never holds buyer or seller funds.
 ## Positioning
 
 The product combines a buyer/seller transaction state with a separate item-custody
-state, including relay-store custody and payment-gated release. This makes the deal's
+state, including Store custody and payment-gated release. This makes the deal's
 money track and physical item track explicit instead of pretending they are one status.
 
 ## Operating Context
 
 People browse listings, claim or bid on an item, coordinate payment directly, and may
-drop the item at a nominated relay store. Sellers and buyers need quick status scanning;
-store staff need an operational board with codes, shelf clocks, and clear counter actions.
+drop the item at a nominated Store. Sellers and buyers need quick status scanning;
+Store staff need an operational board with codes, shelf clocks, and clear counter actions.
 
 ## Capabilities and Constraints
 
 The existing app includes Google-first authentication, verified email/password accounts,
 password recovery, listings, category-specific filters, image uploads, straight sales,
-auctions, backup claims, payment handshakes, reputation, ratings, relay custody, drop-off
+auctions, backup claims, payment handshakes, reputation, ratings, Store custody, drop-off
 codes, shelf clocks, and store controls. Preserve all existing routes, server actions,
 state meanings, and accessibility/native browser affordances.
+
+## Account & Store model
+
+- A personal profile can buy and sell. Store staff do not need personal marketplace
+  profiles to perform their jobs.
+- A Store is a separate business profile with one or more invited staff members. Staff
+  share access to the Store workspace for dropped-off and picked-up inventory.
+- Any individual seller can choose a Store as a pickup or drop-off location while the
+  individual remains the seller and owns the listing reputation.
+- A Store may optionally sell Store-owned inventory as the seller. Consigned inventory
+  remains owned by the original seller.
+- `Verified Store` and `Verified Seller` are separate trust states. A paid Pro
+  subscription unlocks seller tools and raffle hosting; payment alone does not create
+  verification.
+
+## MVP monetization scope
+
+- Pro subscription is available to sellers and raffle hosts. It is not required for a
+  Store to provide basic pickup, drop-off, and custody operations.
+- A Pro member may host up to two free raffles per calendar month. Each additional
+  raffle in that month is a paid overage.
+- Store Pro tools, such as advanced inventory management, multiple locations, and
+  expanded staff controls, are outside the MVP.
 
 ## Authentication & Communications
 
@@ -68,6 +91,7 @@ market data, or commercial claims.
 
 - Trust should be legible in the interface, not implied by marketing language.
 - Keep payment, custody, and responsibility states distinct.
+- Keep personal marketplace activity separate from shared Store operations.
 - Let collectors scan dense information quickly without losing confidence.
 - Make the community and local context feel specific, not like a generic marketplace.
 

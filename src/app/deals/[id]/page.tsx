@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic';
 const PATH_LABELS: Record<string, string> = {
   cash_meetup: 'Cash on meetup',
   remote_ship: 'Remote payment + seller ships',
-  relay: 'Relay store drop-off',
+  relay: 'Store drop-off',
   full_service: 'Pickup & delivery',
 };
 

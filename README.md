@@ -9,13 +9,14 @@ and has no PCI scope. It collects only its own service fees, for logistics it ac
 performed. See [product-design-document.md](product-design-document.md) for the full
 rationale.
 
-**Status: Phase 2 complete — relay custody is live.** A full deal now runs end to end,
+**Status: Phase 2 complete — Store custody is live.** A full deal now runs end to end,
 peer to peer: atomic claims with a backup queue, auctions with anti-snipe soft close,
 the mark-paid/confirm-received handshake, automatic renege-and-promote, objective
 reputation with automatic restrictions, and blind mutual ratings. On top of that the
-item track is real: a seller drops an item at a relay store under a drop-off code, the
-store holds it on a time-bounded shelf clock, and it is released to the buyer only once
-payment is confirmed. WhatsApp and the paid delivery rail are Phase 3.
+item track is real: a seller drops an item at a Store under a drop-off code, the Store
+holds it on a time-bounded shelf clock, and it is released to the buyer only once payment
+is confirmed. MVP scope now also includes Pro subscriptions and raffle hosting; WhatsApp
+and the paid delivery rail are Phase 3.
 
 ---
 
@@ -152,10 +153,10 @@ real foreign key to a seeded lookup table, and `listings.attributes` is JSONB va
 by a `.strict()` schema — so integrity stays strict everywhere it matters and
 flexibility lives only where item descriptions genuinely vary.
 
-### Relay custody, concretely
+### Store custody, concretely
 
-A relay listing nominates one or more stores; the buyer picks one from that list when
-they claim (or when they bid), and that choice — not the seller's first-listed store —
+A Store listing nominates one or more Stores; the buyer picks one from that list when
+they claim (or when they bid), and that choice — not the seller's first-listed Store —
 is what the holding opens against. From there the item walks the custody states
 `awaiting_dropoff -> at_relay -> release_authorized -> picked_up`, with
 `returned_to_seller` as the escape hatch at either shelf state.
@@ -209,6 +210,17 @@ sweep fires, the handler re-checks expiry against `now()` in Postgres and no-ops
 clock has since moved; a genuine overstay is flagged and the store is sent the owner's
 contact details so they can chase it. An unpaid item with nobody left to hand it to goes
 back to the seller rather than becoming the shop's problem.
+
+### Pro subscriptions and raffles
+
+Pro is a seller/creator subscription. It is separate from verification: a `Verified
+Seller` or `Verified Store` status comes from the relevant review process, not from
+payment. Pro members can host up to **two free raffles per calendar month**. Each
+additional raffle in that month is a paid overage, enforced server-side and shown before
+the raffle is published. Any member may participate; hosting is the gated capability.
+
+Basic Store custody remains free in the MVP. Store Pro tools for advanced inventory,
+multiple locations, and expanded staff controls are later scope.
 
 ### Invariants the database enforces
 
@@ -300,16 +312,22 @@ deadlines · objective reputation events, counters and automatic restrictions ·
 mutual ratings · public member trust pages · live auction feed by polling
 
 **Phase 2 — done**
-two-track payment/custody model · relay store nomination on a listing, store choice on
-the claim *and* the bid · relay drop-off with `CT-XXXX` codes · SQL-enforced
+two-track payment/custody model · Store nomination on a listing, Store choice on
+the claim *and* the bid · Store drop-off with `CT-XXXX` codes · SQL-enforced
 payment-gated release · store audit/control board with receive-by-code and the four
 counter actions · per-store time-bounded custody with an overstay sweep · size and
 eligibility gate · unpaid-item return-to-seller · per-role custody panel on the deal
 page
 
+**MVP additions — next**
+shared Store profiles with invited staff access · personal sellers can choose a Store as
+their pickup/drop-off location · Store-owned listings can opt into Store Seller mode ·
+Pro seller/creator subscription · up to two free raffles per Pro member per month, with
+paid overage for additional raffles · separate Verified Seller and Verified Store states
+
 **Phase 3 — next**
 WhatsApp notification adapter + store bot · full-service pickup & delivery rail with
 per-zone pricing · WhatsApp OTP · SSE upgrade from polling
 
-**Later** — vouching · power-seller subscription · promoted listings · seller analytics
-· grading concierge · sponsorship placements
+**Later** — Store Pro tools · vouching · promoted listings · seller analytics · grading
+concierge · sponsorship placements

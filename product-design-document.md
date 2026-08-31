@@ -14,13 +14,26 @@ Today, trading happens in a Facebook group: members post items for **straight sa
 
 This product is **not a marketplace.** It is a **trust and coordination layer over peer-to-peer deals that still settle however the two parties agree.** The software makes the *mechanics* fair, makes *accountability* durable, and lowers *trust friction* for newcomers — without ever moving money.
 
+### Account and Store model
+
+CollectTT separates personal marketplace activity from shared Store operations. A person
+may buy and sell through a personal profile, but Store staff do not need personal
+marketplace profiles to do their jobs. A Store is a separate business profile with
+invited staff who share access to receive, hold, release, and mark items picked up.
+
+An individual seller may select a Store as a pickup or drop-off location while remaining
+the seller of record. A Store may optionally list Store-owned inventory as the seller;
+consigned inventory remains owned by the original seller. `Verified Store` and
+`Verified Seller` are separate trust states. A paid Pro subscription unlocks seller and
+raffle-hosting capabilities; payment alone does not create verification.
+
 ### Scope: multiple collectible categories, not one game
 
-The platform is **not specific to any single game or format.** It covers **trading card games** (Pokémon, Magic, Yu-Gi-Oh, sports cards, and others), **comics**, and **general collectibles**. Trust, custody, reputation, the relay flow, and the two-track lifecycle are all category-agnostic — they work identically whether the item is a graded card, a key-issue comic, or a sealed collectible. The only place category matters is **how an item describes itself** (see §3, item model, and §4), which the schema handles cleanly via a `category` field plus a JSONB attributes column. The grading concierge (§7) generalizes naturally, since CGC grades comics and cards and the major grading houses cover this whole world.
+The platform is **not specific to any single game or format.** It covers **trading card games** (Pokémon, Magic, Yu-Gi-Oh, sports cards, and others), **comics**, and **general collectibles**. Trust, custody, reputation, the Store custody flow, and the two-track lifecycle are all category-agnostic — they work identically whether the item is a graded card, a key-issue comic, or a sealed collectible. The only place category matters is **how an item describes itself** (see §3, item model, and §4), which the schema handles cleanly via a `category` field plus a JSONB attributes column. The grading concierge (§7) generalizes naturally, since CGC grades comics and cards and the major grading houses cover this whole world.
 
 ### Load-bearing principle: never touch the money
 
-The moment the platform holds funds, it inherits escrow logic, chargeback handling, refund flows, KYC pressure, and money-transmitter obligations — the exact regulatory and settlement problems that make card processors unusable locally. Staying out of the money keeps **cash-on-meetup a first-class option**, preserves the community feel, and keeps the build small. The platform collects **only its own service fees** for logistics it actually performed. It is a courier and a storage relay, not an escrow agent holding buyer funds.
+The moment the platform holds funds, it inherits escrow logic, chargeback handling, refund flows, KYC pressure, and money-transmitter obligations — the exact regulatory and settlement problems that make card processors unusable locally. Staying out of the money keeps **cash-on-meetup a first-class option**, preserves the community feel, and keeps the build small. The platform collects **only its own service fees** for logistics it actually performed. It is a courier and a custody coordination layer, not an escrow agent holding buyer funds.
 
 ### The one object that fixes everything: a Transaction with a lifecycle
 
@@ -50,9 +63,10 @@ The **mark-paid / confirm-received handshake** is the core trick: it turns fuzzy
 2. **Right-size for the scale.** 2,000 members / 50 concurrent is *tiny*. The engineering goal is the fewest moving parts that are reliable — every extra vendor is another thing to secure, monitor, pay for, and debug for zero benefit at this load.
 3. **Postgres is the centre of gravity.** Database, job queue, and real-time backplane in one system. No Redis, no serverless, no payment processor.
 4. **Objective facts ≠ subjective opinion.** Whether someone paid, and paid on time, are tracked as hard counters — separate from star ratings.
-5. **Physical custody as the trust anchor.** The relay store solves bilateral trust using a shelf and a release-authorization step, achieving an escrow guarantee without touching funds.
-6. **Server-authoritative everything.** Every deadline, claim order, and bid resolves on server time. Never trust client clocks.
-7. **WhatsApp is an enhancement, not a dependency.** Ship on channels with no gatekeeper (in-app + email); add WhatsApp once Meta Business verification clears.
+5. **Physical custody as the trust anchor.** The Store solves bilateral trust using a shelf and a release-authorization step, achieving an escrow guarantee without touching funds.
+6. **Separate personal and Store responsibility.** Store staff operate a shared Store profile; personal listings, reputation, and subscriptions remain attached to the seller of record.
+7. **Server-authoritative everything.** Every deadline, claim order, bid, and raffle cutoff resolves on server time. Never trust client clocks.
+8. **WhatsApp is an enhancement, not a dependency.** Ship on channels with no gatekeeper (in-app + email); add WhatsApp once Meta Business verification clears.
 
 ---
 
@@ -126,12 +140,12 @@ If optimizing purely for real-time-bidding performance-per-dollar, **Elixir/Phoe
 - **Payment track:** `pending → deposit_sent → confirmed`
 - **Custody track:** `awaiting_dropoff → at_relay → released → picked_up`
 
-The relay store gates custody release on payment confirmation. Seller drops the item *before* the buyer pays; store won't release until payment confirms. Buyer's risk (pay, get nothing) and seller's risk (hand over, not get paid) are both covered — **escrow-grade bilateral trust from a shelf and a release step, without touching money.**
+The Store gates custody release on payment confirmation. Seller drops the item *before* the buyer pays; Store staff won't release until payment confirms. Buyer's risk (pay, get nothing) and seller's risk (hand over, not get paid) are both covered — **escrow-grade bilateral trust from a shelf and a release step, without touching money.**
 
 **Fulfillment paths (per-listing field, buyer chooses at claim/checkout):**
 1. **Cash on meetup** — platform uninvolved (the community's heartbeat).
 2. **Remote payment + seller ships** — P2P, platform uninvolved.
-3. **Relay drop-off** — store as physical escrow (your rail).
+3. **Store drop-off** — Store as physical custody (your rail).
 4. **Full-service pickup & delivery** — your team, end-to-end (your rail).
 
 **Reputation split (objective vs subjective).**
@@ -148,23 +162,35 @@ The relay store gates custody release on payment confirmation. Seller drops the 
 
 ---
 
-## 5. Relay Stores: The Store-Side Strategy
+## 5. Stores: The Store-Side Strategy
 
-The stores currently host relay **for free** because it drives **foot traffic** — that's their real incentive, not fee revenue. Leading with "let's add a fee" solves a problem they don't have and threatens the thing they value. Their actual pain is **abuse**: bulky items, indefinite storage, no idea what's paid or whose stuff it is.
+Stores initially provide custody **for free** because it drives **foot traffic** — that's their real incentive, not fee revenue. Leading with "let's add a fee" solves a problem they don't have and threatens the thing they value. Their actual pain is **abuse**: bulky items, indefinite storage, no idea what's paid or whose stuff it is.
 
 **So the audit/control tool is the product — give it away free.** Per store, the log shows: every item held, whose it is, paid/unpaid status, days-in-store, and one-tap release / picked-up. The fee capability lives quietly inside the same tool, switchable on later.
 
 **Kill the abuse structurally:**
 - **Time-bounded custody by default.** Every item gets a holding clock on drop-off. Paid items: buyer has X days before nudges. Unpaid: tighter (pure liability). After grace, item flags "overstayed" and the store gets an eviction prompt with the owner's contact.
-- **Size/eligibility gate.** Relay is for cards, comics, and small sealed/boxed collectibles. Stores set what they accept; ineligible bulk routes to the delivery team or is refused. **If it's not in the log, it doesn't belong there** — that's the answer to meetup-leakage (someone picking "meetup" then dumping the item at a store): no log entry = illegitimate drop, and the store now has tooling to refuse it.
+- **Size/eligibility gate.** Store custody is for cards, comics, and small sealed/boxed collectibles. Stores set what they accept; ineligible bulk routes to the delivery team or is refused. **If it's not in the log, it doesn't belong there** — that's the answer to meetup-leakage (someone picking "meetup" then dumping the item at a Store): no log entry = illegitimate drop, and the Store now has tooling to refuse it.
 - **Unpaid-item return path.** After the payment window lapses, an unpaid item is the *seller's* to reclaim; store is notified; "return to seller" action in the log. Never let an unpaid item become the store's problem.
 
-**Fee model — optional, per-store, structured to amplify foot traffic (never mandatory):**
+**Store fee model — optional and outside the MVP:**
 - **Free-if-fast, fee-if-it-lingers** — first 48–72h free (buyer still walks in → footfall preserved), fee only on overstay. Turns the fee into a storage-discipline mechanism aimed at the abuse case.
-- **Store credit instead of cash** — relay fee redeemable in-store; the buyer arrives to collect with a small credit burning a hole and spends it. Best structure for footfall-motivated stores.
+- **Store credit instead of cash** — any holding fee is redeemable in-store; the buyer arrives to collect with a small credit burning a hole and spends it. Best structure for footfall-motivated Stores.
 - **Fee only on unpaid/reneged items** — the ones creating dead storage with no sale to justify them.
 
-Stores keep most/all of the *holding* fee (their shelf, their pain). **Your revenue is the delivery/pickup rail**, where you actually do the work — don't fight the stores for the shelf fee.
+Stores keep most/all of the *holding* fee (their shelf, their pain). **Your MVP revenue focus is Pro seller/creator subscriptions and paid raffle overage**, while longer-term revenue can come from the delivery/pickup rail, where you actually do the work. Store Pro tools are also outside the MVP.
+
+### Pro subscriptions and raffles
+
+Pro is a seller/creator subscription, not a paid verification shortcut. Verification is
+earned through the applicable identity or Store review; Pro unlocks higher-value selling
+and hosting capabilities.
+
+Raffle hosting is an MVP capability. Any member may participate, but hosting requires a
+Pro subscription. Each Pro member may host up to **two free raffles per calendar month**;
+each additional raffle in that month is a paid overage. The subscription and overage
+rules must be visible before a host publishes a raffle, and the system must enforce the
+monthly allowance server-side.
 
 ---
 
@@ -179,8 +205,14 @@ Stores keep most/all of the *holding* fee (their shelf, their pain). **Your reve
 - **Payment window** with auto-`reneged` + backup promotion
 - Objective reputation counters + automatic low-rep restrictions (prepay/meetup-only)
 - **Blind mutual ratings** on completed deals
-- Relay custody track + **store audit/control log** (release / picked-up / overstay)
+- Store custody track + **Store audit/control log** (release / picked-up / overstay)
 - Time-bounded custody + size/eligibility gate + unpaid-item return path
+- Shared Store profiles with invited staff access; personal sellers can choose a Store as
+  a pickup/drop-off location, while Store-owned inventory can be sold by the Store
+- **Pro seller/creator subscription** with separate Verified Seller and Verified Store
+  states
+- **Raffle hosting** for Pro members: two free raffles per calendar month, then paid
+  overage for additional raffles
 - Channel-agnostic notifications: **in-app + email** (Brevo)
 - Image upload → R2 with responsive sizes; standard gallery (no deep zoom)
 
@@ -193,9 +225,9 @@ Stores keep most/all of the *holding* fee (their shelf, their pain). **Your reve
 - Listing analytics for sellers
 
 ### Later
-- **Power-seller subscription** (more active listings, verified badge, analytics, bulk-listing, reduced promotion fees)
+- **Store Pro tools** (advanced inventory, multiple locations, additional staff controls)
 - **Native promoted listings** (bump/highlight)
-- **Grading concierge** (batch card *and comic* submission to PSA/CGC via relay stores, handling margin)
+- **Grading concierge** (batch card *and comic* submission to PSA/CGC via Stores, handling margin)
 - **Local hobby-shop sponsorships** (card / comic / collectible shops)
 - True tiled deep-zoom (OpenSeadragon/IIIF) for crystal-level detail
 - Store-credit ledger (if stores adopt credit-based fees)
@@ -206,12 +238,13 @@ Stores keep most/all of the *holding* fee (their shelf, their pain). **Your reve
 
 Ranked by fit for a 2,000-member niche community. **Charge only where you rendered a service.**
 
-1. **Full-service pickup & delivery (anchor rail).** Flat per-zone delivery fee + optional value-tiered handling rate for high-value items. Collected by your team as a service charge (cash on delivery or transfer). You are a courier, not an escrow agent — the *payment for the item* always flows buyer↔seller separately.
-2. **Power-seller subscription (best recurring revenue).** Your heavy sellers pay monthly for more concurrent listings, verified badge, analytics, bulk tools, reduced promotion fees. Predictable in a way per-transaction fees never are at this scale. You already know who these people are.
-3. **Grading concierge (highest-margin, most on-brand).** Batch-collect cards *and comics* through relay stores, submit to the major grading houses (PSA/CGC — CGC grades both cards and comics) in bulk, charge a handling margin on the grading fee. A service people *want*, not a tax — uses infrastructure you're already building, and it now spans every category on the platform.
-4. **Native promoted listings.** Seller pays to bump/highlight. "Ads done right" — your own inventory, zero trust cost.
-5. **Local hobby-shop sponsorships** (card shops, comic shops, collectible dealers). One engaged, hyper-targeted local shop paying for storefront/"sponsored by" presence is worth more than millions of programmatic impressions.
-6. **Relay holding fees** — optional, per-store, mostly kept by the stores (see §5). Not a platform revenue centre.
+1. **Pro seller/creator subscription (primary recurring revenue).** Sellers and raffle hosts pay monthly for more active listings, analytics, bulk tools, and raffle hosting. Verification remains a separate review outcome; the subscription does not buy a trust badge.
+2. **Paid raffle overage.** Each Pro member receives two free raffle hosts per calendar month; additional raffles are charged individually. The allowance and price must be clear before publishing.
+3. **Full-service pickup & delivery (anchor rail).** Flat per-zone delivery fee + optional value-tiered handling rate for high-value items. Collected by your team as a service charge (cash on delivery or transfer). You are a courier, not an escrow agent — the *payment for the item* always flows buyer↔seller separately.
+4. **Grading concierge (highest-margin, most on-brand).** Batch-collect cards *and comics* through Stores, submit to the major grading houses (PSA/CGC — CGC grades both cards and comics) in bulk, charge a handling margin on the grading fee. A service people *want*, not a tax — uses infrastructure you're already building, and it now spans every category on the platform.
+5. **Native promoted listings.** Seller pays to bump/highlight. "Ads done right" — your own inventory, zero trust cost.
+6. **Local hobby-shop sponsorships** (card shops, comic shops, collectible dealers). One engaged, hyper-targeted local shop paying for storefront/"sponsored by" presence is worth more than millions of programmatic impressions.
+7. **Store holding fees** — optional, per-store, mostly kept by the Stores (see §5). Not a platform revenue centre.
 
 ### Explicitly avoided
 - **Scattered Google/AdSense ads.** At this scale, revenue is cents-to-low-single-digit-dollars/month — real effort for nothing — while signalling the *opposite* of trust in a trust product, risking ads for competing marketplaces or scam sites, and adding page weight and consent overhead. Native promotion + local sponsorship deliver the same money better, kept inside your ecosystem. **One local shop sponsor beats a million AdSense impressions here.**
@@ -260,11 +293,12 @@ Render Pro workspace ($25, 25 GB bandwidth) + Standard web ($25) + Standard work
 The reassuring headline: **infrastructure opex is trivially small (~$25–70/mo).** The real question isn't "can revenue cover opex" — it can, easily — it's "can revenue justify *your time.*"
 
 **How little it takes to break even on infrastructure:**
-- **One** power-seller subscription (~US$10–15/mo) covers roughly half of opex on its own.
+- **One** Pro seller/creator subscription can cover roughly half of opex on its own.
+- **A small number of paid raffle overages** adds transaction revenue without charging every Pro member upfront.
 - **A handful of deliveries per week** at a modest per-delivery service fee covers opex entirely.
 - **One grading-concierge batch per month** can exceed a month's opex in margin alone.
 
-Any *one* of your four real revenue streams (delivery rail, subscription, grading, sponsorship) covers full infrastructure cost at low activity. Stacked, they leave comfortable margin for your time. This validates the "never touch money" architecture: by removing the payment processor, PCI scope, and money-transmitter exposure, you also removed the largest cost *and* risk class — which is exactly why break-even is so easy to reach.
+Any *one* of the core revenue streams (subscription, raffle overage, delivery rail, grading, or sponsorship) can cover full infrastructure cost at low activity. Stacked, they leave comfortable margin for your time. This validates the "never touch money" architecture: by removing the payment processor, PCI scope, and money-transmitter exposure, you also removed the largest cost and risk class.
 
 ---
 
@@ -277,13 +311,16 @@ Postgres schema for Users, Listings (with `category` + JSONB `attributes`), Bids
 Straight-sale atomic claim + backup queue. Auctions + anti-snipe soft close. Transaction lifecycle + mark-paid/confirm handshake. Payment window → reneged → promote. Objective reputation counters + restrictions. Blind mutual ratings. Live feed via polling. *Deliverable: a full deal runs end-to-end, P2P.*
 
 **Phase 2 — Custody & store tooling**
-Two-track (payment + custody) model. Relay drop-off flow. **Store audit/control log** (release / picked-up / overstay). Time-bounded custody, size gate, unpaid-item return path. In-app + email notifications hardened. *Deliverable: relay escrow works; stores get their control tool.*
+Two-track (payment + custody) model. Store drop-off flow. **Store audit/control log** (release / picked-up / overstay). Shared Store profile with invited staff access. Time-bounded custody, size gate, unpaid-item return path. In-app + email notifications hardened. *Deliverable: Store custody works; Stores get their control tool.*
 
-**Phase 3 — WhatsApp + your paid rail**
+**Phase 3 — MVP monetization & raffles**
+Pro seller/creator subscription. Two free raffle hosts per Pro member per calendar month, with paid overage for additional raffles. Server-enforced monthly allowance, clear pricing before publishing, separate Verified Seller and Verified Store states, and Store-owned listings as an opt-in seller mode. *Deliverable: the MVP has a credible recurring revenue path without charging Stores for basic custody.*
+
+**Phase 4 — WhatsApp + your paid rail**
 Begin **Meta Business verification early** (it gates this phase — see §11). WhatsApp notification adapter + store bot. Full-service pickup & delivery flow with per-zone pricing. WhatsApp OTP. Upgrade live feed polling → SSE. *Deliverable: your monetizable logistics rail is live.*
 
-**Phase 4 — Monetization & polish**
-Vouching. Power-seller subscription. Native promoted listings. Seller analytics. Grading-concierge intake. Sponsorship placements. *Deliverable: revenue streams switched on.*
+**Phase 5 — Later monetization & polish**
+Store Pro tools. Vouching. Native promoted listings. Seller analytics. Grading-concierge intake. Sponsorship placements. *Deliverable: advanced revenue and operations tools are switched on.*
 
 **Parallel throughout — the real hard part (non-technical).** The build isn't the risk; pulling 2,000 people out of a Facebook group where the network effect already lives is. Plan to **run both in parallel** and **seed the app with your power sellers first.**
 
@@ -298,6 +335,11 @@ Vouching. Power-seller subscription. Native promoted listings. Seller analytics.
 **Community migration (the actual make-or-break).** Technology won't move the network effect; incentives and seeding will. **Mitigation:** parallel-run, power-seller seeding, and lead store adoption with *their* pain (the free audit tool), not a fee.
 
 **Store resistance to fees.** Solved by decoupling: give the control tool free, make fees optional/per-store/footfall-amplifying (§5).
+
+**Raffle compliance and abuse.** Raffles can create additional legal, eligibility, prize,
+and moderation obligations. **Mitigation:** make legal/compliance review a launch gate;
+publish clear rules, entry eligibility, draw timing, winner selection, and refund/cancel
+handling before enabling paid raffle overages.
 
 **Better Auth maturity.** It's a newer library. **Mitigation:** the durable decision is "self-hosted, own-your-data auth in Postgres" — if Better Auth disappoints, the principle survives a swap. Before launch, pin and exercise the deployed version, monitor its advisories and migration notes, and retain regression coverage for Google, credentials, linking, verification, reset, and session revocation.
 

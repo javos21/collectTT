@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic';
 const PATH_LABELS: Record<string, string> = {
   cash_meetup: 'Cash on meetup',
   remote_ship: 'Remote payment + seller ships',
-  relay: 'Relay store drop-off',
+  relay: 'Store drop-off',
   full_service: 'Pickup & delivery',
 };
 
@@ -88,7 +88,7 @@ export default async function ListingPage({
 
   const minBid = minimumNextBid(listing.currentBidCents, listing.startBidCents ?? 0);
 
-  // Candidate relay stores for the picker — UX filtering only; claimListing re-runs
+  // Candidate stores for the picker — UX filtering only; claimListing re-runs
   // the real gate server-side.
   const relayCandidates = listing.fulfillmentPaths.includes('relay')
     ? await candidateStoresFor(db, id, listing.sizeClass)
@@ -97,7 +97,7 @@ export default async function ListingPage({
   // ★ Never offer a path the member cannot actually complete. A listing can declare
   //   `relay` while every store the seller nominated has since been deactivated or
   //   stopped accepting this size — `candidateStoresFor` then returns nothing, no
-  //   picker renders, and choosing "Relay store drop-off" is refused only AFTER the
+  //   picker renders, and choosing "Store drop-off" is refused only AFTER the
   //   form is submitted. Both the bid form and the claim form read this list.
   const choosablePaths = listing.fulfillmentPaths.filter(
     (path) => path !== 'relay' || relayCandidates.length > 0,
@@ -113,7 +113,7 @@ export default async function ListingPage({
   const settleForm = (idPrefix: string, fieldPrefix = '') =>
     choosablePaths.length === 0 ? (
       <p className="buybox__note">
-        No settlement method is available right now — the seller only offers relay
+        No settlement method is available right now — the seller only offers store
         drop-off and none of their stores can take this item.
       </p>
     ) : (
@@ -140,7 +140,7 @@ export default async function ListingPage({
                 </option>
               ))}
             </select>
-            <p className="buybox__note">Only used if you pick relay drop-off.</p>
+            <p className="buybox__note">Only used if you pick store drop-off.</p>
           </>
         )}
       </>

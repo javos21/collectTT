@@ -26,6 +26,17 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong';
 }
 
+function view(formData: FormData): string {
+  const candidate = String(formData.get('view') ?? '');
+  return ['overview', 'shelf', 'ready', 'expected', 'settled'].includes(candidate)
+    ? candidate
+    : 'overview';
+}
+
+function storeUrl(storeId: string, query: string, dashboardView: string): string {
+  return `/store/${storeId}?${query}&view=${encodeURIComponent(dashboardView)}`;
+}
+
 /**
  * ★ A counter terminal is the likeliest place in this app to meet an expired session —
  *   a tab open since morning, a customer at the till. That must be a sign-in redirect,
@@ -50,14 +61,15 @@ async function counterSession(storeId: string): Promise<StoreSession> {
 export async function receiveByCodeAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const code = String(formData.get('code') ?? '');
+  const dashboardView = view(formData);
   const session = await counterSession(storeId);
 
   const found = await findHoldingByCode(db, storeId, code);
   if (found === null) {
     redirect(
-      `/store/${storeId}?refuse=${encodeURIComponent(
+      storeUrl(storeId, `refuse=${encodeURIComponent(
         'No expected drop-off with that code. Do not accept this item.',
-      )}`,
+      )}`, dashboardView),
     );
   }
 
@@ -71,11 +83,11 @@ export async function receiveByCodeAction(formData: FormData): Promise<void> {
       });
     });
   } catch (error) {
-    redirect(`/store/${storeId}?error=${encodeURIComponent(message(error))}`);
+    redirect(storeUrl(storeId, `error=${encodeURIComponent(message(error))}`, dashboardView));
   }
 
   revalidatePath(`/store/${storeId}`);
-  redirect(`/store/${storeId}?ok=${encodeURIComponent(`Received "${found.listingTitle}"`)}`);
+  redirect(storeUrl(storeId, `ok=${encodeURIComponent(`Received "${found.listingTitle}"`)}`, dashboardView));
 }
 
 /**
@@ -86,6 +98,7 @@ export async function receiveByCodeAction(formData: FormData): Promise<void> {
 export async function authorizeReleaseAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const holdingId = String(formData.get('holdingId') ?? '');
+  const dashboardView = view(formData);
   const session = await counterSession(storeId);
 
   try {
@@ -98,20 +111,21 @@ export async function authorizeReleaseAction(formData: FormData): Promise<void> 
       });
     });
   } catch (error) {
-    redirect(`/store/${storeId}?error=${encodeURIComponent(message(error))}`);
+    redirect(storeUrl(storeId, `error=${encodeURIComponent(message(error))}`, dashboardView));
   }
 
   revalidatePath(`/store/${storeId}`);
   redirect(
-    `/store/${storeId}?ok=${encodeURIComponent(
+    storeUrl(storeId, `ok=${encodeURIComponent(
       'Cleared for collection. Hand it over and mark it picked up.',
-    )}`,
+    )}`, dashboardView),
   );
 }
 
 export async function markPickedUpAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const holdingId = String(formData.get('holdingId') ?? '');
+  const dashboardView = view(formData);
   const session = await counterSession(storeId);
 
   try {
@@ -124,17 +138,18 @@ export async function markPickedUpAction(formData: FormData): Promise<void> {
       });
     });
   } catch (error) {
-    redirect(`/store/${storeId}?error=${encodeURIComponent(message(error))}`);
+    redirect(storeUrl(storeId, `error=${encodeURIComponent(message(error))}`, dashboardView));
   }
 
   revalidatePath(`/store/${storeId}`);
-  redirect(`/store/${storeId}?ok=${encodeURIComponent('Collected. Off your shelf.')}`);
+  redirect(storeUrl(storeId, `ok=${encodeURIComponent('Collected. Off your shelf.')}`, dashboardView));
 }
 
 export async function returnToSellerAction(formData: FormData): Promise<void> {
   const storeId = String(formData.get('storeId') ?? '');
   const holdingId = String(formData.get('holdingId') ?? '');
   const reason = String(formData.get('reason') ?? '').trim();
+  const dashboardView = view(formData);
   const session = await counterSession(storeId);
 
   try {
@@ -148,11 +163,9 @@ export async function returnToSellerAction(formData: FormData): Promise<void> {
       });
     });
   } catch (error) {
-    redirect(`/store/${storeId}?error=${encodeURIComponent(message(error))}`);
+    redirect(storeUrl(storeId, `error=${encodeURIComponent(message(error))}`, dashboardView));
   }
 
   revalidatePath(`/store/${storeId}`);
-  redirect(
-    `/store/${storeId}?ok=${encodeURIComponent('Marked returned to seller. The seller is told.')}`,
-  );
+  redirect(storeUrl(storeId, `ok=${encodeURIComponent('Marked returned to seller. The seller is told.')}`, dashboardView));
 }

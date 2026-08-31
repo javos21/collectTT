@@ -49,7 +49,7 @@ export function DeliveryFields({ relayStoreOptions }: { relayStoreOptions: Relay
       )}
 
       {relaySelected && relayStoreOptions.length === 0 && (
-        <p className="form-note">Relay is unavailable until a store is added.</p>
+        <p className="form-note">Store drop-off is unavailable until a store is added.</p>
       )}
     </>
   );

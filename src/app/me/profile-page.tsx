@@ -89,6 +89,7 @@ interface ProfilePageProps {
 
 const date = (value: string) => new Date(value).toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' });
 const titleCase = (value: string) => value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const fulfillmentLabel = (value: string) => ({ cash_meetup: 'Cash meetup', remote_ship: 'Ship to buyer', relay: 'Store drop-off', full_service: 'Pickup & delivery' })[value] ?? titleCase(value);
 
 const DetailRow: FC<{ icon: ReactNode; label: string; value: ReactNode }> = ({ icon, label, value }) => (
   <div className="profile-detail-row">
@@ -153,7 +154,7 @@ function DetailsPanel({ profile, counters, listings, objectiveLines }: Pick<Prof
 }
 
 function ClaimsPanel({ claims }: Pick<ProfilePageProps, 'claims'>) {
-  return <div className="profile-content-stack">{claims.length === 0 ? <EmptyState icon={<ShoppingBag size={22} />} title="No claims yet">When you claim a fixed-price listing, it will appear here with its place in the queue.</EmptyState> : <div className="profile-list">{claims.map((claim) => <article className="profile-list-row" key={claim.id}><div className="profile-list-row__icon profile-list-row__icon--purple"><ShoppingBag size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{claim.title}</h3><p>Claimed {date(claim.claimedAt)} · {titleCase(claim.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value={claim.status} /><small>Queue position {claim.position}</small></div></article>)}</div>}</div>;
+  return <div className="profile-content-stack">{claims.length === 0 ? <EmptyState icon={<ShoppingBag size={22} />} title="No claims yet">When you claim a fixed-price listing, it will appear here with its place in the queue.</EmptyState> : <div className="profile-list">{claims.map((claim) => <article className="profile-list-row" key={claim.id}><div className="profile-list-row__icon profile-list-row__icon--purple"><ShoppingBag size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{claim.title}</h3><p>Claimed {date(claim.claimedAt)} · {fulfillmentLabel(claim.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value={claim.status} /><small>Queue position {claim.position}</small></div></article>)}</div>}</div>;
 }
 
 function ListingsPanel({ listings }: Pick<ProfilePageProps, 'listings'>) {
@@ -166,7 +167,7 @@ function BidsOffersPanel({ bids, offers }: Pick<ProfilePageProps, 'bids' | 'offe
 
 function CollectionPanel({ deals }: Pick<ProfilePageProps, 'deals'>) {
   const collectionDeals = deals.filter((deal) => ['relay', 'full_service'].includes(deal.fulfillmentPath) && deal.state === 'open');
-  return <div className="profile-content-stack">{collectionDeals.length === 0 ? <EmptyState icon={<PackageCheck size={22} />} title="Nothing waiting at a store">Relay collections and seller drop-offs will appear here when a deal is in progress.</EmptyState> : <div className="profile-list">{collectionDeals.map((deal) => <article className="profile-list-row" key={deal.id}><div className="profile-list-row__icon profile-list-row__icon--green"><PackageCheck size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{deal.title}</h3><p>{deal.role} · {titleCase(deal.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value="open" /><ChevronRight size={18} aria-hidden="true" /></div></article>)}</div>}</div>;
+  return <div className="profile-content-stack">{collectionDeals.length === 0 ? <EmptyState icon={<PackageCheck size={22} />} title="Nothing waiting at a store">Store collections and seller drop-offs will appear here when a deal is in progress.</EmptyState> : <div className="profile-list">{collectionDeals.map((deal) => <article className="profile-list-row" key={deal.id}><div className="profile-list-row__icon profile-list-row__icon--green"><PackageCheck size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{deal.title}</h3><p>{deal.role} · {fulfillmentLabel(deal.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value="open" /><ChevronRight size={18} aria-hidden="true" /></div></article>)}</div>}</div>;
 }
 
 function HistoryPanel({ deals, ratings }: Pick<ProfilePageProps, 'deals' | 'ratings'>) {

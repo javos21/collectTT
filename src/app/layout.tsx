@@ -36,6 +36,7 @@ async function SiteNavigation() {
       <Link href="/listings/new"><Plus className="nav-icon" aria-hidden="true" />Sell</Link>
       <Link href="/deals"><CoinsSwap01 className="nav-icon" aria-hidden="true" />My deals</Link>
       {stores.length > 0 && <Link href="/store"><Building05 className="nav-icon" aria-hidden="true" />Store</Link>}
+      {viewer !== null && stores.length === 0 && <Link href="/store/apply"><Building05 className="nav-icon" aria-hidden="true" />Become a Store</Link>}
       {viewer === null ? (
         <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
       ) : (

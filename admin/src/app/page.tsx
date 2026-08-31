@@ -1,5 +1,4 @@
-import Link from 'next/link';
-import { Activity, ArrowUpRight, ClipboardList, Gavel, LayoutDashboard, ShieldCheck, Store, Users } from 'lucide-react';
+import { Activity, ClipboardList, Gavel, ShieldCheck, Users } from 'lucide-react';
 import { count, desc, eq } from 'drizzle-orm';
 
 import { db } from '../../../src/db/client';
@@ -8,36 +7,11 @@ import { claims, listings } from '../../../src/db/schema/listings';
 import { profiles } from '../../../src/db/schema/profiles';
 import { transactions } from '../../../src/db/schema/transactions';
 import { currentUser } from '../../../src/lib/session';
-
-const marketplaceUrl = process.env.APP_URL ?? 'http://localhost:3000';
-const adminUrl = process.env.ADMIN_APP_URL ?? 'http://localhost:3001';
+import { AdminDenied } from './admin-access';
+import { AdminFrame } from './admin-frame';
 
 function displayStatus(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function AdminDenied({ signedIn }: { signedIn: boolean }) {
-  return (
-    <main className="admin-denied">
-      <div className="admin-modal__backdrop" aria-hidden="true" />
-      <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-access-title">
-        <div className="admin-modal__header">
-          <div className="admin-denied__mark"><ShieldCheck size={26} aria-hidden="true" /></div>
-        </div>
-        <div className="admin-modal__copy">
-          <p className="admin-kicker">CollectTT Admin</p>
-          <h1 id="admin-access-title">Admin access required</h1>
-          <p>{signedIn ? 'Your account is signed in, but it does not have administrator access.' : 'Sign in with an administrator account to continue.'}</p>
-        </div>
-        <div className="admin-denied__actions">
-          <a className="admin-button" href={`${marketplaceUrl}/sign-in?callbackURL=${encodeURIComponent(adminUrl)}`}>Sign in</a>
-          <a className="admin-button admin-button--secondary" href={marketplaceUrl}>Back to CollectTT</a>
-        </div>
-        <p className="admin-modal__footnote">Access is controlled by your CollectTT administrator role.</p>
-      </section>
-      <span className="sr-only">The admin workspace is unavailable without administrator permissions.</span>
-    </main>
-  );
 }
 
 export default async function AdminPage() {
@@ -72,26 +46,7 @@ export default async function AdminPage() {
   ];
 
   return (
-    <div className="admin-shell">
-      <header className="admin-topbar">
-        <Link className="admin-brand" href="/" aria-label="CollectTT Admin overview"><span className="admin-brand__dot" />CollectTT <em>Admin</em></Link>
-        <div className="admin-topbar__actions">
-          <span className="admin-topbar__user">{viewer.displayName}</span>
-          <a className="admin-topbar__marketplace" href={marketplaceUrl}>Open marketplace <ArrowUpRight size={15} aria-hidden="true" /></a>
-        </div>
-      </header>
-      <div className="admin-layout">
-        <aside className="admin-sidebar">
-          <p className="admin-sidebar__label">Workspace</p>
-          <nav aria-label="Admin navigation">
-            <Link className="is-active" href="/"><LayoutDashboard size={17} aria-hidden="true" />Overview</Link>
-            <a href="#listings"><ClipboardList size={17} aria-hidden="true" />Listings</a>
-            <a href="#members"><Users size={17} aria-hidden="true" />Members</a>
-            <a href="#deals"><Activity size={17} aria-hidden="true" />Deals</a>
-            <a href="#stores"><Store size={17} aria-hidden="true" />Relay stores</a>
-          </nav>
-          <div className="admin-sidebar__note"><ShieldCheck size={17} aria-hidden="true" /><span>Admin actions should always leave an audit trail.</span></div>
-        </aside>
+    <AdminFrame viewer={viewer} activeNav="overview">
         <main className="admin-main">
           <div className="admin-heading">
             <div><p className="admin-kicker">Operations</p><h1>Admin overview</h1><p>Keep the marketplace healthy, trusted, and moving.</p></div>
@@ -109,12 +64,11 @@ export default async function AdminPage() {
             </section>
             <section className="admin-panel admin-panel--focus">
               <div className="admin-panel__heading"><div><p className="admin-kicker">Next checks</p><h2>Trust &amp; safety</h2></div><ShieldCheck size={19} aria-hidden="true" /></div>
-              <div className="admin-checklist"><div><span className="admin-checklist__indicator admin-checklist__indicator--green" /><div><strong>Reputation events</strong><p>Objective activity powers account protections.</p></div></div><div><span className="admin-checklist__indicator admin-checklist__indicator--blue" /><div><strong>Moderation queue</strong><p>Review reports and account restrictions here.</p></div></div><div><span className="admin-checklist__indicator admin-checklist__indicator--amber" /><div><strong>Relay operations</strong><p>Monitor store handoffs and open custody work.</p></div></div></div>
+              <div className="admin-checklist"><div><span className="admin-checklist__indicator admin-checklist__indicator--green" /><div><strong>Reputation events</strong><p>Objective activity powers account protections.</p></div></div><div><span className="admin-checklist__indicator admin-checklist__indicator--blue" /><div><strong>Moderation queue</strong><p>Review reports and account restrictions here.</p></div></div><div><span className="admin-checklist__indicator admin-checklist__indicator--amber" /><div><strong>Store operations</strong><p>Monitor store handoffs and open custody work.</p></div></div></div>
               <p className="admin-panel__note">This is the initial admin shell. High-impact actions will be added behind explicit confirmations and audit logging.</p>
             </section>
           </div>
         </main>
-      </div>
-    </div>
+    </AdminFrame>
   );
 }
