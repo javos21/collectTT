@@ -109,11 +109,15 @@ export function EditListingForm({
       </fieldset>
 
       {imageIds.map((imageId) => <input key={imageId} type="hidden" name="imageIds" value={imageId} />)}
-      <div className="create-step-actions">
-        <a className="button secondary" href={`/listings/${listingId}`}>Cancel</a>
-        {!locked && <button type="submit">Save changes</button>}
+      <div className="create-step-actions edit-actions">
+        <a className="button secondary" href={`/listings/${listingId}`}>Cancel Edit</a>
+        {!locked && (
+          <div className="edit-actions__right">
+            <button type="submit">Save changes</button>
+            <button className="secondary edit-cancel-button" type="submit" name="intent" value="cancel" formAction={cancelAction} onClick={(event) => { if (!window.confirm('Cancel this listing? Buyers will no longer be able to find it.')) event.preventDefault(); }}>Cancel listing</button>
+          </div>
+        )}
       </div>
-      {!locked && <button className="secondary edit-cancel-button" type="submit" name="intent" value="cancel" formAction={cancelAction} onClick={(event) => { if (!window.confirm('Cancel this listing? Buyers will no longer be able to find it.')) event.preventDefault(); }}>Cancel listing</button>}
     </form>
   );
 }

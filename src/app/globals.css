@@ -212,10 +212,20 @@ header.site .brand-logo {
 .home-category small { margin-top: .15rem; color: #78909b; font-size: .72rem; }
 .home-category__arrow { margin-left: auto; color: #87aeb7; font-size: 1.1rem; }
 .home-listing-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .85rem; }
+.home-carousel { display: grid; gap: .85rem; }
+.home-carousel__controls { display: flex; align-items: center; justify-content: center; gap: .8rem; }
+.home-carousel__arrow { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin: 0; padding: 0; border: 1px solid #a5b4fc; border-radius: 50%; color: #3730a3; background: #eef2ff; cursor: pointer; }
+.home-carousel__arrow:hover:not(:disabled), .home-carousel__arrow:focus-visible:not(:disabled) { border-color: #4338ca; color: #fff; background: #4338ca; }
+.home-carousel__arrow:disabled { cursor: not-allowed; opacity: .42; }
+.home-carousel__arrow svg { width: 18px; height: 18px; }
+.home-carousel__progress { display: flex; align-items: center; justify-content: center; gap: .55rem; min-width: 96px; color: #667985; font-size: .75rem; font-weight: 750; }
+.home-carousel__dots { display: flex; align-items: center; gap: .25rem; }
+.home-carousel__dots span { display: block; width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+.home-carousel__dots span.is-active { width: 18px; border-radius: 999px; background: #4338ca; }
 .home-listing-tile { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--home-line); border-radius: 15px; color: var(--home-ink); background: #fff; text-decoration: none; box-shadow: 0 5px 15px rgba(26,94,125,.05); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
 .home-listing-tile:hover { border-color: #a9dce5; box-shadow: 0 12px 24px rgba(26,94,125,.12); transform: translateY(-3px); }
 .home-listing-tile__image { display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; background: linear-gradient(145deg, #e8f6f8, #f4efe5); color: #6e8b94; font-size: .65rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
-.home-listing-tile__image img { width: 100%; height: 100%; object-fit: contain; object-position: center; padding: .35rem; }
+.home-listing-tile__image img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; object-fit: contain; object-position: center; }
 .home-listing-tile__body { min-width: 0; padding: .8rem .85rem .9rem; }
 .home-listing-tile__tags { display: flex; flex-wrap: wrap; gap: .28rem; margin-bottom: .55rem; }
 .home-listing-tile__tags .pill { padding: .2rem .45rem; font-size: .57rem; }
@@ -1296,7 +1306,7 @@ header.site .phase { color: #557783; }
 .catalog-card { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--brand-line); border-radius: 15px; background: #fff; transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .catalog-card:hover { border-color: #9ed8e2; box-shadow: 0 12px 26px rgba(26,94,125,.11); transform: translateY(-3px); }
 .catalog-card__image { display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; color: #668893; background: linear-gradient(145deg, #e9f7fa, #f6f0e6); font-size: .64rem; font-weight: 750; letter-spacing: .05em; text-decoration: none; text-transform: uppercase; }
-.catalog-card__image img { width: 100%; height: 100%; object-fit: contain; object-position: center; padding: .35rem; }
+.catalog-card__image img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; object-fit: contain; object-position: center; }
 .catalog-card__body { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: .8rem; }
 .catalog-card__tags { display: flex; flex-wrap: wrap; gap: .28rem; margin-bottom: .55rem; }
 .catalog-card__tags .pill { padding: .2rem .45rem; font-size: .57rem; }
@@ -1341,7 +1351,11 @@ header.site .phase { color: #557783; }
 .edit-current-photos__grid img { width: 100%; aspect-ratio: 1; object-fit: contain; border: 1px solid var(--brand-line); border-radius: 10px; background: #f5f5f4; padding: .2rem; }
 .edit-lock-notice { display: flex; gap: .55rem; margin-bottom: 1rem; padding: .85rem 1rem; border: 1px solid #fde68a; border-radius: 12px; color: #92400e; background: #fffbeb; font-size: .8rem; }
 .edit-lock-notice strong { flex: none; }
-.edit-cancel-button { margin-top: .2rem; color: #b42318; }
+.edit-cancel-button { margin: 0; min-width: 150px; min-height: 50px; color: #b42318 !important; border-color: #f0b8b2 !important; background: #fff7f5 !important; }
+.edit-actions__right { display: flex; align-items: center; gap: .75rem; }
+.edit-actions__right > button { min-width: 150px; min-height: 50px; margin: 0; }
+.delivery-estimates { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--brand-line); }
+.delivery-estimates h3 { margin: 0 0 .65rem; color: var(--brand-ink); font-size: .9rem; }
 .edit-audit { margin: 1rem 0; padding: 1rem 1.2rem; border: 1px solid var(--brand-line); border-radius: 16px; background: #fff; }
 .edit-audit h2 { margin: 0 0 .7rem; color: var(--brand-ink); font-size: .9rem; }
 .edit-audit ul { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
@@ -2065,6 +2079,9 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   .create-progress li { align-items: center; flex-direction: column; gap: .25rem; text-align: center; }
   .create-progress li:not(:last-child)::after { top: 14px; right: -50%; left: calc(50% + 17px); }
   .create-step-actions button { flex: 1; }
+  .edit-actions { align-items: stretch; flex-direction: column; }
+  .edit-actions__right { width: 100%; }
+  .edit-actions__right > button { min-width: 0; flex: 1; }
 }
 
 /* Home-page browse shortcuts and listing actions */
@@ -2161,7 +2178,7 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   align-items: center;
   justify-content: center;
   min-height: 38px;
-  margin-top: .85rem;
+  margin-top: auto;
   padding: .55rem .75rem;
   gap: .4rem;
   border: 1px solid #a5b4fc;
@@ -2192,7 +2209,7 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   grid-column: auto;
   margin-top: .15rem;
 }
-.home-listing-tile__cta { margin-top: .85rem; }
+.home-listing-tile__cta { margin-top: auto; }
 .home-section__heading a svg {
   width: 15px;
   height: 15px;
