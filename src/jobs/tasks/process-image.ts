@@ -15,6 +15,7 @@ import type { Helpers } from 'graphile-worker';
 
 import { db } from '../../db/client';
 import { images } from '../../db/schema/images';
+import { MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS, UPLOAD_CONTENT_TYPE } from '../../lib/image-policy';
 import { getObject, putObject, variantKey } from '../../lib/storage';
 
 /**
@@ -50,6 +51,17 @@ export async function processImage(payload: Payload, helpers: Helpers): Promise<
   try {
     const original = await getObject(row.key);
     const meta = await sharp(original).metadata();
+    const width = meta.width ?? 0;
+    const height = meta.height ?? 0;
+    // New uploads are required to be WebP by confirmUpload. These legacy formats are
+    // still accepted here so jobs created before the compression change can finish.
+    if (meta.format !== 'jpeg' && meta.format !== 'png' && meta.format !== 'webp' && meta.format !== 'avif') {
+      throw new Error('Uploaded image format is not supported.');
+    }
+    if (width <= 0 || height <= 0) throw new Error('Uploaded image has no usable dimensions.');
+    if (Math.max(width, height) > MAX_IMAGE_DIMENSION || width * height > MAX_IMAGE_PIXELS) {
+      throw new Error('Uploaded image dimensions exceed the allowed limit.');
+    }
 
     const variants: Record<string, { key: string; w: number; h: number }> = {};
 
@@ -78,9 +90,9 @@ export async function processImage(payload: Payload, helpers: Helpers): Promise<
       .set({
         status: 'ready',
         variants,
-        width: meta.width ?? null,
-        height: meta.height ?? null,
-        contentType: meta.format !== undefined ? `image/${meta.format}` : null,
+        width,
+        height,
+        contentType: meta.format === 'jpeg' ? 'image/jpeg' : meta.format === 'png' ? 'image/png' : meta.format === 'avif' ? 'image/avif' : UPLOAD_CONTENT_TYPE,
         bytes: original.byteLength,
         processedAt: sql`now()`,
       })

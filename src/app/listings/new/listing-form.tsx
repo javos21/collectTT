@@ -85,6 +85,10 @@ export function ListingForm({
       return;
     }
     if (!validateStep(5)) event.preventDefault();
+    if (formRef.current?.querySelector('[data-image-upload-pending="true"]') !== null) {
+      event.preventDefault();
+      setStepError('Wait for your photos to finish uploading before publishing.');
+    }
   }
 
   return (

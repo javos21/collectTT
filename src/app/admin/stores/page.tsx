@@ -1,11 +1,11 @@
 import { CheckCircle2, Clock3, ExternalLink, MapPin, ShieldCheck, Store as StoreIcon, XCircle } from 'lucide-react';
 import { eq } from 'drizzle-orm';
 
-import { db } from '../../../../src/db/client';
-import { profiles } from '../../../../src/db/schema/profiles';
-import { storeApplications } from '../../../../src/db/schema/store-applications';
-import { currentUser } from '../../../../src/lib/session';
-import { listStoreApplications } from '../../../../src/services/store-applications';
+import { db } from '@/db/client';
+import { profiles } from '@/db/schema/profiles';
+import { storeApplications } from '@/db/schema/store-applications';
+import { currentUser } from '@/lib/session';
+import { listStoreApplications } from '@/services/store-applications';
 import { AdminDenied } from '../admin-access';
 import { AdminFrame } from '../admin-frame';
 import { confirmStoreApplicationAction, declineStoreApplicationAction } from './actions';
@@ -77,3 +77,4 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
     </AdminFrame>
   );
 }
+

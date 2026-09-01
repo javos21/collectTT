@@ -1,7 +1,7 @@
 /**
  * Image upload endpoints.
  *
- *   POST /api/images         -> reserve a row, return a presigned PUT URL
+ *   POST /api/images         -> reserve a row, return a presigned PUT URL for WebP bytes
  *   PUT  <presigned url>     -> browser uploads bytes DIRECTLY to storage (not here)
  *   POST /api/images/confirm -> queue variant generation in the worker
  *

@@ -96,3 +96,4 @@ function CatalogForm({ tab, item, onClose }: { tab: Tab; item: CategoryItem | Va
     </div>
   );
 }
+

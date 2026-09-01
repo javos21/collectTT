@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   const updated = await db.update(profiles).set({ role: 'admin' }).where(eq(profiles.userId, user.id)).returning({ userId: profiles.userId });
   if (updated[0] === undefined) throw new Error(`No profile found for ${email}.`);
 
-  console.log(`[admin] ${user.name} (${email}) can now access http://localhost:3001`);
+  console.log(`[admin] ${user.name} (${email}) can now access http://localhost:3000/admin`);
   await pool.end();
 }
 

@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 
-const marketplaceUrl = process.env.APP_URL ?? 'http://localhost:3000';
-const adminUrl = process.env.ADMIN_APP_URL ?? 'http://localhost:3001';
+const marketplaceUrl = '/';
+const adminUrl = '/admin';
 
 export function AdminDenied({ signedIn }: { signedIn: boolean }) {
   return (
@@ -17,7 +17,7 @@ export function AdminDenied({ signedIn }: { signedIn: boolean }) {
           <p>{signedIn ? 'Your account is signed in, but it does not have administrator access.' : 'Sign in with an administrator account to continue.'}</p>
         </div>
         <div className="admin-denied__actions">
-          <a className="admin-button" href={`${marketplaceUrl}/sign-in?callbackURL=${encodeURIComponent(adminUrl)}`}>Sign in</a>
+          <a className="admin-button" href={`/sign-in?callbackURL=${encodeURIComponent(adminUrl)}`}>Sign in</a>
           <a className="admin-button admin-button--secondary" href={marketplaceUrl}>Back to CollectTT</a>
         </div>
         <p className="admin-modal__footnote">Access is controlled by your CollectTT administrator role.</p>
@@ -26,3 +26,4 @@ export function AdminDenied({ signedIn }: { signedIn: boolean }) {
     </main>
   );
 }
+

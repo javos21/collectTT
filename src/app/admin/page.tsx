@@ -1,12 +1,12 @@
 import { Activity, ClipboardList, Gavel, ShieldCheck, Users } from 'lucide-react';
 import { count, desc, eq } from 'drizzle-orm';
 
-import { db } from '../../../src/db/client';
-import { users } from '../../../src/db/schema/auth';
-import { claims, listings } from '../../../src/db/schema/listings';
-import { profiles } from '../../../src/db/schema/profiles';
-import { transactions } from '../../../src/db/schema/transactions';
-import { currentUser } from '../../../src/lib/session';
+import { db } from '@/db/client';
+import { users } from '@/db/schema/auth';
+import { claims, listings } from '@/db/schema/listings';
+import { profiles } from '@/db/schema/profiles';
+import { transactions } from '@/db/schema/transactions';
+import { currentUser } from '@/lib/session';
 import { AdminDenied } from './admin-access';
 import { AdminFrame } from './admin-frame';
 
@@ -72,3 +72,4 @@ export default async function AdminPage() {
     </AdminFrame>
   );
 }
+

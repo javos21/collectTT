@@ -224,7 +224,7 @@ export default async function ListingPage({
               <div className="gallery__track">
                 {images.map((image, index) => {
                   const variants = imageVariants(image.variants);
-                  const key = variants.large ?? variants.card ?? variants.thumb ?? image.r2KeyOriginal;
+                  const key = variants.full ?? variants.card ?? variants.thumb ?? image.r2KeyOriginal;
                   return (
                     <div className="gallery__slide" key={image.id} id={`img-${image.id}`}>
                       {key !== undefined ? (

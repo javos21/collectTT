@@ -1,11 +1,11 @@
 import { asc, eq } from 'drizzle-orm';
 
-import { db } from '../../../../src/db/client';
-import { catalogValues } from '../../../../src/db/schema/catalog';
-import { categories } from '../../../../src/db/schema/listings';
-import { profiles } from '../../../../src/db/schema/profiles';
-import { CATEGORIES, CATEGORY_LIST } from '../../../../src/domain/categories/definitions';
-import { currentUser } from '../../../../src/lib/session';
+import { db } from '@/db/client';
+import { catalogValues } from '@/db/schema/catalog';
+import { categories } from '@/db/schema/listings';
+import { profiles } from '@/db/schema/profiles';
+import { CATEGORIES, CATEGORY_LIST } from '@/domain/categories/definitions';
+import { currentUser } from '@/lib/session';
 import { AdminDenied } from '../admin-access';
 import { AdminFrame } from '../admin-frame';
 import { CatalogManager } from './catalog-manager';
@@ -45,3 +45,4 @@ export default async function CatalogPage({ searchParams }: { searchParams: Prom
 
   return <AdminFrame viewer={viewer} activeNav="catalog"><main className="admin-main"><div className="admin-heading"><div><p className="admin-kicker">Marketplace structure</p><h1>Catalog</h1><p>Manage the vocabulary sellers use to describe what they collect.</p></div><span className="admin-environment">Admin only</span></div><CatalogManager categories={mergedCategories} values={mergedValues} notice={params.notice} /></main></AdminFrame>;
 }
+

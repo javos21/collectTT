@@ -8,10 +8,8 @@
   },
   "scripts": {
     "dev": "next dev",
-    "dev:admin": "npm run dev --prefix admin",
     "dev:worker": "tsx watch src/jobs/worker.ts",
     "build": "next build",
-    "build:admin": "npm run build --prefix admin",
     "start": "next start",
     "start:worker": "tsx src/jobs/worker.ts",
     "db:generate": "drizzle-kit generate",

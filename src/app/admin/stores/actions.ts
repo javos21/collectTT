@@ -4,16 +4,16 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 
-import { db } from '../../../../src/db/client';
-import { profiles } from '../../../../src/db/schema/profiles';
-import { currentUser } from '../../../../src/lib/session';
-import { confirmStoreApplication, declineStoreApplication } from '../../../../src/services/store-applications';
+import { db } from '@/db/client';
+import { profiles } from '@/db/schema/profiles';
+import { currentUser } from '@/lib/session';
+import { confirmStoreApplication, declineStoreApplication } from '@/services/store-applications';
 
 async function requireAdmin() {
   const viewer = await currentUser();
-  if (viewer === null) redirect('/');
+  if (viewer === null) redirect('/admin');
   const profile = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.userId, viewer.userId)).limit(1);
-  if (profile[0]?.role !== 'admin') redirect('/');
+  if (profile[0]?.role !== 'admin') redirect('/admin');
   return viewer;
 }
 
@@ -22,9 +22,9 @@ function text(formData: FormData, field: string): string {
 }
 
 function finish(message: string): never {
-  revalidatePath('/stores');
+  revalidatePath('/admin/stores');
   revalidatePath('/store');
-  redirect(`/stores?notice=${encodeURIComponent(message)}`);
+  redirect(`/admin/stores?notice=${encodeURIComponent(message)}`);
 }
 
 export async function confirmStoreApplicationAction(formData: FormData): Promise<void> {

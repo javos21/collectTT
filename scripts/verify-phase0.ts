@@ -31,23 +31,23 @@ async function main(): Promise<void> {
   }
 
   console.log('1. requesting a presigned upload…');
-  const ticket = await createUploadTicket(owner, 'image/png');
+  const ticket = await createUploadTicket(owner, 'image/webp');
   console.log(`   image ${ticket.imageId}`);
 
   console.log('2. uploading straight to storage (the web process never sees the bytes)…');
-  const png = await sharp({
+  const webp = await sharp({
     create: { width: 1200, height: 1600, channels: 3, background: { r: 200, g: 40, b: 40 } },
   })
-    .png()
+    .webp({ quality: 88 })
     .toBuffer();
 
   const res = await fetch(ticket.uploadUrl, {
     method: 'PUT',
-    body: new Uint8Array(png),
-    headers: { 'content-type': 'image/png' },
+    body: new Uint8Array(webp),
+    headers: { 'content-type': 'image/webp' },
   });
   if (!res.ok) throw new Error(`upload failed: ${res.status} ${await res.text()}`);
-  console.log(`   ${png.byteLength} bytes -> HTTP ${res.status}`);
+  console.log(`   ${webp.byteLength} bytes -> HTTP ${res.status}`);
 
   console.log('3. confirming — enqueues image:process in the SAME transaction…');
   await confirmUpload(ticket.imageId, owner);
@@ -65,6 +65,9 @@ async function main(): Promise<void> {
   if (row.status !== 'ready') {
     throw new Error(`expected status "ready", got "${row.status}" — is the worker running?`);
   }
+  if (!row.r2KeyOriginal.startsWith(`images/${ticket.imageId}/source.webp`)) {
+    throw new Error(`unexpected source key: ${row.r2KeyOriginal}`);
+  }
   console.log(`   status ${row.status}, source ${row.width}x${row.height}`);
 
   console.log('5. verifying every variant exists in storage…');
@@ -75,6 +78,9 @@ async function main(): Promise<void> {
   for (const [name, v] of Object.entries(variants)) {
     const bytes = await getObject(v.key);
     if (bytes.byteLength === 0) throw new Error(`variant ${name} is empty`);
+    if (!v.key.startsWith(`images/${ticket.imageId}/variants/`)) {
+      throw new Error(`unexpected variant key for ${name}: ${v.key}`);
+    }
     console.log(
       `   ${name.padEnd(6)} ${String(v.w).padStart(4)}x${String(v.h).padStart(4)}  ` +
         `${String(bytes.byteLength).padStart(7)} bytes`,

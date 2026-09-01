@@ -2,9 +2,13 @@
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
-type UploadState = 'uploading' | 'ready' | 'error';
+import { compressImage } from '@/lib/image-compression';
+import { MAX_IMAGE_BYTES } from '@/lib/image-policy';
+
+type UploadState = 'compressing' | 'uploading' | 'ready' | 'error';
 
 type UploadItem = {
+  localId: string;
   id?: string;
   name: string;
   previewUrl: string;
@@ -13,7 +17,6 @@ type UploadItem = {
 };
 
 const MAX_FILES = 8;
-const MAX_BYTES = 15 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);
 
 export function ImageUploader() {
@@ -35,36 +38,50 @@ export function ImageUploader() {
     event.target.value = '';
     if (files.length === 0) return;
 
-    const remaining = Math.max(0, MAX_FILES - items.length);
+    const remaining = Math.max(0, MAX_FILES - itemsRef.current.length);
     const nextFiles = files.slice(0, remaining);
     const nextItems = nextFiles.map<UploadItem>((file) => ({
+      localId: crypto.randomUUID(),
       name: file.name,
       previewUrl: URL.createObjectURL(file),
-      state: 'uploading',
+      state: 'compressing',
     }));
 
     setItems((current) => [...current, ...nextItems]);
 
     await Promise.all(nextFiles.map(async (file, index) => {
-      const itemIndex = items.length + index;
+      const item = nextItems[index];
+      if (item === undefined) return;
+      const localId = item.localId;
+      let imageId: string | undefined;
+      const update = (changes: Partial<UploadItem>) => {
+        setItems((current) => current.map((currentItem) => (
+          currentItem.localId === localId ? { ...currentItem, ...changes } : currentItem
+        )));
+      };
+
       try {
         if (!ACCEPTED_TYPES.has(file.type)) throw new Error('Use JPEG, PNG, WebP or AVIF images.');
-        if (file.size > MAX_BYTES) throw new Error('Images must be 15 MB or smaller.');
+        if (file.size > MAX_IMAGE_BYTES) throw new Error('Images must be 15 MB or smaller.');
+
+        const compressed = await compressImage(file);
+        update({ state: 'uploading', name: compressed.file.name });
 
         const ticketResponse = await fetch('/api/images', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contentType: file.type }),
+          body: JSON.stringify({ contentType: compressed.file.type }),
         });
         const ticket = (await ticketResponse.json()) as { imageId?: string; uploadUrl?: string; error?: string };
         if (!ticketResponse.ok || ticket.imageId === undefined || ticket.uploadUrl === undefined) {
           throw new Error(ticket.error ?? 'Could not prepare this image.');
         }
 
+        imageId = ticket.imageId;
         const uploadResponse = await fetch(ticket.uploadUrl, {
           method: 'PUT',
-          headers: { 'Content-Type': file.type },
-          body: file,
+          headers: { 'Content-Type': compressed.file.type },
+          body: compressed.file,
         });
         if (!uploadResponse.ok) throw new Error('Could not upload this image.');
 
@@ -78,15 +95,12 @@ export function ImageUploader() {
           throw new Error(result.error ?? 'Could not finish this upload.');
         }
 
-        setItems((current) => current.map((item, currentIndex) => (
-          currentIndex === itemIndex ? { ...item, id: ticket.imageId, state: 'ready' } : item
-        )));
+        update({ id: ticket.imageId, state: 'ready' });
       } catch (error) {
-        setItems((current) => current.map((item, currentIndex) => (
-          currentIndex === itemIndex
-            ? { ...item, state: 'error', error: error instanceof Error ? error.message : 'Upload failed.' }
-            : item
-        )));
+        if (imageId !== undefined) {
+          void fetch(`/api/images/${imageId}`, { method: 'DELETE' }).catch(() => undefined);
+        }
+        update({ state: 'error', error: error instanceof Error ? error.message : 'Upload failed.' });
       }
     }));
   }
@@ -95,12 +109,18 @@ export function ImageUploader() {
     setItems((current) => {
       const item = current[index];
       if (item !== undefined) URL.revokeObjectURL(item.previewUrl);
+      if (item?.id !== undefined) {
+        void fetch(`/api/images/${item.id}`, { method: 'DELETE' }).catch(() => undefined);
+      }
       return current.filter((_, currentIndex) => currentIndex !== index);
     });
   }
 
   return (
-    <div className="image-uploader">
+    <div
+      className="image-uploader"
+      data-image-upload-pending={items.some((item) => item.state === 'compressing' || item.state === 'uploading') ? 'true' : undefined}
+    >
       <div className="image-uploader__head">
         <div>
           <h3>Photos</h3>
@@ -126,8 +146,23 @@ export function ImageUploader() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={item.previewUrl} alt="" />
               <div className="image-uploader__status">
-                <span>{item.state === 'uploading' ? 'Uploading…' : item.state === 'ready' ? 'Ready' : item.error}</span>
-                <button type="button" className="secondary" onClick={() => remove(index)}>Remove</button>
+                <span aria-live="polite">
+                  {item.state === 'compressing'
+                    ? 'Compressing…'
+                    : item.state === 'uploading'
+                      ? 'Uploading…'
+                      : item.state === 'ready'
+                        ? 'Ready'
+                        : item.error}
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => remove(index)}
+                  disabled={item.state === 'compressing' || item.state === 'uploading'}
+                >
+                  Remove
+                </button>
               </div>
               {item.id !== undefined && <input type="hidden" name="imageIds" value={item.id} />}
             </div>

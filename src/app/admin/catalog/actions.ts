@@ -4,11 +4,11 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
 
-import { db } from '../../../../src/db/client';
-import { catalogValues } from '../../../../src/db/schema/catalog';
-import { categories } from '../../../../src/db/schema/listings';
-import { profiles } from '../../../../src/db/schema/profiles';
-import { currentUser } from '../../../../src/lib/session';
+import { db } from '@/db/client';
+import { catalogValues } from '@/db/schema/catalog';
+import { categories } from '@/db/schema/listings';
+import { profiles } from '@/db/schema/profiles';
+import { currentUser } from '@/lib/session';
 
 function text(formData: FormData, field: string): string {
   return String(formData.get(field) ?? '').trim();
@@ -20,15 +20,15 @@ function safeKey(label: string): string {
 
 async function requireAdmin() {
   const viewer = await currentUser();
-  if (viewer === null) redirect('/');
+  if (viewer === null) redirect('/admin');
   const profile = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.userId, viewer.userId)).limit(1);
-  if (profile[0]?.role !== 'admin') redirect('/');
+  if (profile[0]?.role !== 'admin') redirect('/admin');
   return viewer;
 }
 
 function finish(message: string): never {
-  revalidatePath('/catalog');
-  redirect(`/catalog?notice=${encodeURIComponent(message)}`);
+  revalidatePath('/admin/catalog');
+  redirect(`/admin/catalog?notice=${encodeURIComponent(message)}`);
 }
 
 export async function saveCategoryAction(formData: FormData): Promise<void> {

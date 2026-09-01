@@ -13,6 +13,8 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectsCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -76,6 +78,17 @@ export async function putObject(opts: {
   );
 }
 
+export async function headObject(key: string): Promise<{
+  contentLength: number | undefined;
+  contentType: string | undefined;
+}> {
+  const result = await storage().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
+  return {
+    contentLength: result.ContentLength,
+    contentType: result.ContentType,
+  };
+}
+
 export async function getObject(key: string): Promise<Buffer> {
   const result = await storage().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
   if (result.Body === undefined) throw new Error(`Object not found: ${key}`);
@@ -91,11 +104,23 @@ export async function deleteObject(key: string): Promise<void> {
   await storage().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
 }
 
-/** Deterministic key layout, so an object's purpose is readable from its path. */
-export function originalKey(imageId: string, ext: string): string {
-  return `originals/${imageId}.${ext}`;
+export async function deleteObjects(keys: string[]): Promise<void> {
+  const uniqueKeys = [...new Set(keys)].filter((key) => key !== '');
+  if (uniqueKeys.length === 0) return;
+
+  await storage().send(
+    new DeleteObjectsCommand({
+      Bucket: bucket(),
+      Delete: { Objects: uniqueKeys.map((Key) => ({ Key })) },
+    }),
+  );
 }
 
-export function variantKey(imageId: string, variant: string, ext: string): string {
-  return `variants/${imageId}/${variant}.${ext}`;
+/** Deterministic key layout, so an object's purpose is readable from its path. */
+export function originalKey(imageId: string, _ext = 'webp'): string {
+  return `images/${imageId}/source.webp`;
+}
+
+export function variantKey(imageId: string, variant: string, ext = 'webp'): string {
+  return `images/${imageId}/variants/${variant}.${ext}`;
 }

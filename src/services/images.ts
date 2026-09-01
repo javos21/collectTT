@@ -7,21 +7,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import { db } from '../db/client';
 import { images } from '../db/schema/images';
+import { listingImages } from '../db/schema/listings';
 import { enqueue } from '../jobs/enqueue';
-import { originalKey, presignUpload } from '../lib/storage';
+import { MAX_IMAGE_BYTES, UPLOAD_CONTENT_TYPE } from '../lib/image-policy';
+import { deleteObjects, headObject, originalKey, presignUpload } from '../lib/storage';
 
-const ALLOWED = new Map([
-  ['image/jpeg', 'jpg'],
-  ['image/png', 'png'],
-  ['image/webp', 'webp'],
-  ['image/avif', 'avif'],
-]);
-
-export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+export { MAX_IMAGE_BYTES } from '../lib/image-policy';
 
 export interface UploadTicket {
   imageId: string;
@@ -34,13 +29,12 @@ export async function createUploadTicket(
   ownerUserId: string,
   contentType: string,
 ): Promise<UploadTicket> {
-  const ext = ALLOWED.get(contentType);
-  if (ext === undefined) {
-    throw new Error(`Unsupported image type: ${contentType}. Use JPEG, PNG, WebP or AVIF.`);
+  if (contentType !== UPLOAD_CONTENT_TYPE) {
+    throw new Error('Images must be compressed to WebP before upload.');
   }
 
   const imageId = randomUUID();
-  const key = originalKey(imageId, ext);
+  const key = originalKey(imageId);
 
   await db.insert(images).values({
     id: imageId,
@@ -60,23 +54,74 @@ export async function createUploadTicket(
  * never be marked uploaded without its processing job existing.
  */
 export async function confirmUpload(imageId: string, ownerUserId: string): Promise<void> {
+  const rows = await db
+    .select({ id: images.id, owner: images.ownerUserId, status: images.status, key: images.r2KeyOriginal })
+    .from(images)
+    .where(eq(images.id, imageId))
+    .limit(1);
+
+  const row = rows[0];
+  if (row === undefined) throw new Error('Image not found');
+  if (row.owner !== ownerUserId) throw new Error('Not your image');
+  // Already queued or processed — confirming twice is a no-op, not an error.
+  if (row.status !== 'pending') return;
+
+  let stored: Awaited<ReturnType<typeof headObject>>;
+  try {
+    stored = await headObject(row.key);
+  } catch {
+    throw new Error('Uploaded image could not be found in storage.');
+  }
+
+  if (stored.contentLength === undefined || stored.contentLength <= 0) {
+    throw new Error('Uploaded image is empty.');
+  }
+  if (stored.contentLength > MAX_IMAGE_BYTES) {
+    throw new Error('Compressed image is too large.');
+  }
+  if (stored.contentType?.toLowerCase() !== UPLOAD_CONTENT_TYPE) {
+    throw new Error('Uploaded image must be a WebP file.');
+  }
+
   await db.transaction(async (tx) => {
-    const rows = await tx
-      .select({ id: images.id, owner: images.ownerUserId, status: images.status })
+    const current = await tx
+      .select({ owner: images.ownerUserId, status: images.status })
       .from(images)
       .where(eq(images.id, imageId))
       .limit(1);
 
-    const row = rows[0];
-    if (row === undefined) throw new Error('Image not found');
-    if (row.owner !== ownerUserId) throw new Error('Not your image');
-    // Already queued or processed — confirming twice is a no-op, not an error.
-    if (row.status !== 'pending') return;
+    const latest = current[0];
+    if (latest === undefined) throw new Error('Image not found');
+    if (latest.owner !== ownerUserId) throw new Error('Not your image');
+    if (latest.status !== 'pending') return;
 
-    // ★ Enqueued on the same transaction as the confirmation: an image can never be
-    //   confirmed without its processing job existing.
+    // Enqueued on the same transaction as confirmation: an image can never be
+    // confirmed without its processing job existing.
     await enqueue(tx, 'image:process', { imageId }, { jobKey: `image:${imageId}` });
   });
+}
+
+/** Remove an unassociated upload and all of its generated objects. */
+export async function deleteImage(imageId: string, ownerUserId: string): Promise<void> {
+  const rows = await db
+    .select({ id: images.id, owner: images.ownerUserId, status: images.status, sourceKey: images.r2KeyOriginal, variants: images.variants })
+    .from(images)
+    .where(and(eq(images.id, imageId), eq(images.ownerUserId, ownerUserId)))
+    .limit(1);
+
+  const row = rows[0];
+  if (row === undefined) throw new Error('Image not found');
+  if (row.status === 'processing') throw new Error('Image is still processing. Try again shortly.');
+
+  const linked = await db
+    .select({ listingId: listingImages.listingId })
+    .from(listingImages)
+    .where(eq(listingImages.imageId, imageId))
+    .limit(1);
+  if (linked[0] !== undefined) throw new Error('Images already attached to a listing cannot be removed.');
+
+  await deleteObjects([row.sourceKey, ...Object.values(imageVariants(row.variants))]);
+  await db.delete(images).where(eq(images.id, imageId));
 }
 
 export async function getImage(imageId: string) {

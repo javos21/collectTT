@@ -34,11 +34,11 @@ npm run seed:dev          # optional: sample members and listings
 
 npm run dev               # web process    -> http://localhost:3000
 npm run dev:worker        # worker process (separate terminal)
-npm run dev:admin         # admin process -> http://localhost:3001
 ```
 
-The admin app uses the same database and authentication session, but requires the
-existing `admin` profile role. Promote a local account explicitly when needed:
+The admin workspace is served by the main web process at `http://localhost:3000/admin`.
+It uses the same database and authentication session, but requires the existing `admin`
+profile role. Promote a local account explicitly when needed:
 
 ```bash
 npm run admin:grant -- you@example.com
