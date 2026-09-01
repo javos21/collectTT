@@ -23,9 +23,9 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm ci && npm run build
-    # Render's free plan does not provide a service shell. Apply committed schema
-    # migrations during startup before Next handles requests.
-    startCommand: npm run db:migrate && npm run start
+    # `prestart` in package.json applies committed migrations before Next handles
+    # requests, including when Render uses a dashboard-level start command override.
+    startCommand: npm run start
     healthCheckPath: /
     envVars:
       - key: NODE_ENV
