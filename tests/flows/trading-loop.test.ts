@@ -154,9 +154,9 @@ describe('★ atomic straight-sale claim', () => {
     // ★ Exactly one winner, decided by the database, not by luck of ordering.
     expect(claimed).toHaveLength(1);
 
-    // The stack is capped at 4 (1 active + 3 queued); the rest are rejected.
-    expect(queued.length).toBeLessThanOrEqual(3);
-    expect(claimed.length + queued.length).toBeLessThanOrEqual(4);
+    // The stack is capped at 3 total live claimants (1 active + 2 queued).
+    expect(queued.length).toBeLessThanOrEqual(2);
+    expect(claimed.length + queued.length).toBeLessThanOrEqual(3);
 
     const rows = await db.select().from(claims).where(eq(claims.listingId, listingId));
     expect(rows.filter((c) => c.status === 'active')).toHaveLength(1);

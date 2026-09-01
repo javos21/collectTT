@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { parseMoneyInput } from '@/domain/money';
 import { currentUser } from '@/lib/session';
-import { updateListingBasics } from '@/services/listings';
+import { cancelListing, updateListingBasics } from '@/services/listings';
 
 const money = (formData: FormData): number | undefined => {
   const raw = String(formData.get('price') ?? '').trim();
@@ -22,6 +22,11 @@ export async function updateListingAction(formData: FormData): Promise<void> {
       title: String(formData.get('title') ?? ''),
       description: String(formData.get('description') ?? '') || undefined,
       priceCents: money(formData),
+      acceptsOffers: formData.get('acceptsOffers') !== null,
+      paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
+      deliveryEstimates: Object.fromEntries(
+        formData.getAll('fulfillmentPaths').map(String).map((path) => [path, Number(formData.get(`deliveryEstimate__${path}`) ?? 0)]),
+      ),
       imageIds: formData.getAll('imageIds').map(String),
     });
     redirect(`/listings/${listingId}`);
@@ -34,5 +39,19 @@ export async function updateListingAction(formData: FormData): Promise<void> {
       redirect(`/listings/${listingId}/edit?error=${encodeURIComponent(error.message)}`);
     }
     throw error;
+  }
+}
+
+export async function cancelListingAction(formData: FormData): Promise<void> {
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+
+  const listingId = String(formData.get('listingId') ?? '');
+  try {
+    await cancelListing(user.userId, listingId);
+    redirect(`/listings/${listingId}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not cancel this listing.';
+    redirect(`/listings/${listingId}/edit?error=${encodeURIComponent(message)}`);
   }
 }

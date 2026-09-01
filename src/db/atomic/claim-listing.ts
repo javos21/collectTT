@@ -129,6 +129,7 @@ export async function claimListing(opts: {
         source: 'claim',
         claimId: claim.id,
         listingTitle: listing.title,
+        paymentWindowHours: listing.paymentWindowHours,
         relayStoreId: opts.relayStoreId ?? null,
       });
 
@@ -173,11 +174,17 @@ export async function claimListing(opts: {
     }
 
     const depth = await tx.execute(sql`
-      select coalesce(max(position), 0) + 1 as next from claims where listing_id = ${opts.listingId}
+      select
+        count(*) filter (where status in ('active', 'queued', 'promoted'))::int as live,
+        coalesce(max(position) filter (where status in ('active', 'queued', 'promoted')), 0) + 1 as next
+      from claims
+      where listing_id = ${opts.listingId}
     `);
-    const position = Number((depth.rows[0] as { next: string }).next);
+    const depthRow = depth.rows[0] as { live: number | string; next: number | string };
+    const live = Number(depthRow.live);
+    const position = Number(depthRow.next);
 
-    if (position > WINDOWS.maxClaimStackDepth) {
+    if (live >= WINDOWS.maxClaimStackDepth || position > WINDOWS.maxClaimStackDepth) {
       throw new ConflictError(
         `The backup queue for this listing is full (${WINDOWS.maxClaimStackDepth} deep).`,
       );

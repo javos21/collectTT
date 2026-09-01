@@ -229,6 +229,7 @@ export async function placeBid(opts: {
         source: 'auction_win',
         winningBidId: bid.id,
         listingTitle: listing.title,
+        paymentWindowHours: listing.paymentWindowHours,
         relayStoreId: opts.relayStoreId ?? null,
       });
 

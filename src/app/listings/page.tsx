@@ -326,8 +326,11 @@ export default async function BrowsePage({
                         <div className="catalog-card__price">
                           <span className="catalog-card__price-label">{row.saleType === 'auction' ? 'Current bid' : 'Sale price'}</span>
                           <strong className="num">{row.saleType === 'auction' ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0) : formatMoney(row.priceCents ?? 0)}</strong>
-                          {row.saleType === 'straight_sale' && (
+                          {row.saleType === 'straight_sale' && row.acceptsOffers && (
                             <span className="catalog-card__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
+                          )}
+                          {row.saleType === 'straight_sale' && row.liveClaimCount > 0 && (
+                            <span className="catalog-card__offers">First claim in progress · {row.liveClaimCount}/3 claimed</span>
                           )}
                           {row.saleType === 'auction' && <small>{row.bidCount} bid{row.bidCount === 1 ? '' : 's'}</small>}
                           {row.saleType === 'auction' && (
@@ -336,7 +339,7 @@ export default async function BrowsePage({
                             </span>
                           )}
                         </div>
-                        <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : 'View listing'}</Link>
+                        <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : row.liveClaimCount > 0 ? 'Join queue' : 'View listing'}</Link>
                       </div>
                     </div>
                   </article>

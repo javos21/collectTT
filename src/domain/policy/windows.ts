@@ -51,11 +51,11 @@ export const WINDOWS = {
   },
 
   /** How deep the straight-sale backup claim stack goes. */
-  maxClaimStackDepth: 4,
+  maxClaimStackDepth: 3,
 } as const;
 
-export function paymentWindowMs(path: FulfillmentPath): number {
-  return WINDOWS.payment[path];
+export function paymentWindowMs(path: FulfillmentPath, paymentWindowHours?: number): number {
+  return paymentWindowHours === undefined ? WINDOWS.payment[path] : paymentWindowHours * HOUR;
 }
 
 export function sellerDropoffWindowMs(path: FulfillmentPath): number | null {
@@ -74,10 +74,10 @@ export interface Deadlines {
  * Compute both deadlines for a new transaction.
  * `now` MUST come from the database clock.
  */
-export function computeDeadlines(path: FulfillmentPath, now: Date): Deadlines {
+export function computeDeadlines(path: FulfillmentPath, now: Date, paymentWindowHours?: number): Deadlines {
   const dropoffMs = sellerDropoffWindowMs(path);
   return {
-    paymentDeadlineAt: new Date(now.getTime() + paymentWindowMs(path)),
+    paymentDeadlineAt: new Date(now.getTime() + paymentWindowMs(path, paymentWindowHours)),
     sellerDropoffDeadlineAt: dropoffMs === null ? null : new Date(now.getTime() + dropoffMs),
   };
 }

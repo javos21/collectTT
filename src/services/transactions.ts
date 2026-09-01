@@ -89,6 +89,8 @@ export interface OpenTransactionInput {
   winningBidId?: string | null;
   offerId?: string | null;
   listingTitle: string;
+  /** Listing-wide seller choice; omitted for legacy rows, which use policy defaults. */
+  paymentWindowHours?: number;
   /** Which relay store the buyer chose. Required for the `relay` path only. */
   relayStoreId?: string | null;
 }
@@ -101,7 +103,7 @@ export interface OpenTransactionInput {
 export async function openTransaction(input: OpenTransactionInput): Promise<{ id: string }> {
   const { tx } = input;
   const now = await dbNow(tx);
-  const deadlines = computeDeadlines(input.fulfillmentPath, now);
+  const deadlines = computeDeadlines(input.fulfillmentPath, now, input.paymentWindowHours);
 
   // Attempt numbers are unique per listing; a promotion opens the next one.
   const prior = await tx
@@ -693,7 +695,21 @@ export async function promoteNextCandidate(
     try {
       const transactionId = await tx.transaction(async (sp) => {
         if (candidate.claimId !== undefined) {
-          await sp.update(claims).set({ status: 'active' }).where(eq(claims.id, candidate.claimId));
+          // A promoted backup becomes the new first claimant. Re-number the remaining
+          // live queue behind them so a failed first claim frees the third slot for a
+          // new buyer instead of leaving a misleading historical position gap.
+          await sp
+            .update(claims)
+            .set({ status: 'active', position: 1 })
+            .where(eq(claims.id, candidate.claimId));
+          const remaining = await sp
+            .select({ id: claims.id })
+            .from(claims)
+            .where(and(eq(claims.listingId, listingId), eq(claims.status, 'queued')))
+            .orderBy(claims.position);
+          for (const [index, queued] of remaining.entries()) {
+            await sp.update(claims).set({ position: index + 2 }).where(eq(claims.id, queued.id));
+          }
         }
 
         const opened = await openTransaction({
@@ -707,6 +723,7 @@ export async function promoteNextCandidate(
           claimId: candidate.claimId ?? null,
           winningBidId: candidate.bidId ?? null,
           listingTitle: listing.title,
+          paymentWindowHours: listing.paymentWindowHours,
           relayStoreId: candidate.relayStoreId ?? null,
         });
 

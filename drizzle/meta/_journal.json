@@ -64,6 +64,41 @@
       "when": 1788069000000,
       "tag": "0008_store_applications",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788278661458,
+      "tag": "0009_lumpy_roxanne_simpson",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788286056168,
+      "tag": "0010_remarkable_talisman",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788286218343,
+      "tag": "0011_unique_lilith",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788286274438,
+      "tag": "0012_lumpy_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788286441511,
+      "tag": "0013_wild_cammi",
+      "breakpoints": true
     }
   ]
 }

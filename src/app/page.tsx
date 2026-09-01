@@ -65,18 +65,20 @@ function ListingTile({ row }: { row: BrowseRow }) {
           <div className="home-listing-tile__sale-meta">
             <span className="home-listing-tile__price-label">Sale Price</span>
             <strong className="num">{formatMoney(priceFor(row))}</strong>
-            <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
+            {row.acceptsOffers && <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>}
+            {row.liveClaimCount > 0 && <span className="home-listing-tile__offers">First claim in progress · {row.liveClaimCount}/3 claimed</span>}
           </div>
         )}
-        <span className="home-listing-tile__cta"><Eye aria-hidden="true" />View Listing</span>
+        <span className="home-listing-tile__cta"><Eye aria-hidden="true" />{row.liveClaimCount > 0 ? 'Join queue' : 'View Listing'}</span>
       </div>
     </Link>
   );
 }
 
 export default async function HomePage() {
-  const [recentSale, auctions, ...catPages] = await Promise.all([
-    browseListings({ saleType: 'straight_sale', pageSize: 8, sort: 'newest' }),
+  const [recentSale, lastChance, auctions, ...catPages] = await Promise.all([
+    browseListings({ saleType: 'straight_sale', surface: 'recent', pageSize: 8, sort: 'newest' }),
+    browseListings({ saleType: 'straight_sale', surface: 'last_chance', pageSize: 8, sort: 'newest' }),
     browseListings({ saleType: 'auction', pageSize: 8, sort: 'ending_soon' }),
     ...CATEGORY_LIST.map((category) => browseListings({ category: category.key, pageSize: 1 })),
   ]);
@@ -146,6 +148,18 @@ export default async function HomePage() {
           <div className="home-empty"><strong>No sale listings yet.</strong><span>Be the first to put something up for the community.</span><Link className="button" href="/listings/new">Create a listing</Link></div>
         )}
         <p className="home-catalog-note"><span className="home-catalog-note__dot" aria-hidden="true" /> {total} active listing{total === 1 ? '' : 's'} across the catalog · secure local handoff options available</p>
+      </section>
+
+      <section className="home-section home-section--recent" aria-labelledby="last-chance-title">
+        <div className="home-section__heading">
+          <div><h2 id="last-chance-title">Last chance to claim</h2><p>These items have a claim in progress, but there is still room in the queue.</p></div>
+          <Link href="/listings?saleType=straight_sale">See All <ArrowRight aria-hidden="true" /></Link>
+        </div>
+        {lastChance.rows.length > 0 ? (
+          <div className="home-listing-grid">{lastChance.rows.map((row) => <ListingTile key={row.id} row={row} />)}</div>
+        ) : (
+          <div className="home-empty"><strong>No last-chance listings right now.</strong><span>When a fixed-price item has one or two claims, it will appear here.</span></div>
+        )}
       </section>
     </main>
   );

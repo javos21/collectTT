@@ -5,6 +5,7 @@ import { db } from '@/db/client';
 import { SignInRequiredModal } from '@/components/sign-in-required-modal';
 import { createListingAction } from './actions';
 import { ListingForm } from './listing-form';
+import { getFullServiceDeliveryDays } from '@/services/platform-settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,10 @@ export default async function NewListingPage({
     );
   }
 
-  const relayStoreOptions = await listRelayStores(db);
+  const [relayStoreOptions, fullServiceDefaultDays] = await Promise.all([
+    listRelayStores(db),
+    getFullServiceDeliveryDays(),
+  ]);
 
   return (
     <main className="create-page">
@@ -54,6 +58,7 @@ export default async function NewListingPage({
           name: store.name,
           area: store.area,
         }))}
+        fullServiceDefaultDays={fullServiceDefaultDays}
         error={error}
       />
     </main>

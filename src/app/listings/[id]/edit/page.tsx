@@ -2,10 +2,10 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
 import { currentUser } from '@/lib/session';
-import { getListing } from '@/services/listings';
+import { getListing, getListingActivity, listingAuditForSeller } from '@/services/listings';
 import { imageVariants } from '@/services/images';
 import { EditListingForm } from './edit-listing-form';
-import { updateListingAction } from './actions';
+import { cancelListingAction, updateListingAction } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +23,13 @@ export default async function EditListingPage({
 
   const result = await getListing(id);
   if (result === null) notFound();
-  const { listing, images } = result;
+  const { listing, images, fulfillmentTerms } = result;
   if (listing.sellerId !== user.userId) redirect(`/listings/${id}`);
   if (listing.status !== 'active' && listing.status !== 'draft') redirect(`/listings/${id}`);
+  const [activity, auditEvents] = await Promise.all([
+    getListingActivity(id),
+    listingAuditForSeller(id, user.userId),
+  ]);
 
   return (
     <main className="create-page">
@@ -37,6 +41,20 @@ export default async function EditListingPage({
         </div>
         <img src="/assets/collecttt_logo.png" alt="" aria-hidden="true" />
       </header>
+
+      {auditEvents.length > 0 && (
+        <section className="edit-audit" aria-labelledby="edit-history-title">
+          <h2 id="edit-history-title">Listing history</h2>
+          <ul>
+            {auditEvents.map((event, index) => (
+              <li key={`${event.occurredAt.toISOString()}-${index}`}>
+                <span>{event.eventType === 'edited' ? 'Listing edited' : event.eventType === 'created' ? 'Listing created' : 'Listing cancelled'}</span>
+                <time dateTime={event.occurredAt.toISOString()}>{event.occurredAt.toLocaleString('en-TT', { dateStyle: 'medium', timeStyle: 'short' })}</time>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {images.length > 0 && (
         <section className="edit-current-photos" aria-labelledby="current-photos-title">
@@ -58,10 +76,17 @@ export default async function EditListingPage({
 
       <EditListingForm
         action={updateListingAction}
+        cancelAction={cancelListingAction}
         listingId={listing.id}
         title={listing.title}
         description={listing.description ?? ''}
         price={listing.saleType === 'straight_sale' && listing.priceCents !== null ? (listing.priceCents / 100).toFixed(2) : null}
+        saleType={listing.saleType}
+        acceptsOffers={listing.acceptsOffers}
+        paymentWindowHours={listing.paymentWindowHours}
+        fulfillmentPaths={listing.fulfillmentPaths}
+        fulfillmentTerms={fulfillmentTerms}
+        locked={activity.locked}
         error={error}
       />
     </main>

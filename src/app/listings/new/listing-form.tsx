@@ -32,10 +32,12 @@ const STEPS = [
 export function ListingForm({
   action,
   relayStoreOptions,
+  fullServiceDefaultDays,
   error,
 }: {
   action: ServerAction;
   relayStoreOptions: RelayStore[];
+  fullServiceDefaultDays: number;
   error?: string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -156,7 +158,7 @@ export function ListingForm({
 
       <fieldset className="create-section create-step" data-step="4" hidden={step !== 4}>
         <legend>Delivery</legend>
-        <DeliveryFields relayStoreOptions={relayStoreOptions} />
+        <DeliveryFields relayStoreOptions={relayStoreOptions} fullServiceDefaultDays={fullServiceDefaultDays} />
       </fieldset>
 
       <fieldset className="create-section create-step" data-step="5" hidden={step !== 5}>
@@ -170,6 +172,16 @@ export function ListingForm({
           ))}
         </div>
         <p className="form-note">Select every payment method you are willing to accept.</p>
+        <div className="form-field form-field--compact">
+          <label htmlFor="paymentWindowHours">Payment period</label>
+          <select id="paymentWindowHours" name="paymentWindowHours" defaultValue="72">
+            <option value="48">Within 2 days</option>
+            <option value="72">Within 3 days</option>
+            <option value="120">Within 5 days</option>
+            <option value="168">Within 7 days</option>
+          </select>
+          <small className="form-note">This applies to every payment and fulfillment option on the listing.</small>
+        </div>
       </fieldset>
 
       {imageIds.map((imageId) => <input key={imageId} type="hidden" name="imageIds" value={imageId} />)}

@@ -73,6 +73,10 @@ export const listings = pgTable(
 
     // ---- straight sale
     priceCents: bigint('price_cents', { mode: 'number' }),
+    /** Fixed-price sellers explicitly control whether negotiation is available. */
+    acceptsOffers: boolean('accepts_offers').notNull().default(false),
+    /** One payment window applies to every fulfillment option on this listing. */
+    paymentWindowHours: integer('payment_window_hours').notNull().default(72),
 
     // ---- auction
     startBidCents: bigint('start_bid_cents', { mode: 'number' }),
@@ -128,7 +132,24 @@ export const listings = pgTable(
     // coalesce is load-bearing: array_length of an empty array is NULL, and a NULL
     // CHECK expression PASSES. Without it an empty path list slips straight through.
     check('listing_paths_nonempty', sql`coalesce(array_length(${t.fulfillmentPaths}, 1), 0) >= 1`),
+    check('listing_payment_window_valid', sql`${t.paymentWindowHours} between 48 and 168`),
   ],
+);
+
+/** Append-only seller-visible history for material listing changes. */
+export const listingAuditEvents = pgTable(
+  'listing_audit_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    actorUserId: text('actor_user_id').references(() => profiles.userId, { onDelete: 'set null' }),
+    eventType: text('event_type').notNull(),
+    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('listing_audit_by_listing').on(t.listingId, t.occurredAt.desc())],
 );
 
 export const listingImages = pgTable(
@@ -145,6 +166,22 @@ export const listingImages = pgTable(
   (t) => [
     primaryKey({ columns: [t.listingId, t.imageId] }),
     uniqueIndex('listing_images_position').on(t.listingId, t.position),
+  ],
+);
+
+/** Seller-facing delivery promise for each fulfillment option declared on a listing. */
+export const listingFulfillmentTerms = pgTable(
+  'listing_fulfillment_terms',
+  {
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
+    expectedDeliveryDays: integer('expected_delivery_days').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listingId, t.fulfillmentPath] }),
+    check('listing_delivery_days_positive', sql`${t.expectedDeliveryDays} between 1 and 60`),
   ],
 );
 
@@ -178,14 +215,23 @@ export const claims = pgTable(
   },
   (t) => [
     uniqueIndex('claims_one_per_claimant').on(t.listingId, t.claimantId),
-    uniqueIndex('claims_position').on(t.listingId, t.position),
+    // Queue positions can be reused after a failed claim/relist; terminal rows remain
+    // in the audit history but must not block a fresh three-person queue.
+    uniqueIndex('claims_position')
+      .on(t.listingId, t.position)
+      .where(sql`${t.status} in ('active', 'queued', 'promoted')`),
     // ★ Exactly one live claimant per listing, enforced by the database rather than
     //   by hoping the application never races with itself.
     uniqueIndex('claims_one_active')
       .on(t.listingId)
       .where(sql`${t.status} = 'active'`),
     index('claims_stack').on(t.listingId, t.position),
-    check('claim_stack_depth', sql`${t.position} between 1 and 4`),
+    // Terminal historical rows may retain an old position for audit purposes; only
+    // live queue rows are constrained to the three available slots.
+    check(
+      'claim_stack_depth',
+      sql`${t.position} between 1 and 3 or ${t.status} not in ('active', 'queued', 'promoted')`,
+    ),
   ],
 );
 

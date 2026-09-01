@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 
-import { getListing } from '@/services/listings';
+import { getListing, getListingActivity } from '@/services/listings';
 import { candidateStoresFor } from '@/services/relay-stores';
 import { getCategory } from '@/domain/categories/definitions';
 import { formatMoney, minimumNextBid } from '@/domain/money';
@@ -15,6 +15,7 @@ import { acceptOfferAction, bidAction, claimAction, rejectOfferAction, submitOff
 import { AuctionLive } from './bid-panel';
 import { latestOfferForBuyer, pendingOffersForSeller } from '@/services/offers';
 import { SignInRequiredModal } from '@/components/sign-in-required-modal';
+import { QueueJoinedModal } from './queue-joined-modal';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,12 +38,13 @@ export default async function ListingPage({
   const result = await getListing(id);
   if (result === null) notFound();
 
-  const { listing, sellerName, sellerSince, images } = result;
+  const { listing, sellerName, sellerSince, images, fulfillmentTerms } = result;
   const category = getCategory(listing.category);
   const attributes = listing.attributes as Record<string, unknown>;
   const viewer = await currentUser();
   const showSignInModal = viewer === null && flash.auth === 'buy';
   const isSeller = viewer?.userId === listing.sellerId;
+  const sellerActivity = isSeller ? await getListingActivity(id) : null;
   const pendingOffers = isSeller && listing.saleType === 'straight_sale'
     ? await pendingOffersForSeller(id, viewer.userId)
     : [];
@@ -52,6 +54,19 @@ export default async function ListingPage({
 
   const isAuction = listing.saleType === 'auction';
   const isOpen = listing.status === 'active';
+  const sellerQueue = isSeller && !isAuction
+    ? await db
+        .select({
+          position: claims.position,
+          status: claims.status,
+          claimantName: profiles.displayName,
+          claimedAt: claims.claimedAt,
+        })
+        .from(claims)
+        .innerJoin(profiles, eq(profiles.userId, claims.claimantId))
+        .where(and(eq(claims.listingId, id), inArray(claims.status, ['active', 'queued', 'promoted'])))
+        .orderBy(asc(claims.position))
+    : [];
 
   // Recent bids, for the live feed.
   const recentBids = isAuction
@@ -82,7 +97,10 @@ export default async function ListingPage({
       : undefined;
 
   const stackDepth = !isAuction
-    ? (await db.select({ id: claims.id }).from(claims).where(eq(claims.listingId, id))).length
+    ? (await db
+        .select({ id: claims.id })
+        .from(claims)
+        .where(and(eq(claims.listingId, id), inArray(claims.status, ['active', 'queued', 'promoted'])))).length
     : 0;
 
   const minBid = minimumNextBid(listing.currentBidCents, listing.startBidCents ?? 0);
@@ -189,16 +207,7 @@ export default async function ListingPage({
         </div>
       )}
       {flash.queued !== undefined && flash.queued !== '' && (
-        <div className="alert alert--info">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-            <path d="M12 8v4l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span>
-            You&apos;re <strong>#{flash.queued}</strong> in the backup queue. If the current buyer
-            doesn&apos;t pay in time, it comes to you automatically.
-          </span>
-        </div>
+        <QueueJoinedModal position={flash.queued} listingId={id} />
       )}
       {flash.bid === 'ok' && <div className="alert alert--info">Bid placed.</div>}
       {flash.bid === 'extended' && (
@@ -288,7 +297,9 @@ export default async function ListingPage({
             <div className="buybox__state">
               This is your listing.
               {pendingOffers.length > 0 && ` ${pendingOffers.length} offer${pendingOffers.length === 1 ? '' : 's'} waiting.`}
-              {(listing.status === 'active' || listing.status === 'draft') && (
+              {sellerActivity?.locked ? (
+                <><br /><span className="buybox__lock-note">Editing and cancellation are locked while buyer activity is active.</span></>
+              ) : (listing.status === 'active' || listing.status === 'draft') && (
                 <><br /><Link href={`/listings/${id}/edit`}>Edit listing →</Link></>
               )}
             </div>
@@ -323,7 +334,7 @@ export default async function ListingPage({
                 </>
               )}
             </div>
-          ) : listing.status === 'active' || listing.status === 'claimed' ? (
+          ) : listing.status === 'active' || (listing.status === 'claimed' && stackDepth < 3) ? (
             <form className="buybox__form" action={claimAction}>
               <input type="hidden" name="listingId" value={id} />
               {settleForm('')}
@@ -340,10 +351,10 @@ export default async function ListingPage({
               )}
             </form>
           ) : (
-            <div className="buybox__state">This listing is no longer available.</div>
+            <div className="buybox__state">This listing is no longer available for new claims.</div>
           )}
 
-          {!isAuction && viewer !== null && !isSeller && listing.status === 'active' && (
+          {!isAuction && viewer !== null && !isSeller && listing.status === 'active' && listing.acceptsOffers && (
             <>
               <hr />
               {myOffer?.status === 'pending' ? (
@@ -439,6 +450,27 @@ export default async function ListingPage({
         </section>
       )}
 
+      {isSeller && !isAuction && sellerQueue.length > 0 && (
+        <section className="offers-section" aria-labelledby="claim-queue-heading">
+          <h2 id="claim-queue-heading" className="section-label">Claim queue</h2>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Priority</th><th>Buyer</th><th>Status</th><th>Claimed</th></tr></thead>
+              <tbody>
+                {sellerQueue.map((claim) => (
+                  <tr key={`${claim.position}-${claim.claimedAt.toISOString()}`}>
+                    <td><strong>#{claim.position}</strong></td>
+                    <td>{claim.claimantName}</td>
+                    <td>{claim.status === 'active' ? 'First claim in progress' : 'Backup queue'}</td>
+                    <td className="muted">{claim.claimedAt.toLocaleString('en-TT')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* ------------------------------------------------ bid history */}
       {isAuction && recentBids.length > 0 && (
         <>
@@ -514,13 +546,19 @@ export default async function ListingPage({
                 strokeLinejoin="round"
               />
             </svg>
-            {PATH_LABELS[path] ?? path}
+            <span>
+              {PATH_LABELS[path] ?? path}
+              {fulfillmentTerms.find((term) => term.fulfillmentPath === path) !== undefined && (
+                <> · expected within {fulfillmentTerms.find((term) => term.fulfillmentPath === path)!.expectedDeliveryDays} day{fulfillmentTerms.find((term) => term.fulfillmentPath === path)!.expectedDeliveryDays === 1 ? '' : 's'}</>
+              )}
+            </span>
           </li>
         ))}
       </ul>
       <p className="muted" style={{ marginTop: '.85rem' }}>
         Accepted payment: {listing.settlementMethods.join(', ')}. Payment always flows
-        directly between buyer and seller — CollectTT never holds funds.
+        directly between buyer and seller — CollectTT never holds funds. Payment is expected
+        within {listing.paymentWindowHours} hours after a deal opens.
       </p>
 
       <h2 className="section-label">Seller</h2>

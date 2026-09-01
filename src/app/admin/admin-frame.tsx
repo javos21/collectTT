@@ -26,6 +26,7 @@ export function AdminFrame({ viewer, activeNav, children }: { viewer: CurrentUse
             <a href="/admin#deals"><Activity size={17} aria-hidden="true" />Deals</a>
             <Link className={activeNav === 'stores' ? 'is-active' : ''} href="/admin/stores"><Store size={17} aria-hidden="true" />Stores</Link>
             <Link className={activeNav === 'catalog' ? 'is-active' : ''} href="/admin/catalog"><LibraryBig size={17} aria-hidden="true" />Catalog</Link>
+            <a href="/admin#settings"><ShieldCheck size={17} aria-hidden="true" />Settings</a>
           </nav>
           <div className="admin-sidebar__note"><ShieldCheck size={17} aria-hidden="true" /><span>Admin actions should always leave an audit trail.</span></div>
         </aside>
@@ -34,4 +35,3 @@ export function AdminFrame({ viewer, activeNav, children }: { viewer: CurrentUse
     </div>
   );
 }
-

@@ -9,12 +9,14 @@ import { transactions } from '@/db/schema/transactions';
 import { currentUser } from '@/lib/session';
 import { AdminDenied } from './admin-access';
 import { AdminFrame } from './admin-frame';
+import { getFullServiceDeliveryDays } from '@/services/platform-settings';
+import { updateDeliveryDefaultsAction } from './actions';
 
 function displayStatus(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<{ settings?: string; settingsError?: string }> }) {
   const viewer = await currentUser();
   if (viewer === null) return <AdminDenied signedIn={false} />;
 
@@ -25,7 +27,7 @@ export default async function AdminPage() {
     .limit(1);
   if (viewerProfile[0]?.role !== 'admin') return <AdminDenied signedIn />;
 
-  const [userCount, activeListingCount, openTransactionCount, activeClaimCount, recentListings] = await Promise.all([
+  const [userCount, activeListingCount, openTransactionCount, activeClaimCount, recentListings, fullServiceDeliveryDays] = await Promise.all([
     db.select({ value: count() }).from(users),
     db.select({ value: count() }).from(listings).where(eq(listings.status, 'active')),
     db.select({ value: count() }).from(transactions).where(eq(transactions.state, 'open')),
@@ -36,7 +38,9 @@ export default async function AdminPage() {
       .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
       .orderBy(desc(listings.createdAt))
       .limit(8),
+    getFullServiceDeliveryDays(),
   ]);
+  const params = await searchParams;
 
   const stats = [
     { label: 'Members', value: userCount[0]?.value ?? 0, icon: Users, tone: 'purple' },
@@ -68,8 +72,17 @@ export default async function AdminPage() {
               <p className="admin-panel__note">This is the initial admin shell. High-impact actions will be added behind explicit confirmations and audit logging.</p>
             </section>
           </div>
+          <section className="admin-panel admin-settings-panel" id="settings">
+            <div className="admin-panel__heading"><div><p className="admin-kicker">Defaults</p><h2>Delivery settings</h2></div></div>
+            <p className="admin-panel__note">Set the standard delivery estimate shown when sellers select full-service delivery. Sellers can still set the estimate for each listing.</p>
+            {params.settings === 'saved' && <p className="admin-settings-success" role="status">Delivery default saved.</p>}
+            {params.settingsError !== undefined && <p className="admin-settings-error" role="alert">Enter a whole number from 1 to 60 days.</p>}
+            <form className="admin-settings-form" action={updateDeliveryDefaultsAction}>
+              <label htmlFor="fullServiceDeliveryDays">Full-service delivery estimate</label>
+              <div><input id="fullServiceDeliveryDays" name="fullServiceDeliveryDays" type="number" min="1" max="60" defaultValue={fullServiceDeliveryDays} required /><span>days</span><button type="submit">Save setting</button></div>
+            </form>
+          </section>
         </main>
     </AdminFrame>
   );
 }
-

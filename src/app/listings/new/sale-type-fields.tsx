@@ -50,10 +50,16 @@ export function SaleTypeFields({
       </div>
 
       {saleType === 'straight_sale' ? (
-        <div className="form-field create-price-field">
-          <label className="sr-only" htmlFor="price">Price</label>
-          <div className="money-input"><span>TT$</span><input id="price" name="price" type="text" inputMode="decimal" placeholder="Price" required /></div>
-        </div>
+        <>
+          <div className="form-field create-price-field">
+            <label className="sr-only" htmlFor="price">Price</label>
+            <div className="money-input"><span>TT$</span><input id="price" name="price" type="text" inputMode="decimal" placeholder="Price" required /></div>
+          </div>
+          <label className="auto-relist" htmlFor="acceptsOffers">
+            <input id="acceptsOffers" type="checkbox" name="acceptsOffers" />
+            <span><strong>Accept offers</strong><small>Let buyers propose a price below your asking price.</small></span>
+          </label>
+        </>
       ) : (
         <div className="form-grid form-grid--three">
           <div className="form-field">

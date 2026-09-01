@@ -13,13 +13,27 @@ const PATH_LABELS: Record<string, { title: string; detail: string }> = {
 
 type RelayStore = { id: string; name: string; area: string };
 
-export function DeliveryFields({ relayStoreOptions }: { relayStoreOptions: RelayStore[] }) {
+export function DeliveryFields({
+  relayStoreOptions,
+  fullServiceDefaultDays,
+}: {
+  relayStoreOptions: RelayStore[];
+  fullServiceDefaultDays: number;
+}) {
   const [relaySelected, setRelaySelected] = useState(false);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>(['cash_meetup']);
+
+  const defaultDays: Record<string, number> = {
+    cash_meetup: 2,
+    remote_ship: 5,
+    relay: 5,
+    full_service: fullServiceDefaultDays,
+  };
 
   return (
     <>
       <div className="choice-grid">
-        {FULFILLMENT_PATHS.filter((path) => path !== 'full_service').map((path) => (
+        {FULFILLMENT_PATHS.map((path) => (
           <label className="choice-card" key={path} htmlFor={`path_${path}`}>
             <input
               id={`path_${path}`}
@@ -27,10 +41,26 @@ export function DeliveryFields({ relayStoreOptions }: { relayStoreOptions: Relay
               name="fulfillmentPaths"
               value={path}
               defaultChecked={path === 'cash_meetup'}
-              onChange={path === 'relay' ? (event) => setRelaySelected(event.target.checked) : undefined}
+              onChange={(event) => {
+                setSelectedPaths((current) => event.target.checked ? [...current, path] : current.filter((item) => item !== path));
+                if (path === 'relay') setRelaySelected(event.target.checked);
+              }}
             />
             <span><strong>{PATH_LABELS[path]?.title}</strong><small>{PATH_LABELS[path]?.detail}</small></span>
           </label>
+        ))}
+      </div>
+
+      <div className="delivery-estimates">
+        <h3>Expected delivery</h3>
+        <p className="form-note">Tell buyers how long each selected option normally takes.</p>
+        {FULFILLMENT_PATHS.filter((path) => selectedPaths.includes(path)).map((path) => (
+          <div className="form-field form-field--compact" key={path}>
+            <label htmlFor={`deliveryEstimate__${path}`}>{PATH_LABELS[path]?.title}</label>
+            <select id={`deliveryEstimate__${path}`} name={`deliveryEstimate__${path}`} defaultValue={String(defaultDays[path] ?? 5)} required>
+              {[1, 2, 3, 5, 7, 10, 14, 21, 30].map((days) => <option key={days} value={days}>Within {days} day{days === 1 ? '' : 's'}</option>)}
+            </select>
+          </div>
         ))}
       </div>
 

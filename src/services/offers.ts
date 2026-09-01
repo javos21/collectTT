@@ -45,6 +45,9 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
     if (listing.sale_type !== 'straight_sale' || askingPrice === null) {
       throw new ConflictError('Offers are only available on fixed-price listings');
     }
+    if (!listing.accepts_offers) {
+      throw new ConflictError('This seller is not accepting offers on this listing');
+    }
     if (listing.status !== 'active') {
       throw new ConflictError('This listing is no longer available for offers');
     }
@@ -127,6 +130,9 @@ export async function acceptOffer(
     if (row.listing_status !== 'active' || row.sale_type !== 'straight_sale') {
       throw new ConflictError('This listing is no longer available for offers');
     }
+    if (!row.accepts_offers) {
+      throw new ConflictError('This seller is not accepting offers on this listing');
+    }
     if (
       row.price_cents === null ||
       Number(row.amount_cents) >= Number(row.price_cents)
@@ -184,6 +190,7 @@ export async function acceptOffer(
       source: 'offer_accept',
       offerId,
       listingTitle: row.listing_title,
+      paymentWindowHours: Number(row.payment_window_hours),
       relayStoreId,
     });
 
@@ -284,7 +291,7 @@ async function displayName(tx: Tx, userId: string): Promise<string> {
 
 async function lockedListing(tx: Tx, listingId: string): Promise<ListingRow> {
   const rows = await tx.execute(sql`
-    select id, seller_id, title, sale_type, status, price_cents, fulfillment_paths, size_class
+    select id, seller_id, title, sale_type, status, price_cents, fulfillment_paths, size_class, accepts_offers
       from listings
      where id = ${listingId}
      for update
@@ -310,6 +317,8 @@ function sqlOfferWithListing(offerId: string) {
       l.status as listing_status,
       l.price_cents,
       l.fulfillment_paths,
+      l.accepts_offers,
+      l.payment_window_hours,
       l.size_class
       from offers o
       inner join listings l on l.id = o.listing_id
@@ -326,6 +335,7 @@ interface ListingRow {
   status: string;
   price_cents: number | string | null;
   fulfillment_paths: string[];
+  accepts_offers: boolean;
   size_class: SizeClass;
 }
 
@@ -343,5 +353,7 @@ interface OfferWithListingRow {
   listing_status: string;
   price_cents: number | string | null;
   fulfillment_paths: string[];
+  accepts_offers: boolean;
+  payment_window_hours: number | string;
   size_class: SizeClass;
 }
