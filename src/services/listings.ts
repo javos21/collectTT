@@ -323,14 +323,6 @@ export async function updateListingBasics(
     if (current.sale_type === 'straight_sale' && input.priceCents === undefined) {
       throw new Error('A price is required for a fixed-price listing.');
     }
-    if (input.deliveryEstimates !== undefined) {
-      for (const path of current.fulfillment_paths) {
-        if (input.deliveryEstimates[path] === undefined) {
-          throw new Error('Add an expected delivery time for each selected option.');
-        }
-      }
-    }
-
     const changes: Record<string, unknown> = {};
     if (current.title !== input.title) changes.title = { from: current.title, to: input.title };
     if ((current.description ?? '') !== (input.description ?? '')) {
@@ -352,8 +344,13 @@ export async function updateListingBasics(
         .from(listingFulfillmentTerms)
         .where(eq(listingFulfillmentTerms.listingId, listingId));
       const previous = Object.fromEntries(previousTerms.map((term) => [term.fulfillmentPath, term.expectedDeliveryDays]));
-      const termChanges = Object.fromEntries(current.fulfillment_paths.map((path) => [path, { from: previous[path], to: input.deliveryEstimates?.[path] }]));
-      if (JSON.stringify(previous) !== JSON.stringify(input.deliveryEstimates)) changes.deliveryEstimates = termChanges;
+      const normalized = Object.fromEntries(current.fulfillment_paths.map((path) => [
+        path,
+        input.deliveryEstimates?.[path] ?? previous[path] ?? 5,
+      ]));
+      const termChanges = Object.fromEntries(current.fulfillment_paths.map((path) => [path, { from: previous[path], to: normalized[path] }]));
+      if (JSON.stringify(previous) !== JSON.stringify(normalized)) changes.deliveryEstimates = termChanges;
+      input.deliveryEstimates = normalized;
     }
 
     await tx

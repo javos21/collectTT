@@ -17,6 +17,15 @@ export async function updateListingAction(formData: FormData): Promise<void> {
   if (user === null) redirect('/sign-in');
 
   const listingId = String(formData.get('listingId') ?? '');
+  const fulfillmentPaths = formData.getAll('fulfillmentPaths').map(String);
+  const deliveryEstimates = Object.fromEntries(
+    fulfillmentPaths.flatMap((path) => {
+      const raw = String(formData.get(`deliveryEstimate__${path}`) ?? '').trim();
+      if (raw === '') return [];
+      const days = Number(raw);
+      return Number.isInteger(days) ? [[path, days] as const] : [];
+    }),
+  );
   try {
     await updateListingBasics(user.userId, listingId, {
       title: String(formData.get('title') ?? ''),
@@ -24,9 +33,7 @@ export async function updateListingAction(formData: FormData): Promise<void> {
       priceCents: money(formData),
       acceptsOffers: formData.get('acceptsOffers') !== null,
       paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
-      deliveryEstimates: Object.fromEntries(
-        formData.getAll('fulfillmentPaths').map(String).map((path) => [path, Number(formData.get(`deliveryEstimate__${path}`) ?? 0)]),
-      ),
+      ...(Object.keys(deliveryEstimates).length > 0 ? { deliveryEstimates } : {}),
       imageIds: formData.getAll('imageIds').map(String),
     });
     redirect(`/listings/${listingId}`);
