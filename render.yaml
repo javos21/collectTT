@@ -57,6 +57,8 @@ services:
         value: "false"
       - key: STORAGE_PUBLIC_URL
         sync: false
+      - key: STORAGE_CORS_ORIGINS
+        sync: false
       - key: EMAIL_ADAPTER
         value: brevo
       - key: BREVO_API_KEY
@@ -95,6 +97,8 @@ services:
       - key: STORAGE_FORCE_PATH_STYLE
         value: "false"
       - key: STORAGE_PUBLIC_URL
+        sync: false
+      - key: STORAGE_CORS_ORIGINS
         sync: false
       - key: EMAIL_ADAPTER
         value: brevo

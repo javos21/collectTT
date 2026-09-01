@@ -16,6 +16,7 @@ import {
   HeadObjectCommand,
   DeleteObjectsCommand,
   DeleteObjectCommand,
+  PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from './env';
@@ -67,6 +68,29 @@ export async function presignUpload(opts: {
 export async function presignDownload(key: string, expiresInSeconds = 3600): Promise<string> {
   const command = new GetObjectCommand({ Bucket: bucket(), Key: key });
   return getSignedUrl(storage(), command, { expiresIn: expiresInSeconds });
+}
+
+/** Allow the browser to use presigned upload URLs from the configured app origins. */
+export async function configureStorageCors(origins: readonly string[]): Promise<void> {
+  const allowedOrigins = [...new Set(origins.map((origin) => origin.trim()).filter(Boolean))];
+  if (allowedOrigins.length === 0) throw new Error('At least one storage CORS origin is required.');
+
+  await storage().send(
+    new PutBucketCorsCommand({
+      Bucket: bucket(),
+      CORSConfiguration: {
+        CORSRules: [
+          {
+            AllowedOrigins: allowedOrigins,
+            AllowedMethods: ['GET', 'HEAD', 'PUT'],
+            AllowedHeaders: ['*'],
+            ExposeHeaders: ['ETag', 'Content-Length', 'Content-Type'],
+            MaxAgeSeconds: 3600,
+          },
+        ],
+      },
+    }),
+  );
 }
 
 export async function putObject(opts: {

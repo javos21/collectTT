@@ -288,6 +288,9 @@ export default async function ListingPage({
             <div className="buybox__state">
               This is your listing.
               {pendingOffers.length > 0 && ` ${pendingOffers.length} offer${pendingOffers.length === 1 ? '' : 's'} waiting.`}
+              {(listing.status === 'active' || listing.status === 'draft') && (
+                <><br /><Link href={`/listings/${id}/edit`}>Edit listing →</Link></>
+              )}
             </div>
           ) : isAuction ? (
             isOpen ? (

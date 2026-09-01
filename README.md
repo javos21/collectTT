@@ -29,12 +29,18 @@ and password-reset links can print to your terminal with `EMAIL_ADAPTER=console`
 docker compose up -d      # Postgres (:5434) + MinIO (:9000, console :9001)
 cp .env.example .env.local
 npm install
-npm run setup             # migrations + category seed
+npm run setup             # migrations + category seed + MinIO bucket CORS
 npm run seed:dev          # optional: sample members and listings
 
 npm run dev               # web process    -> http://localhost:3000
 npm run dev:worker        # worker process (separate terminal)
 ```
+
+The browser uploads directly to object storage, so the bucket must allow the web
+origin to make `PUT` requests. `npm run setup` configures this for local MinIO. For
+staging/R2, set `STORAGE_CORS_ORIGINS` to the exact deployed HTTPS origin and run
+`npm run storage:cors` once with the R2 storage credentials; the Render web and worker
+services both include this variable for reference.
 
 The admin workspace is served by the main web process at `http://localhost:3000/admin`.
 It uses the same database and authentication session, but requires the existing `admin`

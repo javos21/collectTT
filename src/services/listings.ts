@@ -186,6 +186,77 @@ export async function publishListing(sellerId: string, listingId: string): Promi
     .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId), eq(listings.status, 'draft')));
 }
 
+const listingEditSchema = z.object({
+  title: z.string().trim().min(3).max(160),
+  description: z.string().trim().max(4000).optional(),
+  priceCents: z.number().int().positive().optional(),
+  imageIds: z.array(z.string().uuid()).max(8).default([]),
+});
+
+/**
+ * Update seller-editable listing details without changing the sale type, delivery
+ * terms, payment terms, or auction clock. Those terms can affect existing buyers
+ * and transactions, so they remain immutable after publication.
+ */
+export async function updateListingBasics(
+  sellerId: string,
+  listingId: string,
+  raw: unknown,
+): Promise<void> {
+  const input = listingEditSchema.parse(raw);
+
+  await db.transaction(async (tx) => {
+    const currentRows = await tx
+      .select({ saleType: listings.saleType, status: listings.status, priceCents: listings.priceCents })
+      .from(listings)
+      .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)))
+      .limit(1);
+    const current = currentRows[0];
+    if (current === undefined) throw new Error('Listing not found');
+    if (current.status !== 'active' && current.status !== 'draft') {
+      throw new Error('Only active or draft listings can be edited.');
+    }
+    if (current.saleType === 'straight_sale' && input.priceCents === undefined) {
+      throw new Error('A price is required for a fixed-price listing.');
+    }
+
+    await tx
+      .update(listings)
+      .set({
+        title: input.title,
+        description: input.description ?? null,
+        ...(current.saleType === 'straight_sale' ? { priceCents: input.priceCents ?? current.priceCents } : {}),
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)));
+
+    if (input.imageIds.length === 0) return;
+
+    const existingRows = await tx
+      .select({ imageId: listingImages.imageId })
+      .from(listingImages)
+      .where(eq(listingImages.listingId, listingId));
+    const existingIds = new Set(existingRows.map((row) => row.imageId));
+    const newImageIds = [...new Set(input.imageIds)].filter((imageId) => !existingIds.has(imageId));
+    if (newImageIds.length === 0) return;
+    if (existingRows.length + newImageIds.length > 8) throw new Error('A listing can have at most 8 photos.');
+
+    const ownedImages = await tx
+      .select({ id: images.id })
+      .from(images)
+      .where(and(inArray(images.id, newImageIds), eq(images.ownerUserId, sellerId)));
+    if (ownedImages.length !== newImageIds.length) throw new Error('One or more images do not belong to you');
+
+    await tx.insert(listingImages).values(
+      newImageIds.map((imageId, index) => ({
+        listingId,
+        imageId,
+        position: existingRows.length + index,
+      })),
+    );
+  });
+}
+
 export const BROWSE_PAGE_SIZE = 24;
 
 export const BROWSE_SORTS = ['newest', 'price_low', 'price_high', 'ending_soon'] as const;
@@ -333,7 +404,7 @@ function selectBrowseRows(
         select i.id
         from listing_images li
         inner join images i on i.id = li.image_id
-        where li.listing_id = ${listings.id} and i.status = 'ready'
+        where li.listing_id = ${listings.id}
         order by li.position asc
         limit 1
       )`,
@@ -345,7 +416,7 @@ function selectBrowseRows(
         )
         from listing_images li
         inner join images i on i.id = li.image_id
-        where li.listing_id = ${listings.id} and i.status = 'ready'
+        where li.listing_id = ${listings.id}
         order by li.position asc
         limit 1
       )`,

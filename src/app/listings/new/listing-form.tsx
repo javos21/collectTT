@@ -43,6 +43,7 @@ export function ListingForm({
   const [stepError, setStepError] = useState('');
   const [saleType, setSaleType] = useState<SaleType>('straight_sale');
   const [imageIds, setImageIds] = useState<string[]>([]);
+  const [hasImageUploadError, setHasImageUploadError] = useState(false);
 
   function validateStep(stepToValidate: number): boolean {
     const form = formRef.current;
@@ -83,6 +84,10 @@ export function ListingForm({
     if (!validateStep(5)) return;
     if (formRef.current?.querySelector('[data-image-upload-pending="true"]') !== null) {
       setStepError('Wait for your photos to finish uploading before publishing.');
+      return;
+    }
+    if (hasImageUploadError) {
+      setStepError('One or more photos failed to upload. Return to Item and try again.');
       return;
     }
     // Keep the final action explicit. With no submit button mounted in the wizard
@@ -126,7 +131,7 @@ export function ListingForm({
           <label className="sr-only" htmlFor="description">Description</label>
           <textarea id="description" name="description" required maxLength={4000} rows={5} placeholder="Description" />
         </div>
-        <ImageUploader onReadyImageIdsChange={setImageIds} />
+        <ImageUploader onReadyImageIdsChange={setImageIds} onUploadErrorChange={setHasImageUploadError} />
         <div className="form-field form-field--compact">
           <label className="sr-only" htmlFor="sizeClass">Item size</label>
           <select id="sizeClass" name="sizeClass" defaultValue="small" aria-label="Item size">

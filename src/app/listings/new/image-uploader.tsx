@@ -19,7 +19,13 @@ type UploadItem = {
 const MAX_FILES = 8;
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);
 
-export function ImageUploader({ onReadyImageIdsChange }: { onReadyImageIdsChange: (imageIds: string[]) => void }) {
+export function ImageUploader({
+  onReadyImageIdsChange,
+  onUploadErrorChange,
+}: {
+  onReadyImageIdsChange: (imageIds: string[]) => void;
+  onUploadErrorChange: (hasError: boolean) => void;
+}) {
   const [items, setItems] = useState<UploadItem[]>([]);
   const itemsRef = useRef<UploadItem[]>([]);
 
@@ -30,7 +36,8 @@ export function ImageUploader({ onReadyImageIdsChange }: { onReadyImageIdsChange
         .filter((item) => item.state === 'ready' && item.id !== undefined)
         .map((item) => item.id as string),
     );
-  }, [items, onReadyImageIdsChange]);
+    onUploadErrorChange(items.some((item) => item.state === 'error'));
+  }, [items, onReadyImageIdsChange, onUploadErrorChange]);
 
   useEffect(() => {
     return () => {
@@ -125,6 +132,7 @@ export function ImageUploader({ onReadyImageIdsChange }: { onReadyImageIdsChange
     <div
       className="image-uploader"
       data-image-upload-pending={items.some((item) => item.state === 'compressing' || item.state === 'uploading') ? 'true' : undefined}
+      data-image-upload-error={items.some((item) => item.state === 'error') ? 'true' : undefined}
     >
       <div className="image-uploader__head">
         <div>
