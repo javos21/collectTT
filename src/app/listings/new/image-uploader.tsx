@@ -19,13 +19,18 @@ type UploadItem = {
 const MAX_FILES = 8;
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);
 
-export function ImageUploader() {
+export function ImageUploader({ onReadyImageIdsChange }: { onReadyImageIdsChange: (imageIds: string[]) => void }) {
   const [items, setItems] = useState<UploadItem[]>([]);
   const itemsRef = useRef<UploadItem[]>([]);
 
   useEffect(() => {
     itemsRef.current = items;
-  }, [items]);
+    onReadyImageIdsChange(
+      items
+        .filter((item) => item.state === 'ready' && item.id !== undefined)
+        .map((item) => item.id as string),
+    );
+  }, [items, onReadyImageIdsChange]);
 
   useEffect(() => {
     return () => {
@@ -164,7 +169,6 @@ export function ImageUploader() {
                   Remove
                 </button>
               </div>
-              {item.id !== undefined && <input type="hidden" name="imageIds" value={item.id} />}
             </div>
           ))}
         </div>

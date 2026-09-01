@@ -63,6 +63,12 @@ export async function presignUpload(opts: {
   return getSignedUrl(storage(), command, { expiresIn: opts.expiresInSeconds ?? 600 });
 }
 
+/** Generate a short-lived read URL so image objects may remain private in R2. */
+export async function presignDownload(key: string, expiresInSeconds = 3600): Promise<string> {
+  const command = new GetObjectCommand({ Bucket: bucket(), Key: key });
+  return getSignedUrl(storage(), command, { expiresIn: expiresInSeconds });
+}
+
 export async function putObject(opts: {
   key: string;
   body: Buffer;

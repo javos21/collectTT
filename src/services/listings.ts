@@ -329,6 +329,14 @@ function selectBrowseRows(
       sellerCompletedSales: reputationCounters.sellCompleted,
       fulfillmentPaths: listings.fulfillmentPaths,
       settlementMethods: listings.settlementMethods,
+      primaryImageId: sql<string | null>`(
+        select i.id
+        from listing_images li
+        inner join images i on i.id = li.image_id
+        where li.listing_id = ${listings.id} and i.status = 'ready'
+        order by li.position asc
+        limit 1
+      )`,
       primaryImageKey: sql<string | null>`(
         select coalesce(
           i.variants -> 'card' ->> 'key',

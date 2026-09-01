@@ -5,7 +5,6 @@ import { ArrowRight, BadgeCheck, BookOpen, Clock3, Eye, Layers3, Plus, Search, T
 import { CATEGORY_LIST } from '@/domain/categories/definitions';
 import { browseListings } from '@/services/listings';
 import { formatMoney } from '@/domain/money';
-import { publicUrl } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,8 +45,8 @@ function ListingTile({ row }: { row: BrowseRow }) {
   return (
     <Link className="home-listing-tile" href={`/listings/${row.id}`}>
       <div className="home-listing-tile__image">
-        {row.primaryImageKey ? (
-          <img src={publicUrl(row.primaryImageKey)} alt="" />
+        {row.primaryImageId ? (
+          <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" />
         ) : (
           <span aria-hidden="true">Collectible preview</span>
         )}

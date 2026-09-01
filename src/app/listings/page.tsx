@@ -5,7 +5,6 @@ import { browseListings, BROWSE_SORTS, SETTLEMENT_METHODS, type BrowseSort } fro
 import { CATEGORY_LIST, isCategoryKey } from '@/domain/categories/definitions';
 import { filtersFor, coerceFilters } from '@/domain/categories/filters';
 import { formatMoney } from '@/domain/money';
-import { publicUrl } from '@/lib/storage';
 import { FULFILLMENT_PATHS, type FulfillmentPath } from '@/domain/states/transaction';
 import { FilterPanel } from './filter-panel';
 
@@ -295,7 +294,7 @@ export default async function BrowsePage({
                 {rows.map((row) => (
                   <article className="catalog-card" key={row.id}>
                     <Link className="catalog-card__image" href={`/listings/${row.id}`} aria-label={`View ${row.title}`}>
-                      {row.primaryImageKey ? <img src={publicUrl(row.primaryImageKey)} alt="" /> : <span aria-hidden="true">Collectible preview</span>}
+                      {row.primaryImageId ? <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" /> : <span aria-hidden="true">Collectible preview</span>}
                     </Link>
                     <div className="catalog-card__body">
                       <h3><Link href={`/listings/${row.id}`}>{row.title}</Link></h3>

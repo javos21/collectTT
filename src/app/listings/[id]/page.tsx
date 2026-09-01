@@ -6,7 +6,6 @@ import { getListing } from '@/services/listings';
 import { candidateStoresFor } from '@/services/relay-stores';
 import { getCategory } from '@/domain/categories/definitions';
 import { formatMoney, minimumNextBid } from '@/domain/money';
-import { publicUrl } from '@/lib/storage';
 import { imageVariants } from '@/services/images';
 import { currentUser } from '@/lib/session';
 import { db } from '@/db/client';
@@ -224,13 +223,10 @@ export default async function ListingPage({
               <div className="gallery__track">
                 {images.map((image, index) => {
                   const variants = imageVariants(image.variants);
-                  const key = variants.full ?? variants.card ?? variants.thumb ?? image.r2KeyOriginal;
                   return (
                     <div className="gallery__slide" key={image.id} id={`img-${image.id}`}>
-                      {key !== undefined ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={publicUrl(key)} alt={`${listing.title} — photo ${index + 1}`} />
-                      ) : null}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/images/${image.id}?variant=${variants.full !== undefined ? 'full' : variants.card !== undefined ? 'card' : 'thumb'}`} alt={`${listing.title} — photo ${index + 1}`} />
                     </div>
                   );
                 })}
@@ -239,7 +235,6 @@ export default async function ListingPage({
                 <div className="gallery__rail">
                   {images.map((image, index) => {
                     const variants = imageVariants(image.variants);
-                    const key = variants.thumb ?? variants.card ?? image.r2KeyOriginal;
                     return (
                       <a
                         className="gallery__thumb"
@@ -247,10 +242,8 @@ export default async function ListingPage({
                         href={`#img-${image.id}`}
                         aria-label={`View photo ${index + 1}`}
                       >
-                        {key !== undefined ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={publicUrl(key)} alt="" />
-                        ) : null}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/api/images/${image.id}?variant=${variants.thumb !== undefined ? 'thumb' : variants.card !== undefined ? 'card' : 'full'}`} alt="" />
                       </a>
                     );
                   })}

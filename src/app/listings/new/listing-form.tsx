@@ -42,6 +42,7 @@ export function ListingForm({
   const [step, setStep] = useState(1);
   const [stepError, setStepError] = useState('');
   const [saleType, setSaleType] = useState<SaleType>('straight_sale');
+  const [imageIds, setImageIds] = useState<string[]>([]);
 
   function validateStep(stepToValidate: number): boolean {
     const form = formRef.current;
@@ -76,6 +77,17 @@ export function ListingForm({
   function previous() {
     setStepError('');
     setStep((current) => Math.max(1, current - 1));
+  }
+
+  function publish() {
+    if (!validateStep(5)) return;
+    if (formRef.current?.querySelector('[data-image-upload-pending="true"]') !== null) {
+      setStepError('Wait for your photos to finish uploading before publishing.');
+      return;
+    }
+    // Keep the final action explicit. With no submit button mounted in the wizard
+    // until this click, pressing Enter or selecting a checkbox cannot publish early.
+    formRef.current?.requestSubmit();
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -114,7 +126,7 @@ export function ListingForm({
           <label className="sr-only" htmlFor="description">Description</label>
           <textarea id="description" name="description" required maxLength={4000} rows={5} placeholder="Description" />
         </div>
-        <ImageUploader />
+        <ImageUploader onReadyImageIdsChange={setImageIds} />
         <div className="form-field form-field--compact">
           <label className="sr-only" htmlFor="sizeClass">Item size</label>
           <select id="sizeClass" name="sizeClass" defaultValue="small" aria-label="Item size">
@@ -147,16 +159,19 @@ export function ListingForm({
         <div className="choice-grid choice-grid--payments">
           {SETTLEMENT_METHODS.map((method) => (
             <label className="choice-card choice-card--compact" key={method} htmlFor={`pay_${method}`}>
-              <input id={`pay_${method}`} type="checkbox" name="settlementMethods" value={method} defaultChecked={method === 'cash'} />
+              <input id={`pay_${method}`} type="checkbox" name="settlementMethods" value={method} />
               <span><strong>{PAYMENT_LABELS[method] ?? method}</strong></span>
             </label>
           ))}
         </div>
+        <p className="form-note">Select every payment method you are willing to accept.</p>
       </fieldset>
+
+      {imageIds.map((imageId) => <input key={imageId} type="hidden" name="imageIds" value={imageId} />)}
 
       <div className="create-step-actions">
         {step > 1 ? <button className="secondary" type="button" onClick={previous}>Back</button> : <span />}
-        {step < 5 ? <button type="button" onClick={next}>Continue</button> : <button type="submit">Publish listing</button>}
+        {step < 5 ? <button type="button" onClick={next}>Continue</button> : <button type="button" onClick={publish}>Publish listing</button>}
       </div>
     </form>
   );
