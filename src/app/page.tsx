@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { ArrowRight, BookOpen, Layers3, Plus, Search, Trophy } from 'lucide-react';
+import { ArrowRight, BookOpen, Layers3, Plus, Search, Store, Trophy } from 'lucide-react';
 
 import { CATEGORY_LIST } from '@/domain/categories/definitions';
 import { browseListings } from '@/services/listings';
@@ -50,7 +50,7 @@ export default async function HomePage() {
         <div className="home-hero__orb home-hero__orb--two" aria-hidden="true" />
         <div className="home-hero__main">
           <div className="home-hero__content">
-            <h1 id="home-title">Find Your Next Great Collectible.</h1>
+            <h1 id="home-title">Find Your Next Great <span className="home-hero__accent">Collectible.</span></h1>
             <p className="home-hero__lede">Trade cards, comics, and collectibles with collectors across Trinidad &amp; Tobago.</p>
             <form className="home-search" action="/listings" method="get" role="search">
               <Search aria-hidden="true" />
@@ -116,6 +116,16 @@ export default async function HomePage() {
         ) : (
           <div className="home-empty"><strong>No last-chance listings right now.</strong><span>When a fixed-price item has one or two claims, it will appear here.</span></div>
         )}
+      </section>
+
+      <section className="home-sell-prompt home-store-prompt" aria-labelledby="store-prompt-title">
+        <div>
+          <h2 id="store-prompt-title">Have a storefront?</h2>
+          <p>Want to join the community? Create a Store application here.</p>
+        </div>
+        <Link className="home-sell-prompt__cta" href="/store/apply">
+          <Store aria-hidden="true" />Create Store Application
+        </Link>
       </section>
     </main>
   );
