@@ -3016,12 +3016,9 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 
 /* CollectTT home hero — compact, search-first, and grounded in the logo's forward ribbons. */
 .home-page {
-  position: relative;
-  left: 50%;
   width: min(1920px, calc(100vw - 48px));
   max-width: none;
-  margin-left: 0;
-  transform: translateX(-50%);
+  margin-left: calc((100% - 100vw + 48px) / 2);
 }
 .home-hero {
   min-height: 390px;
@@ -3082,7 +3079,7 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 }
 
 @media (max-width: 650px) {
-  .home-page { width: calc(100vw - 24px); }
+  .home-page { width: calc(100vw - 24px); margin-left: 0; }
   .home-hero {
     min-height: 0;
     padding: 2.4rem 1rem 1.2rem;
