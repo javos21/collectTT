@@ -2431,13 +2431,13 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   color: #312e81;
 }
 .home-store-prompt {
-  border-color: var(--accent-pop);
-  background: var(--accent-pop);
-  box-shadow: 0 14px 30px rgba(245, 158, 11, .18);
+  border-color: var(--primary);
+  background: var(--primary);
+  box-shadow: 0 14px 30px rgba(79, 70, 229, .16);
 }
 .home-store-prompt h2,
 .home-store-prompt > div > p:last-child {
-  color: var(--foreground);
+  color: var(--primary-foreground);
 }
 .home-store-prompt .home-sell-prompt__cta,
 .home-store-prompt .home-sell-prompt__cta:hover,
@@ -3080,6 +3080,8 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 }
 .home-hero__accent { color: #3438f5; }
 .home-hero__lede {
+  width: 100%;
+  max-width: none;
   margin-top: .75rem;
   color: #526078;
   line-height: 1.5;
@@ -3177,12 +3179,9 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   filter: brightness(.96);
 }
 .home-browse-action--auction { background: var(--primary); }
-.home-browse-action--sale {
-  background: var(--accent-pop);
-  color: var(--foreground);
-}
+.home-browse-action--sale { background: var(--primary); color: var(--primary-foreground); }
 .home-browse-action--sale:hover,
-.home-browse-action--sale:focus-visible { color: var(--foreground); }
+.home-browse-action--sale:focus-visible { color: var(--primary-foreground); }
 .home-browse-action__icon {
   display: grid;
   place-items: center;
