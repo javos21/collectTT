@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { UserRound } from 'lucide-react';
-import { Building05, CoinsSwap01, Plus, SearchLg, UserCircle } from '@untitledui/icons';
+import { Building05, CoinsSwap01, Plus, SearchLg } from '@untitledui/icons';
 import '@fontsource-variable/inter';
 import '@fontsource/space-mono/400.css';
 import './globals.css';
 
+import { MobileNavigation } from '@/components/mobile-navigation';
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
 import { storesForStaff } from '@/services/custody';
@@ -31,24 +32,27 @@ async function SiteNavigation() {
   const stores = viewer === null ? [] : await storesForStaff(db, viewer.userId);
 
   return (
-    <nav aria-label="Primary navigation">
-      <Link href="/listings"><SearchLg className="nav-icon" aria-hidden="true" />Browse</Link>
-      <Link href="/listings/new"><Plus className="nav-icon" aria-hidden="true" />Sell</Link>
-      <Link href="/deals"><CoinsSwap01 className="nav-icon" aria-hidden="true" />My deals</Link>
-      {stores.length > 0 && <Link href="/store"><Building05 className="nav-icon" aria-hidden="true" />Store</Link>}
-      {viewer === null ? (
-        <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
-      ) : (
-        <Link className="user-nav" href="/me" aria-label={`Open ${viewer.displayName} profile`}>
-          {viewer.image === null ? (
-            <span className="user-nav__avatar" aria-hidden="true">{initials(viewer.displayName)}</span>
-          ) : (
-            <img className="user-nav__avatar" src={viewer.image} alt="" />
-          )}
-          <span>{viewer.displayName}</span>
-        </Link>
-      )}
-    </nav>
+    <>
+      <nav aria-label="Primary navigation">
+        <Link href="/listings"><SearchLg className="nav-icon" aria-hidden="true" />Browse</Link>
+        <Link href="/listings/new"><Plus className="nav-icon" aria-hidden="true" />Sell</Link>
+        <Link href="/deals"><CoinsSwap01 className="nav-icon" aria-hidden="true" />My deals</Link>
+        {stores.length > 0 && <Link href="/store"><Building05 className="nav-icon" aria-hidden="true" />Store</Link>}
+        {viewer === null ? (
+          <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
+        ) : (
+          <Link className="user-nav" href="/me" aria-label={`Open ${viewer.displayName} profile`}>
+            {viewer.image === null ? (
+              <span className="user-nav__avatar" aria-hidden="true">{initials(viewer.displayName)}</span>
+            ) : (
+              <img className="user-nav__avatar" src={viewer.image} alt="" />
+            )}
+            <span>{viewer.displayName}</span>
+          </Link>
+        )}
+      </nav>
+      <MobileNavigation hasStore={stores.length > 0} signedIn={viewer !== null} />
+    </>
   );
 }
 
@@ -103,12 +107,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </div>
         </footer>
-        <nav className="mobile-tabs" aria-label="Mobile navigation">
-          <Link href="/listings"><SearchLg aria-hidden="true" /><span>Browse</span></Link>
-          <Link href="/listings/new"><Plus aria-hidden="true" /><span>Sell</span></Link>
-          <Link href="/deals"><CoinsSwap01 aria-hidden="true" /><span>Deals</span></Link>
-          <Link href="/me"><UserCircle aria-hidden="true" /><span>Profile</span></Link>
-        </nav>
       </body>
     </html>
   );

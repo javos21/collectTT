@@ -2404,6 +2404,49 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   transform: none;
 }
 
+/* Solid theme surfaces keep both calls to action calm and improve copy contrast. */
+.home-sell-prompt::before { display: none; }
+.home-sell-prompt {
+  border-color: var(--primary);
+  background: var(--primary);
+  box-shadow: 0 14px 30px rgba(79, 70, 229, .16);
+}
+.home-sell-prompt h2 {
+  color: var(--primary-foreground);
+  text-shadow: none;
+}
+.home-sell-prompt > div > p:last-child {
+  color: #eef2ff;
+  font-size: .9rem;
+  line-height: 1.5;
+}
+.home-sell-prompt__cta {
+  border-color: #fff;
+  background: #fff;
+  color: #3730a3;
+}
+.home-sell-prompt__cta:hover,
+.home-sell-prompt__cta:focus-visible {
+  background: #eef2ff;
+  color: #312e81;
+}
+.home-store-prompt {
+  border-color: var(--secondary);
+  background: var(--secondary);
+  box-shadow: 0 14px 30px rgba(20, 184, 166, .16);
+}
+.home-store-prompt h2,
+.home-store-prompt > div > p:last-child {
+  color: var(--secondary-foreground);
+}
+.home-store-prompt .home-sell-prompt__cta,
+.home-store-prompt .home-sell-prompt__cta:hover,
+.home-store-prompt .home-sell-prompt__cta:focus-visible {
+  color: var(--secondary-foreground);
+}
+.home-store-prompt .home-sell-prompt__cta:hover,
+.home-store-prompt .home-sell-prompt__cta:focus-visible { background: #ccfbf1; }
+
 @media (max-width: 720px) {
   .site-footer__inner {
     width: min(100% - 28px, 640px);
@@ -3102,4 +3145,180 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   .home-hero .home-category-grid { gap: .65rem; }
   .home-hero .home-category { min-height: 66px; }
   .home-hero + .home-section { margin-top: 2.25rem; }
+}
+
+/* Homepage browse actions replace the category shortcuts with two clear paths. */
+.home-browse-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(900px, 100%);
+  gap: .9rem;
+  margin: 1rem auto 0;
+}
+.home-browse-action {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-width: 0;
+  min-height: 66px;
+  padding: .75rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: #fff;
+  font-size: .83rem;
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: 0 8px 18px rgb(24 24 27 / 10%);
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+.home-browse-action:hover,
+.home-browse-action:focus-visible {
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgb(24 24 27 / 16%);
+  filter: brightness(.96);
+}
+.home-browse-action--auction { background: var(--primary); }
+.home-browse-action--sale {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+.home-browse-action--sale:hover,
+.home-browse-action--sale:focus-visible { color: var(--secondary-foreground); }
+.home-browse-action__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 18%);
+}
+.home-browse-action__icon svg,
+.home-browse-action > svg { width: 18px; height: 18px; }
+.home-browse-action > span:nth-child(2) { min-width: 0; }
+.home-browse-action > svg { margin-left: auto; }
+
+@media (max-width: 650px) {
+  .home-browse-actions { grid-template-columns: 1fr; gap: .65rem; }
+  .home-browse-action { min-height: 60px; }
+}
+
+/* Keep uploaded listing photos legible inside the fixed card thumbnail frame. */
+.home-listing-tile__image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* Mobile navigation uses a persistent header trigger and an accessible sidebar. */
+.mobile-menu-trigger,
+.mobile-drawer { display: none; }
+
+@media (max-width: 720px) {
+  .wrap { padding-bottom: 40px; }
+  .mobile-menu-trigger {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    margin: 0 0 0 auto;
+    padding: 0;
+    border: 1px solid rgba(79, 70, 229, .16);
+    border-radius: 11px;
+    color: #3730a3;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(49, 46, 129, .08);
+  }
+  .mobile-menu-trigger:hover,
+  .mobile-menu-trigger:focus-visible { background: #f6f7ff; }
+  .mobile-menu-trigger svg { width: 21px; height: 21px; }
+  .mobile-drawer {
+    position: fixed;
+    z-index: 40;
+    inset: 0;
+    display: block;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .mobile-drawer.is-open {
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .mobile-drawer__backdrop {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgba(6, 44, 60, .38);
+    opacity: 0;
+    transition: opacity .2s ease;
+  }
+  .mobile-drawer.is-open .mobile-drawer__backdrop { opacity: 1; }
+  .mobile-drawer__panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    width: min(84vw, 340px);
+    flex-direction: column;
+    padding: 1rem;
+    border-right: 1px solid #dfe3ff;
+    background: #fff;
+    box-shadow: 18px 0 42px rgba(24, 24, 27, .16);
+    transform: translateX(-100%);
+    transition: transform .24s ease;
+  }
+  .mobile-drawer.is-open .mobile-drawer__panel { transform: translateX(0); }
+  .mobile-drawer__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    padding: 0 .15rem .8rem .35rem;
+    border-bottom: 1px solid #eef0f5;
+    color: #18181b;
+    font-size: 1rem;
+  }
+  .mobile-drawer__close {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    color: #52525b;
+    background: transparent;
+  }
+  .mobile-drawer__close:hover { color: #3730a3; background: #f6f7ff; }
+  .mobile-drawer__close svg { width: 20px; height: 20px; }
+  .mobile-drawer__links {
+    display: grid;
+    gap: .35rem;
+    margin-top: 1rem;
+  }
+  .mobile-drawer__links a {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    min-height: 52px;
+    padding: .75rem .8rem;
+    border-radius: 11px;
+    color: #3f3f46;
+    font-size: .9rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .mobile-drawer__links a:hover,
+  .mobile-drawer__links a:focus-visible { color: #3730a3; background: #f6f7ff; }
+  .mobile-drawer__links a svg { width: 20px; height: 20px; color: #6366f1; }
 }

@@ -1,18 +1,10 @@
 import Link from 'next/link';
-import type { ReactNode } from 'react';
-import { ArrowRight, BookOpen, Layers3, Plus, Search, Store, Trophy } from 'lucide-react';
+import { ArrowRight, Gavel, Plus, Search, Store, Tag } from 'lucide-react';
 
-import { CATEGORY_LIST } from '@/domain/categories/definitions';
 import { browseListings } from '@/services/listings';
 import { HomeListingCarousel, type HomeListingRow } from './home-listing-carousel';
 
 export const dynamic = 'force-dynamic';
-
-const CATEGORY_ICON: Record<string, ReactNode> = {
-  trading_card: <Layers3 aria-hidden="true" />,
-  comic: <BookOpen aria-hidden="true" />,
-  collectible: <Trophy aria-hidden="true" />,
-};
 
 type BrowseRow = Awaited<ReturnType<typeof browseListings>>['rows'][number];
 
@@ -32,15 +24,13 @@ function toHomeListingRow(row: BrowseRow): HomeListingRow {
 }
 
 export default async function HomePage() {
-  const [recentSale, lastChance, auctions, ...catPages] = await Promise.all([
+  const [recentSale, lastChance, auctions] = await Promise.all([
     browseListings({ saleType: 'straight_sale', surface: 'recent', pageSize: 16, sort: 'newest' }),
     browseListings({ saleType: 'straight_sale', surface: 'last_chance', pageSize: 16, sort: 'newest' }),
     browseListings({ saleType: 'auction', pageSize: 16, sort: 'ending_soon' }),
-    ...CATEGORY_LIST.map((category) => browseListings({ category: category.key, pageSize: 1 })),
   ]);
 
   const total = recentSale.total;
-  const catCounts = new Map(CATEGORY_LIST.map((category, index) => [category.key, catPages[index]?.total ?? 0]));
 
   return (
     <main className="home-page">
@@ -58,14 +48,17 @@ export default async function HomePage() {
               <input id="home-search-input" name="q" type="search" placeholder="Search listings" />
               <button type="submit">Search</button>
             </form>
-            <div className="home-category-grid" aria-labelledby="category-title">
-              <h2 className="sr-only" id="category-title">Explore categories</h2>
-              {CATEGORY_LIST.map((category) => (
-                <Link className="home-category" key={category.key} href={`/listings?category=${category.key}`}>
-                  <span className="home-category__icon">{CATEGORY_ICON[category.key]}</span>
-                  <span><strong>{category.label}s</strong><small>{catCounts.get(category.key) ?? 0} listings</small></span>
-                </Link>
-              ))}
+            <div className="home-browse-actions" aria-label="Browse listing types">
+              <Link className="home-browse-action home-browse-action--auction" href="/listings?saleType=auction">
+                <span className="home-browse-action__icon"><Gavel aria-hidden="true" /></span>
+                <span>Browse All Auctions Listings</span>
+                <ArrowRight aria-hidden="true" />
+              </Link>
+              <Link className="home-browse-action home-browse-action--sale" href="/listings?saleType=straight_sale">
+                <span className="home-browse-action__icon"><Tag aria-hidden="true" /></span>
+                <span>Browse All Sale Listings</span>
+                <ArrowRight aria-hidden="true" />
+              </Link>
             </div>
           </div>
         </div>
