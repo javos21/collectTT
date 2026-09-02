@@ -79,10 +79,6 @@ export const storeApplicationStatusEnum = pgEnum('store_application_status', [
   'confirmed',
   'declined',
 ]);
-export const ratingDirectionEnum = pgEnum('rating_direction', [
-  'buyer_rates_seller',
-  'seller_rates_buyer',
-]);
 export const notificationChannelEnum = pgEnum('notification_channel', [
   'in_app',
   'email',

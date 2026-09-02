@@ -1,6 +1,6 @@
 /**
  * Deadline handlers: payment window, seller drop-off window, payment reminder,
- * candidate promotion, and rating reveal.
+ * candidate promotion.
  *
  * ★ Every one is IDEMPOTENT — the first thing each does is a conditional read or write
  *   that no-ops when the state has already moved. Graphile Worker guarantees
@@ -17,9 +17,7 @@ import { listings } from '../../db/schema/listings';
 import {
   terminateTransaction,
   promoteNextCandidate,
-  loadTransaction,
 } from '../../services/transactions';
-import { revealRatings } from '../../services/ratings';
 import { recomputeRollingWindows, evaluateRestrictions } from '../../services/reputation';
 import { notify } from '../../notifications/dispatch';
 import { profiles } from '../../db/schema/profiles';
@@ -159,16 +157,6 @@ export async function promoteNext(payload: PromotePayload, helpers: Helpers): Pr
         ? `listing ${payload.listingId} promoted to transaction ${result.transactionId}`
         : `listing ${payload.listingId} had no remaining candidates`,
     );
-  });
-}
-
-// ---------------------------------------------------------------- ratings
-
-export async function ratingsReveal(payload: TxPayload, helpers: Helpers): Promise<void> {
-  await db.transaction(async (tx) => {
-    const row = await loadTransaction(tx, payload.transactionId);
-    const n = await revealRatings(tx, payload.transactionId, row.listingTitle);
-    helpers.logger.info(`revealed ${n} rating(s) for ${payload.transactionId}`);
   });
 }
 

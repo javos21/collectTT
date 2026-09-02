@@ -4,7 +4,6 @@
 --   listings.active_transaction_id      -> transactions.id   (listings <-> transactions)
 --   custody_holdings.current_transaction_id -> transactions.id
 --   reputation_events.transaction_id    -> transactions.id
---   ratings.transaction_id              -> transactions.id
 --   claims.transaction_id               -> transactions.id
 --   listings.current_bid_id             -> bids.id           (listings <-> bids)
 --
@@ -40,30 +39,11 @@ begin
       on delete set null;
   end if;
 
-  if not exists (select 1 from pg_constraint where conname = 'ratings_transaction_fk') then
-    alter table ratings
-      add constraint ratings_transaction_fk
-      foreign key (transaction_id) references transactions(id)
-      on delete cascade;
-  end if;
-
   if not exists (select 1 from pg_constraint where conname = 'claims_transaction_fk') then
     alter table claims
       add constraint claims_transaction_fk
       foreign key (transaction_id) references transactions(id)
       on delete set null;
-  end if;
-end
-$$;
-
--- The ratings.direction column is a plain text column in Drizzle (the enum lives in the
--- domain); constrain it here so bad values cannot be written.
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'ratings_direction_valid') then
-    alter table ratings
-      add constraint ratings_direction_valid
-      check (direction in ('buyer_rates_seller', 'seller_rates_buyer'));
   end if;
 end
 $$;

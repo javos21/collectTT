@@ -20,7 +20,6 @@ import {
   dropoffWindowExpired,
   paymentReminder,
   promoteNext,
-  ratingsReveal,
   reputationRecompute,
   consistencyCheck,
 } from './transaction-windows';
@@ -38,7 +37,6 @@ export interface TaskPayloads {
   'transaction:dropoff_window': { transactionId: string };
   'transaction:promote_next': { listingId: string; failedTransactionId: string };
   'transaction:payment_reminder': { transactionId: string };
-  'ratings:reveal': { transactionId: string };
   'reputation:recompute': Record<string, never>;
   'consistency:check': Record<string, never>;
 
@@ -63,7 +61,6 @@ export const taskList: TaskList = {
   'transaction:dropoff_window': dropoffWindowExpired as Task,
   'transaction:payment_reminder': paymentReminder as Task,
   'transaction:promote_next': promoteNext as Task,
-  'ratings:reveal': ratingsReveal as Task,
   'reputation:recompute': reputationRecompute as Task,
   'consistency:check': consistencyCheck as Task,
   // Phase 2

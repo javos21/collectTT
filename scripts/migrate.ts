@@ -1,7 +1,7 @@
 /**
  * Apply migrations, then the circular foreign keys that cannot be expressed in the
  * Drizzle schema (listings ↔ transactions, custody_holdings ↔ transactions,
- * reputation_events → transactions, ratings → transactions).
+ * reputation_events → transactions).
  *
  * Safe to run repeatedly — every statement in the follow-up SQL is guarded.
  */

@@ -2,9 +2,8 @@
  * Objective facts vs subjective opinion.
  *
  * `reputation_events` is append-only and is the source of truth. Counters are a cache
- * rebuildable from the events at any time. Star ratings live entirely separately and
- * never feed the automatic restrictions — "did they pay" is a fact, "were they pleasant"
- * is an opinion, and only facts get to restrict someone's account.
+ * rebuildable from the events at any time. Only verified transaction outcomes feed the
+ * automatic restrictions.
  */
 
 export const REPUTATION_EVENT_TYPES = [
@@ -22,8 +21,6 @@ export const REPUTATION_EVENT_TYPES = [
   'seller_no_show',
   // custody facts
   'custody_overstay',
-  // subjective, tracked separately and never used for restrictions
-  'rating_received',
   // manual
   'admin_adjustment',
 ] as const;

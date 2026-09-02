@@ -189,13 +189,7 @@ export const EVENTS = {
     type: 'transaction_completed',
     channels: ['in_app', 'email'],
     title: (d) => `Deal complete: "${str(d, 'listingTitle')}"`,
-    body: () => `Rate your counterparty — ratings stay hidden until both sides submit.`,
-  },
-  rating_revealed: {
-    type: 'rating_revealed',
-    channels: ['in_app'],
-    title: (d) => `Your rating for "${str(d, 'listingTitle')}" is visible`,
-    body: () => `Both sides have submitted.`,
+    body: () => `Your verified transaction record has been updated.`,
   },
   restriction_applied: {
     type: 'restriction_applied',

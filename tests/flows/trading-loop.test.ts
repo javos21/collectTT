@@ -9,7 +9,6 @@
  *   · a lapsed payment window renegesd, records the fact, and promotes the next candidate
  *   · a late bid extends the auction, and the close job reschedules rather than closing
  *   · a reneged auction winner hands off to the runner-up AT THEIR OWN BID
- *   · blind ratings stay blind until both sides submit
  *
  * Requires the local database: `docker compose up -d && npm run setup`.
  */
@@ -20,20 +19,18 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import { db, pool } from '../../src/db/client';
 import { users } from '../../src/db/schema/auth';
-import { profiles, reputationCounters, reputationEvents, ratings } from '../../src/db/schema/profiles';
+import { profiles, reputationCounters, reputationEvents } from '../../src/db/schema/profiles';
 import { listings, claims, bids } from '../../src/db/schema/listings';
 import { offers } from '../../src/db/schema/offers';
 import { transactions } from '../../src/db/schema/transactions';
 import { claimListing } from '../../src/db/atomic/claim-listing';
 import { placeBid } from '../../src/db/atomic/place-bid';
 import { markPaid, confirmPayment, disputePayment } from '../../src/services/transactions';
-import { submitRating, ratingsFor } from '../../src/services/ratings';
 import { acceptOffer, rejectOffer, submitOffer } from '../../src/services/offers';
 import { auctionClose } from '../../src/jobs/tasks/auction-close';
 import {
   paymentWindowExpired,
   promoteNext,
-  ratingsReveal,
 } from '../../src/jobs/tasks/transaction-windows';
 
 // Graphile Worker passes a Helpers object; the handlers only use `logger`.
@@ -111,7 +108,6 @@ afterAll(async () => {
   if (listingIds.length > 0) {
     const sub = `(select id from transactions where listing_id = any($1))`;
     await q(`delete from transaction_events where transaction_id in ${sub}`, [listingIds]);
-    await q(`delete from ratings where transaction_id in ${sub}`, [listingIds]);
     await q(`update listings set active_transaction_id = null where id = any($1)`, [listingIds]);
     await q(`delete from reputation_events where transaction_id in ${sub}`, [listingIds]);
     await q(`delete from transactions where listing_id = any($1)`, [listingIds]);
@@ -350,7 +346,6 @@ describe('★ mark-paid / confirm-received handshake', () => {
     expect(row?.paymentState).toBe('confirmed');
     expect(row?.state).toBe('completed');
     expect(row?.completedAt).not.toBeNull();
-    expect(row?.ratingWindowEndsAt).not.toBeNull();
 
     // The listing is done.
     const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
@@ -692,97 +687,5 @@ describe('★ auctions: bidding, anti-snipe, close', () => {
     // ★ They owe THEIR bid, not the winner's.
     expect(runnerUpTx?.amountCents).toBe(6_000);
     expect(runnerUpTx?.source).toBe('auction_runner_up');
-  });
-});
-
-// ════════════════════════════════════════════════════════ blind ratings
-
-describe('★ blind mutual ratings', () => {
-  async function completedDeal(buyer: string): Promise<string> {
-    const listingId = await makeListing();
-    const claim = await claimListing({
-      listingId,
-      claimantId: buyer,
-      fulfillmentPath: 'cash_meetup',
-    });
-    const txId = claim.transactionId!;
-    await db.transaction(async (tx) => markPaid(tx, txId, buyer));
-    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
-    return txId;
-  }
-
-  it('stays hidden until BOTH sides submit', async () => {
-    const buyer = buyers[0]!;
-    const txId = await completedDeal(buyer);
-
-    await submitRating({ transactionId: txId, raterId: buyer, stars: 5, comment: 'smooth' });
-
-    // The seller can tell a rating exists but cannot see it.
-    const sellerView = await ratingsFor(txId, seller);
-    expect(sellerView.mine).toBeNull();
-    expect(sellerView.theirs).toBeNull();
-    expect(sellerView.theirsPending).toBe(true);
-
-    // The buyer sees their own.
-    const buyerView = await ratingsFor(txId, buyer);
-    expect(buyerView.mine?.stars).toBe(5);
-    expect(buyerView.theirs).toBeNull();
-
-    // Seller submits -> both reveal at once.
-    await submitRating({ transactionId: txId, raterId: seller, stars: 4 });
-
-    const afterSeller = await ratingsFor(txId, seller);
-    expect(afterSeller.theirs?.stars).toBe(5);
-    const afterBuyer = await ratingsFor(txId, buyer);
-    expect(afterBuyer.theirs?.stars).toBe(4);
-  });
-
-  it('reveals a one-sided rating when the window closes', async () => {
-    const buyer = buyers[1]!;
-    const txId = await completedDeal(buyer);
-    await submitRating({ transactionId: txId, raterId: buyer, stars: 3 });
-
-    // Nothing revealed yet.
-    let rows = await db.select().from(ratings).where(eq(ratings.transactionId, txId));
-    expect(rows[0]?.revealedAt).toBeNull();
-
-    await ratingsReveal({ transactionId: txId }, helpers);
-
-    rows = await db.select().from(ratings).where(eq(ratings.transactionId, txId));
-    expect(rows[0]?.revealedAt).not.toBeNull();
-
-    // And it folded into the seller's public average.
-    const counters = (
-      await db.select().from(reputationCounters).where(eq(reputationCounters.userId, seller))
-    )[0];
-    expect(counters?.ratingCount).toBeGreaterThan(0);
-  });
-
-  it('refuses a rating from someone who was not party to the deal', async () => {
-    const txId = await completedDeal(buyers[2]!);
-    await expect(
-      submitRating({ transactionId: txId, raterId: buyers[3]!, stars: 1 }),
-    ).rejects.toThrow(/only the two parties/i);
-  });
-
-  it('refuses to rate an unfinished deal', async () => {
-    const listingId = await makeListing();
-    const claim = await claimListing({
-      listingId,
-      claimantId: buyers[4]!,
-      fulfillmentPath: 'cash_meetup',
-    });
-    await expect(
-      submitRating({ transactionId: claim.transactionId!, raterId: buyers[4]!, stars: 5 }),
-    ).rejects.toThrow(/completed/i);
-  });
-
-  it('refuses a second rating from the same person', async () => {
-    const buyer = buyers[5]!;
-    const txId = await completedDeal(buyer);
-    await submitRating({ transactionId: txId, raterId: buyer, stars: 5 });
-    await expect(
-      submitRating({ transactionId: txId, raterId: buyer, stars: 1 }),
-    ).rejects.toThrow(/already rated/i);
   });
 });

@@ -15,9 +15,7 @@ import {
   uniqueIndex,
   index,
   jsonb,
-  numeric,
   uuid,
-  check,
 } from 'drizzle-orm/pg-core';
 
 import { users } from './auth';
@@ -111,10 +109,6 @@ export const reputationCounters = pgTable('reputation_counters', {
   sellReneged90d: integer('sell_reneged_90d').notNull().default(0),
   sellNoShows: integer('sell_no_shows').notNull().default(0),
 
-  // Subjective, kept strictly apart from the facts above and never used to restrict.
-  ratingAvg: numeric('rating_avg', { precision: 3, scale: 2 }),
-  ratingCount: integer('rating_count').notNull().default(0),
-
   recomputedAt: timestamp('recomputed_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -137,34 +131,5 @@ export const restrictions = pgTable(
     index('restrictions_active')
       .on(t.userId, t.expiresAt)
       .where(sql`${t.liftedAt} is null`),
-  ],
-);
-
-export const ratings = pgTable(
-  'ratings',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    // FK added post-create, as with reputation_events.
-    transactionId: uuid('transaction_id').notNull(),
-    raterId: text('rater_id')
-      .notNull()
-      .references(() => profiles.userId),
-    rateeId: text('ratee_id')
-      .notNull()
-      .references(() => profiles.userId),
-    direction: text('direction').notNull(),
-    stars: integer('stars').notNull(),
-    comment: text('comment'),
-    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
-    /** NULL until both sides submit or the window closes. Blind until then. */
-    revealedAt: timestamp('revealed_at', { withTimezone: true }),
-  },
-  (t) => [
-    uniqueIndex('ratings_one_per_rater').on(t.transactionId, t.raterId),
-    index('ratings_public')
-      .on(t.rateeId)
-      .where(sql`${t.revealedAt} is not null`),
-    check('rating_stars_range', sql`${t.stars} between 1 and 5`),
-    check('rating_distinct', sql`${t.raterId} <> ${t.rateeId}`),
   ],
 );

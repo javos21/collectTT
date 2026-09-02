@@ -244,7 +244,6 @@ async function cleanup(): Promise<void> {
   if (ids.length > 0) {
     const sub = `(select id from transactions where listing_id = any($1))`;
     await q(`delete from transaction_events where transaction_id in ${sub}`, [ids]);
-    await q(`delete from ratings where transaction_id in ${sub}`, [ids]);
     await q(`update listings set active_transaction_id = null where id = any($1)`, [ids]);
     await q(`delete from reputation_events where transaction_id in ${sub}`, [ids]);
     await q(`delete from transactions where listing_id = any($1)`, [ids]);

@@ -1,10 +1,8 @@
 /**
  * Objective reputation.
  *
- * `reputation_events` is append-only and is the truth. Counters are a cache. Star
- * ratings live in a different table entirely and NEVER feed the automatic restrictions —
- * "did they pay" is a fact, "were they pleasant" is an opinion, and only facts get to
- * restrict someone's account.
+ * `reputation_events` is append-only and is the truth. Counters are a cache.
+ * Only verified transaction outcomes feed the automatic restrictions.
  *
  * Every function here takes an open transaction: a reputation fact and the state change
  * that caused it must commit together or not at all.

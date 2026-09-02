@@ -2431,21 +2431,21 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   color: #312e81;
 }
 .home-store-prompt {
-  border-color: var(--secondary);
-  background: var(--secondary);
-  box-shadow: 0 14px 30px rgba(20, 184, 166, .16);
+  border-color: var(--accent-pop);
+  background: var(--accent-pop);
+  box-shadow: 0 14px 30px rgba(245, 158, 11, .18);
 }
 .home-store-prompt h2,
 .home-store-prompt > div > p:last-child {
-  color: var(--secondary-foreground);
+  color: var(--foreground);
 }
 .home-store-prompt .home-sell-prompt__cta,
 .home-store-prompt .home-sell-prompt__cta:hover,
 .home-store-prompt .home-sell-prompt__cta:focus-visible {
-  color: var(--secondary-foreground);
+  color: var(--foreground);
 }
 .home-store-prompt .home-sell-prompt__cta:hover,
-.home-store-prompt .home-sell-prompt__cta:focus-visible { background: #ccfbf1; }
+.home-store-prompt .home-sell-prompt__cta:focus-visible { background: #fffbeb; }
 
 @media (max-width: 720px) {
   .site-footer__inner {
@@ -2994,8 +2994,6 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 .history-metrics span { color: #71717a; font-size: .62rem; }
 .profile-history-list { margin-top: .35rem; }
 .profile-history-list > h3 { margin: .7rem 0 .25rem; color: #27272a; font-size: .84rem; }
-.profile-history-row--rating { align-items: flex-start; }
-.star-rating { display: flex !important; flex-direction: row; gap: .08rem !important; color: #d97706; }
 .profile-toggle-list { display: grid; gap: .65rem; margin-top: .8rem; }
 .profile-toggle-list label { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin: 0; color: #27272a; font-size: .77rem; }
 .profile-toggle-list label > span { display: grid; gap: .12rem; }
@@ -3180,11 +3178,11 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 }
 .home-browse-action--auction { background: var(--primary); }
 .home-browse-action--sale {
-  background: var(--secondary);
-  color: var(--secondary-foreground);
+  background: var(--accent-pop);
+  color: var(--foreground);
 }
 .home-browse-action--sale:hover,
-.home-browse-action--sale:focus-visible { color: var(--secondary-foreground); }
+.home-browse-action--sale:focus-visible { color: var(--foreground); }
 .home-browse-action__icon {
   display: grid;
   place-items: center;

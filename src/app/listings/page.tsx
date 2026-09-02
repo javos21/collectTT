@@ -305,10 +305,10 @@ export default async function BrowsePage({
                         <UserRound aria-hidden="true" />
                         <div>
                           <Link href={`/members/${row.sellerId}`}>{row.sellerName}</Link>
-                          <span className="catalog-card__seller-rating">
-                            {row.sellerRatingAvg !== null ? `${Number(row.sellerRatingAvg).toFixed(1)} rating` : 'New seller'}
-                            {(row.sellerRatingCount ?? 0) > 0 && ` · ${row.sellerRatingCount} rating${row.sellerRatingCount === 1 ? '' : 's'}`}
-                            {(row.sellerCompletedSales ?? 0) > 0 && ` · ${row.sellerCompletedSales} sale${row.sellerCompletedSales === 1 ? '' : 's'}`}
+                          <span className="catalog-card__seller-trust">
+                            {(row.sellerCompletedSales ?? 0) > 0
+                              ? `${row.sellerCompletedSales} verified sale${row.sellerCompletedSales === 1 ? '' : 's'}`
+                              : 'New seller'}
                           </span>
                         </div>
                       </div>

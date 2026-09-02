@@ -34,9 +34,6 @@ export const WINDOWS = {
     full_service: 36 * HOUR,
   } satisfies Record<'relay' | 'full_service', number>,
 
-  /** Blind ratings reveal when both sides submit, or when this elapses. */
-  ratingReveal: 7 * DAY,
-
   /** Default shelf clocks. Per-store values on `relay_stores` override these. */
   custody: {
     paidDays: 7,
@@ -80,10 +77,6 @@ export function computeDeadlines(path: FulfillmentPath, now: Date, paymentWindow
     paymentDeadlineAt: new Date(now.getTime() + paymentWindowMs(path, paymentWindowHours)),
     sellerDropoffDeadlineAt: dropoffMs === null ? null : new Date(now.getTime() + dropoffMs),
   };
-}
-
-export function ratingRevealDeadline(completedAt: Date): Date {
-  return new Date(completedAt.getTime() + WINDOWS.ratingReveal);
 }
 
 /**

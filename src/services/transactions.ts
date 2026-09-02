@@ -37,7 +37,6 @@ import {
   canComplete,
   computeDeadlines,
   isFailedTransactionState,
-  ratingRevealDeadline,
   REASON_TO_STATE,
   statusAfterFailedAttempt,
   usesCustodyTrack,
@@ -430,15 +429,12 @@ export async function completeIfBothTracksDone(tx: Tx, transactionId: string): P
   if (!canComplete(row.paymentState, row.custodyState)) return false;
 
   assertTransactionTransition('open', 'completed');
-  const now = await dbNow(tx);
-  const ratingWindowEndsAt = ratingRevealDeadline(now);
 
   const updated = await tx
     .update(transactions)
     .set({
       state: 'completed',
       completedAt: sql`now()`,
-      ratingWindowEndsAt,
       updatedAt: sql`now()`,
     })
     .where(and(eq(transactions.id, transactionId), eq(transactions.state, 'open')))
@@ -485,13 +481,6 @@ export async function completeIfBothTracksDone(tx: Tx, transactionId: string): P
     .update(claims)
     .set({ status: 'superseded' })
     .where(and(eq(claims.listingId, row.listingId), eq(claims.status, 'queued')));
-
-  await enqueue(
-    tx,
-    'ratings:reveal',
-    { transactionId },
-    { jobKey: `ratings_reveal:${transactionId}`, runAt: ratingWindowEndsAt },
-  );
 
   for (const userId of [row.buyerId, row.sellerId]) {
     await notify({

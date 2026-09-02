@@ -7,7 +7,6 @@ import { currentUser } from '@/lib/session';
 import { transactions, transactionEvents } from '@/db/schema/transactions';
 import { listings } from '@/db/schema/listings';
 import { profiles } from '@/db/schema/profiles';
-import { ratingsFor } from '@/services/ratings';
 import { custodyPanelFor } from '@/services/custody';
 import { formatMoney } from '@/domain/money';
 import { usesCustodyTrack } from '@/domain/states/transaction';
@@ -15,7 +14,6 @@ import {
   markPaidAction,
   confirmPaymentAction,
   disputePaymentAction,
-  rateAction,
 } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -122,7 +120,6 @@ export default async function DealPage({
     .where(eq(transactionEvents.transactionId, id))
     .orderBy(asc(transactionEvents.occurredAt));
 
-  const ratings = t.state === 'completed' ? await ratingsFor(id, viewer.userId) : null;
   const isOpen = t.state === 'open';
   const hasCustody = usesCustodyTrack(t.fulfillmentPath);
   const custodyPanel = hasCustody ? await custodyPanelFor(db, id) : null;
@@ -169,7 +166,6 @@ export default async function DealPage({
       {flash.done === 'marked' && <div className="alert alert--info">Marked as paid. {counterpartyName} has been notified.</div>}
       {flash.done === 'confirmed' && <div className="alert alert--info">Payment confirmed.</div>}
       {flash.done === 'disputed' && <div className="alert alert--warn">Recorded. The buyer has been told nothing arrived.</div>}
-      {flash.done === 'rated' && <div className="alert alert--info">Rating submitted.</div>}
 
       <div className="listing-body">
         {/* -------------------------------------------------- tracks + item + history */}
@@ -385,52 +381,13 @@ export default async function DealPage({
                 </>
               )}
             </>
-          ) : t.state === 'completed' && ratings !== null ? (
+          ) : t.state === 'completed' ? (
             <>
               <p className="movebox__label">Deal complete</p>
-              <p className="movebox__cta">Rate this deal</p>
-              {ratings.mine === null ? (
-                <form className="buybox__form" action={rateAction}>
-                  <input type="hidden" name="transactionId" value={id} />
-                  <label htmlFor="stars">Stars</label>
-                  <select id="stars" name="stars" defaultValue="5">
-                    {[5, 4, 3, 2, 1].map((n) => (
-                      <option key={n} value={n}>
-                        {'★'.repeat(n)}
-                        {'☆'.repeat(5 - n)}
-                      </option>
-                    ))}
-                  </select>
-                  <label htmlFor="comment">Comment (optional)</label>
-                  <textarea id="comment" name="comment" maxLength={1000} />
-                  <p className="buybox__note">
-                    Blind — neither of you sees the other&apos;s rating until you&apos;ve both
-                    submitted, or the window closes{' '}
-                    {t.ratingWindowEndsAt !== null
-                      ? `on ${t.ratingWindowEndsAt.toLocaleDateString('en-TT')}`
-                      : 'at the deadline'}
-                    .
-                  </p>
-                  <button type="submit">Submit rating</button>
-                </form>
-              ) : (
-                <div className="buybox__state">
-                  You rated this {'★'.repeat(ratings.mine.stars)}
-                  {'☆'.repeat(5 - ratings.mine.stars)}.
-                </div>
-              )}
-              <div className="buybox__state" style={{ marginTop: '.6rem' }}>
-                {ratings.theirs !== null ? (
-                  <>
-                    They rated you {'★'.repeat(ratings.theirs.stars)}
-                    {'☆'.repeat(5 - ratings.theirs.stars)}
-                    {ratings.theirs.comment !== null && <> — “{ratings.theirs.comment}”</>}
-                  </>
-                ) : ratings.theirsPending ? (
-                  'They have rated you — hidden until you submit yours.'
-                ) : (
-                  'They haven’t rated yet.'
-                )}
+              <p className="movebox__cta">Transaction completed</p>
+              <div className="buybox__state">
+                This deal is complete. Its verified activity is included in both members&apos;
+                trust snapshots.
               </div>
             </>
           ) : (

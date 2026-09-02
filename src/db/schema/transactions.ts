@@ -80,7 +80,6 @@ export const transactions = pgTable(
     // ---- clocks, all set from the DB clock
     paymentDeadlineAt: timestamp('payment_deadline_at', { withTimezone: true }).notNull(),
     sellerDropoffDeadlineAt: timestamp('seller_dropoff_deadline_at', { withTimezone: true }),
-    ratingWindowEndsAt: timestamp('rating_window_ends_at', { withTimezone: true }),
 
     markedPaidAt: timestamp('marked_paid_at', { withTimezone: true }),
     paymentConfirmedAt: timestamp('payment_confirmed_at', { withTimezone: true }),

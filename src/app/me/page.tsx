@@ -1,11 +1,11 @@
-import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { desc, eq, or } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 
 import { bids, claims, listings } from '@/db/schema/listings';
 import { db } from '@/db/client';
 import { offers } from '@/db/schema/offers';
-import { profiles, ratings, reputationCounters } from '@/db/schema/profiles';
+import { profiles, reputationCounters } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
 import { formatMoney } from '@/domain/money';
 import { objectiveSummary } from '@/domain/policy/reputation';
@@ -30,7 +30,7 @@ export default async function MePage() {
   const user = await currentUser();
   if (user === null) redirect('/sign-in');
 
-  const [profileRows, countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows, ratingRows] =
+  const [profileRows, countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows] =
     await Promise.all([
       db.select().from(profiles).where(eq(profiles.userId, user.userId)).limit(1),
       db.select().from(reputationCounters).where(eq(reputationCounters.userId, user.userId)).limit(1),
@@ -63,22 +63,10 @@ export default async function MePage() {
         .where(or(eq(transactions.buyerId, user.userId), eq(transactions.sellerId, user.userId)))
         .orderBy(desc(transactions.createdAt))
         .limit(50),
-      db
-        .select({ rating: ratings, title: listings.title })
-        .from(ratings)
-        .innerJoin(transactions, eq(transactions.id, ratings.transactionId))
-        .innerJoin(listings, eq(listings.id, transactions.listingId))
-        .where(and(eq(ratings.rateeId, user.userId), sql`${ratings.revealedAt} is not null`))
-        .orderBy(desc(ratings.submittedAt))
-        .limit(30),
     ]);
 
   const profile = profileRows[0];
   const counters = countersRows[0];
-  const ratingAverage = counters?.ratingAvg === null || counters?.ratingAvg === undefined
-    ? null
-    : Number(counters.ratingAvg);
-
   return (
     <main className="profile-page">
       <ProfilePage
@@ -96,8 +84,6 @@ export default async function MePage() {
           deliveryCity: profile?.deliveryCity ?? null,
           deliveryCountry: profile?.deliveryCountry ?? 'Trinidad and Tobago',
           memberSince: profile?.memberSince.toISOString() ?? new Date().toISOString(),
-          ratingAverage,
-          ratingCount: counters?.ratingCount ?? 0,
         }}
         counters={counters === undefined ? null : {
           buyClaimsTotal: counters.buyClaimsTotal,
@@ -148,14 +134,6 @@ export default async function MePage() {
           fulfillmentPath: transaction.fulfillmentPath,
           createdAt: transaction.createdAt.toISOString(),
           completedAt: iso(transaction.completedAt),
-        }))}
-        ratings={ratingRows.map(({ rating, title }) => ({
-          id: rating.id,
-          title,
-          stars: rating.stars,
-          comment: rating.comment,
-          direction: rating.direction,
-          submittedAt: rating.submittedAt.toISOString(),
         }))}
         objectiveLines={counters === undefined ? [] : objectiveSummary({
           buyCompleted: counters.buyCompleted,

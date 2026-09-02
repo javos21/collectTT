@@ -631,8 +631,6 @@ function selectBrowseRows(
       publishedAt: listings.publishedAt,
       sellerName: profiles.displayName,
       sellerId: profiles.userId,
-      sellerRatingAvg: reputationCounters.ratingAvg,
-      sellerRatingCount: reputationCounters.ratingCount,
       sellerCompletedSales: reputationCounters.sellCompleted,
       fulfillmentPaths: listings.fulfillmentPaths,
       settlementMethods: listings.settlementMethods,

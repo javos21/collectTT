@@ -5,7 +5,6 @@ import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { profiles, reputationCounters, restrictions } from '@/db/schema/profiles';
 import { listings } from '@/db/schema/listings';
-import { publicRatings } from '@/services/ratings';
 import { formatMoney } from '@/domain/money';
 import { isNewMember } from '@/domain/policy/reputation';
 
@@ -31,14 +30,13 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
 
   const { p, c } = row;
 
-  const [theirListings, reviews, activeRestrictions] = await Promise.all([
+  const [theirListings, activeRestrictions] = await Promise.all([
     db
       .select()
       .from(listings)
       .where(and(eq(listings.sellerId, id), eq(listings.status, 'active')))
       .orderBy(desc(listings.publishedAt))
       .limit(12),
-    publicRatings(id),
     db
       .select({ type: restrictions.type, reason: restrictions.reason })
       .from(restrictions)
@@ -88,19 +86,6 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
             <td>Undelivered sales (last 90 days)</td>
             <td>{c?.sellReneged90d ?? 0}</td>
           </tr>
-          <tr>
-            <td>Rating</td>
-            <td>
-              {c?.ratingCount ? (
-                <>
-                  {Number(c.ratingAvg).toFixed(2)} from {c.ratingCount} rating
-                  {c.ratingCount === 1 ? '' : 's'}
-                </>
-              ) : (
-                <span className="muted">not rated yet</span>
-              )}
-            </td>
-          </tr>
         </tbody>
       </table>
 
@@ -122,29 +107,6 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
             ))}
           </ul>
         </>
-      )}
-
-      <h2>Ratings</h2>
-      {reviews.length === 0 ? (
-        <p className="muted">No revealed ratings yet.</p>
-      ) : (
-        <table>
-          <tbody>
-            {reviews.map((r, i) => (
-              <tr key={i}>
-                <td>
-                  {'★'.repeat(r.stars)}
-                  {'☆'.repeat(5 - r.stars)}
-                </td>
-                <td>{r.comment ?? <span className="muted">no comment</span>}</td>
-                <td className="muted">
-                  {r.direction === 'buyer_rates_seller' ? 'as seller' : 'as buyer'} ·{' '}
-                  {r.submittedAt.toLocaleDateString('en-TT')}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       )}
 
       <h2>Active listings</h2>

@@ -10,7 +10,6 @@ import {
   CalendarDays,
   ChevronRight,
   CircleHelp,
-  Clock3,
   Gavel,
   HandCoins,
   HeartHandshake,
@@ -23,7 +22,6 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingBag,
-  Star,
   UserRound,
   WalletCards,
 } from 'lucide-react';
@@ -37,7 +35,7 @@ const tabs = [
   { id: 'listings', label: 'My Listings' },
   { id: 'claims', label: 'Claims' },
   { id: 'bids-offers', label: 'Bids / Offers' },
-  { id: 'history', label: 'History & Ratings' },
+  { id: 'history', label: 'History' },
   { id: 'settings', label: 'Settings' },
 ] as const;
 
@@ -54,8 +52,6 @@ type ProfileData = {
   deliveryCity: string | null;
   deliveryCountry: string;
   memberSince: string;
-  ratingAverage: number | null;
-  ratingCount: number;
 };
 
 type CounterData = {
@@ -72,7 +68,6 @@ type ClaimData = { id: string; title: string; status: string; position: number; 
 type BidData = { id: string; title: string; amount: string; status: string; placedAt: string };
 type OfferData = { id: string; title: string; amount: string; status: string; createdAt: string };
 type DealData = { id: string; title: string; role: string; amount: string; state: string; fulfillmentPath: string; createdAt: string; completedAt: string | null };
-type RatingData = { id: string; title: string; stars: number; comment: string | null; direction: string; submittedAt: string };
 
 interface ProfilePageProps {
   signOutAction: () => Promise<void>;
@@ -83,7 +78,6 @@ interface ProfilePageProps {
   bids: BidData[];
   offers: OfferData[];
   deals: DealData[];
-  ratings: RatingData[];
   objectiveLines: string[];
 }
 
@@ -111,7 +105,10 @@ const StatusPill: FC<{ value: string }> = ({ value }) => (
 );
 
 function DetailsPanel({ profile, counters, listings, objectiveLines }: Pick<ProfilePageProps, 'profile' | 'counters' | 'listings' | 'objectiveLines'>) {
-  const ratingLabel = profile.ratingAverage === null ? 'No ratings yet' : `${profile.ratingAverage.toFixed(1)} / 5`;
+  const completedDeals = (counters?.buyCompleted ?? 0) + (counters?.sellCompleted ?? 0);
+  const paidOnTime = counters?.buyClaimsTotal
+    ? `${counters.buyPaidOnTime} of ${counters.buyClaimsTotal}`
+    : 'No purchase history';
   return (
     <div className="profile-content-stack">
       <div className="profile-detail-grid">
@@ -133,13 +130,13 @@ function DetailsPanel({ profile, counters, listings, objectiveLines }: Pick<Prof
         </section>
         <section className="profile-panel profile-panel--trust">
           <div className="profile-panel__title"><ShieldCheck size={19} aria-hidden="true" /><h3>Your trust snapshot</h3></div>
-          <div className="trust-score"><strong>{ratingLabel}</strong></div>
+          <div className="trust-score"><strong>{completedDeals} completed deal{completedDeals === 1 ? '' : 's'}</strong></div>
           <div className="trust-bars">
             <div><span>Purchases completed</span><strong>{counters?.buyCompleted ?? 0}</strong></div>
             <div><span>Sales completed</span><strong>{counters?.sellCompleted ?? 0}</strong></div>
-            <div><span>Paid on time</span><strong>{counters?.buyPaidOnTime ?? 0}</strong></div>
+            <div><span>Paid on time</span><strong>{paidOnTime}</strong></div>
           </div>
-          <p className="profile-panel__note">Ratings are kept separate from the objective record that powers account protections.</p>
+          <p className="profile-panel__note">Built from verified transaction outcomes and used for account protections.</p>
         </section>
       </div>
       <section className="profile-panel profile-panel--activity">
@@ -170,12 +167,29 @@ function CollectionPanel({ deals }: Pick<ProfilePageProps, 'deals'>) {
   return <div className="profile-content-stack">{collectionDeals.length === 0 ? <EmptyState icon={<PackageCheck size={22} />} title="Nothing waiting at a store">Store collections and seller drop-offs will appear here when a deal is in progress.</EmptyState> : <div className="profile-list">{collectionDeals.map((deal) => <article className="profile-list-row" key={deal.id}><div className="profile-list-row__icon profile-list-row__icon--green"><PackageCheck size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{deal.title}</h3><p>{deal.role} · {fulfillmentLabel(deal.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value="open" /><ChevronRight size={18} aria-hidden="true" /></div></article>)}</div>}</div>;
 }
 
-function HistoryPanel({ deals, ratings }: Pick<ProfilePageProps, 'deals' | 'ratings'>) {
-  return <div className="profile-content-stack"><section className="profile-panel profile-panel--history"><div className="profile-panel__title"><HeartHandshake size={19} aria-hidden="true" /><h3>How your activity affects your rating</h3></div><p>Your rating is built from revealed feedback after completed transactions. Objective outcomes such as paid-on-time and completed deals are tracked separately, so one opinion never changes your account standing.</p><div className="history-metrics"><div><BadgeCheck size={18} aria-hidden="true" /><strong>{deals.filter((deal) => deal.state === 'completed').length}</strong><span>completed transactions</span></div><div><Star size={18} aria-hidden="true" /><strong>{ratings.length}</strong><span>ratings received</span></div><div><Clock3 size={18} aria-hidden="true" /><strong>{deals.filter((deal) => deal.state !== 'completed').length}</strong><span>open or closed elsewhere</span></div></div></section><div className="profile-history-list"><h3>Recent transactions</h3>{deals.length === 0 ? <EmptyState icon={<WalletCards size={22} />} title="No transaction history yet">Once a claim, bid, or offer becomes a deal, its full trail will be kept here.</EmptyState> : deals.slice(0, 12).map((deal) => <article className="profile-history-row" key={deal.id}><div><strong>{deal.title}</strong><span>{deal.role} · {date(deal.createdAt)}</span></div><div><strong>{deal.amount}</strong><StatusPill value={deal.state} /></div></article>)}</div><div className="profile-history-list"><h3>Ratings received</h3>{ratings.length === 0 ? <p className="muted">No ratings have been revealed yet.</p> : ratings.map((rating) => <article className="profile-history-row profile-history-row--rating" key={rating.id}><div><strong>{rating.title}</strong><span>{rating.comment ?? 'No written comment'} · {date(rating.submittedAt)}</span></div><div className="star-rating" aria-label={`${rating.stars} out of 5 stars`}>{Array.from({ length: 5 }, (_, index) => <Star key={index} size={15} fill={index < rating.stars ? 'currentColor' : 'none'} aria-hidden="true" />)}</div></article>)}</div></div>;
+function HistoryPanel({ deals, counters }: Pick<ProfilePageProps, 'deals' | 'counters'>) {
+  const completedDeals = deals.filter((deal) => deal.state === 'completed').length;
+  return (
+    <div className="profile-content-stack">
+      <section className="profile-panel profile-panel--history">
+        <div className="profile-panel__title"><HeartHandshake size={19} aria-hidden="true" /><h3>How your activity builds trust</h3></div>
+        <p>CollectTT builds trust from verified transaction outcomes. Completed deals, payment timing, and seller delivery history are tracked separately from opinions.</p>
+        <div className="history-metrics">
+          <div><BadgeCheck size={18} aria-hidden="true" /><strong>{completedDeals}</strong><span>completed transactions</span></div>
+          <div><HandCoins size={18} aria-hidden="true" /><strong>{counters?.buyPaidOnTime ?? 0}</strong><span>payments on time</span></div>
+          <div><PackageCheck size={18} aria-hidden="true" /><strong>{counters?.sellCompleted ?? 0}</strong><span>sales completed</span></div>
+        </div>
+      </section>
+      <div className="profile-history-list">
+        <h3>Recent transactions</h3>
+        {deals.length === 0 ? <EmptyState icon={<WalletCards size={22} />} title="No transaction history yet">Once a claim, bid, or offer becomes a deal, its full trail will be kept here.</EmptyState> : deals.slice(0, 12).map((deal) => <article className="profile-history-row" key={deal.id}><div><strong>{deal.title}</strong><span>{deal.role} · {date(deal.createdAt)}</span></div><div><strong>{deal.amount}</strong><StatusPill value={deal.state} /></div></article>)}
+      </div>
+    </div>
+  );
 }
 
 function SettingsPanel() {
-  return <div className="profile-content-stack"><div className="profile-two-column"><section className="profile-panel"><div className="profile-panel__title"><Bell size={19} aria-hidden="true" /><h3>Notifications</h3></div><div className="profile-toggle-list"><label><span><strong>Deal reminders</strong><small>Get a nudge before payment or collection windows close.</small></span><input type="checkbox" defaultChecked /></label><label><span><strong>Bid and offer updates</strong><small>Know when you are outbid or an offer changes.</small></span><input type="checkbox" defaultChecked /></label></div></section><section className="profile-panel"><div className="profile-panel__title"><ShieldCheck size={19} aria-hidden="true" /><h3>Account security</h3></div><div className="profile-security-item"><div><strong>Email verified</strong><small>Your email is used for account recovery and verification codes.</small></div><span className="status-pill"><span aria-hidden="true" />Protected</span></div><button className="secondary profile-password-button" type="button">Change password</button></section></div><div className="profile-help-callout"><CircleHelp size={19} aria-hidden="true" /><div><strong>Need a hand?</strong><p>Read how claims, custody, payments, and ratings work in CollectTT.</p></div><ChevronRight size={18} aria-hidden="true" /></div></div>;
+  return <div className="profile-content-stack"><div className="profile-two-column"><section className="profile-panel"><div className="profile-panel__title"><Bell size={19} aria-hidden="true" /><h3>Notifications</h3></div><div className="profile-toggle-list"><label><span><strong>Deal reminders</strong><small>Get a nudge before payment or collection windows close.</small></span><input type="checkbox" defaultChecked /></label><label><span><strong>Bid and offer updates</strong><small>Know when you are outbid or an offer changes.</small></span><input type="checkbox" defaultChecked /></label></div></section><section className="profile-panel"><div className="profile-panel__title"><ShieldCheck size={19} aria-hidden="true" /><h3>Account security</h3></div><div className="profile-security-item"><div><strong>Email verified</strong><small>Your email is used for account recovery and verification codes.</small></div><span className="status-pill"><span aria-hidden="true" />Protected</span></div><button className="secondary profile-password-button" type="button">Change password</button></section></div><div className="profile-help-callout"><CircleHelp size={19} aria-hidden="true" /><div><strong>Need a hand?</strong><p>Read how claims, custody, and payments work in CollectTT.</p></div><ChevronRight size={18} aria-hidden="true" /></div></div>;
 }
 
 const panelByTab: Record<string, FC<ProfilePageProps>> = {
@@ -184,7 +198,7 @@ const panelByTab: Record<string, FC<ProfilePageProps>> = {
   listings: ({ listings }) => <ListingsPanel listings={listings} />,
   claims: ({ claims }) => <ClaimsPanel claims={claims} />,
   'bids-offers': ({ bids, offers }) => <BidsOffersPanel bids={bids} offers={offers} />,
-  history: ({ deals, ratings }) => <HistoryPanel deals={deals} ratings={ratings} />,
+  history: ({ deals, counters }) => <HistoryPanel deals={deals} counters={counters} />,
   settings: () => <SettingsPanel />,
 };
 
