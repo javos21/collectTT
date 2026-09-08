@@ -39,10 +39,10 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
   };
 
   return (
-    <AdminFrame viewer={viewer} activeNav="stores">
+    <AdminFrame activeNav="stores">
       <main className="admin-main">
         <div className="admin-heading">
-          <div><p className="admin-kicker">Trust &amp; operations</p><h1>Stores</h1><p>Review storefront applications before locations can receive inventory.</p></div>
+          <div><h1>Stores</h1><p>Review storefront applications before locations can receive inventory.</p></div>
           <span className="admin-environment">Admin only</span>
         </div>
 
@@ -56,7 +56,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
         </section>
 
         <section className="admin-panel stores-panel">
-          <div className="admin-panel__heading"><div><p className="admin-kicker">Application queue</p><h2>Store applications</h2></div><span>{applications.length} total</span></div>
+          <div className="admin-panel__heading"><div><h2>Store applications</h2></div><span>{applications.length} total</span></div>
           {applications.length === 0 ? <div className="catalog-empty"><StoreIcon className="catalog-empty__icon" size={20} aria-hidden="true" /><strong>No Store applications yet</strong><p>New applications will appear here after a member submits one.</p></div> : <div className="stores-list">
             {applications.map((application) => {
               const links = linksFor(application);
@@ -68,7 +68,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                 </div>
                 <div className="store-application-card__facts"><span><MapPin size={14} aria-hidden="true" />{application.area}, {application.city}</span><span>{application.phoneE164}</span><span>Submitted {application.createdAt.toLocaleDateString('en-TT')}</span></div>
                 <details className="store-application-card__details"><summary>View application details</summary><div className="store-application-card__detail-grid"><div><strong>Address</strong><p>{[application.addressLine1, application.addressLine2, application.city, application.country].filter(Boolean).join(', ')}</p></div><div><strong>Accepted sizes</strong><p>{application.acceptsSizeClasses.map(displayStatus).join(', ')}</p></div><div><strong>Verification links</strong>{links.length === 0 ? <p>None supplied</p> : <ul>{links.map(([label, url]) => <li key={label}><a href={url} target="_blank" rel="noreferrer">{label} <ExternalLink size={12} aria-hidden="true" /></a></li>)}</ul>}</div><div><strong>Terms acceptance</strong><p>Version {application.termsVersion}, accepted {application.termsAcceptedAt.toLocaleDateString('en-TT')}</p></div></div></details>
-                {isPending ? <div className="store-application-card__actions"><form action={confirmStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><button className="admin-button" type="submit">Confirm Store</button></form><form className="store-decline-form" action={declineStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><input name="adminNote" aria-label={`Optional note for ${application.storeName}`} placeholder="Optional note for applicant" /><button className="admin-button admin-button--danger" type="submit">Decline</button></form></div> : application.adminNote ? <p className="store-application-card__note"><strong>Admin note:</strong> {application.adminNote}</p> : null}
+                {isPending ? <div className="store-application-card__actions"><form action={confirmStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><button className="admin-button admin-button--success" type="submit">Confirm Store</button></form><form className="store-decline-form" action={declineStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><input name="adminNote" aria-label={`Optional note for ${application.storeName}`} placeholder="Optional note for applicant" /><button className="admin-button admin-button--danger" type="submit">Decline</button></form></div> : application.adminNote ? <p className="store-application-card__note"><strong>Admin note:</strong> {application.adminNote}</p> : null}
               </article>;
             })}
           </div>}
@@ -77,4 +77,3 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
     </AdminFrame>
   );
 }
-

@@ -43,7 +43,7 @@ export async function authorizeReleaseAtomic(input: StoreActionInput): Promise<v
   // ★ AUTHORITY FIRST, then shape — the same order markReceived, markPickedUp and
   //   returnToSeller use. A caller who is not staff here must learn nothing about the
   //   holding, not even which custody state it is in.
-  if (actorRole !== 'admin') {
+  if (actorRole !== 'admin' && actorRole !== 'system') {
     if (holding.storeId === null) {
       throw new CustodyForbiddenError('This item is with the delivery team, not a store');
     }
@@ -61,6 +61,11 @@ export async function authorizeReleaseAtomic(input: StoreActionInput): Promise<v
       throw new CustodyForbiddenError('You are not staff at the store holding this item');
     }
   }
+
+  // Payment confirmation now invokes this gate automatically. Keep the operation
+  // idempotent so legacy/admin callers and a concurrent confirmation can safely
+  // retry without producing a second audit row or notification.
+  if (holding.state === 'release_authorized') return;
 
   // Shape check: is this transition legal at all? Refused in the clerk's words.
   assertCustodyTransitionForCounter(holding.state, 'release_authorized', 'released');

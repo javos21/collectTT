@@ -36,8 +36,9 @@ function sslConfig(url: string): { ssl: { rejectUnauthorized: boolean } } | Reco
 export const pool = new Pool({
   connectionString,
   // Small and boring: 50 concurrent users do not need a big pool, and Render Postgres
-  // Basic has a modest connection ceiling shared with the worker process.
-  max: Number(process.env.PG_POOL_MAX ?? 10),
+  // Basic has a modest connection ceiling shared with the worker process. Keep the
+  // default below Supabase session-pool limits; pg queues excess work for us.
+  max: Number(process.env.PG_POOL_MAX ?? 5),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   ...sslConfig(connectionString),

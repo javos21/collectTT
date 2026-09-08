@@ -6,6 +6,13 @@ import { ImageUploader } from '@/app/listings/new/image-uploader';
 
 type ServerAction = (formData: FormData) => Promise<void>;
 
+const DELIVERY_LABELS: Record<string, string> = {
+  cash_meetup: 'Meet in person',
+  remote_ship: 'Seller ships to buyer',
+  relay: 'Pick up at a store',
+  full_service: 'CollectTT delivery',
+};
+
 export function EditListingForm({
   action,
   cancelAction,
@@ -97,7 +104,7 @@ export function EditListingForm({
           <h3>Expected delivery</h3>
           {fulfillmentPaths.map((path) => {
             const currentDays = fulfillmentTerms.find((term) => term.fulfillmentPath === path)?.expectedDeliveryDays ?? 5;
-            return <div className="form-field form-field--compact" key={path}><input type="hidden" name="fulfillmentPaths" value={path} /><label htmlFor={`edit-delivery-${path}`}>{path.replace('_', ' ')}</label><select id={`edit-delivery-${path}`} name={`deliveryEstimate__${path}`} defaultValue={String(currentDays)}>{[1, 2, 3, 5, 7, 10, 14, 21, 30].map((days) => <option key={days} value={days}>Within {days} day{days === 1 ? '' : 's'}</option>)}</select></div>;
+            return <div className="form-field form-field--compact" key={path}><input type="hidden" name="fulfillmentPaths" value={path} /><label htmlFor={`edit-delivery-${path}`}>{DELIVERY_LABELS[path] ?? path}</label><select id={`edit-delivery-${path}`} name={`deliveryEstimate__${path}`} defaultValue={String(currentDays)}>{[1, 2, 3, 5, 7, 10, 14, 21, 30].map((days) => <option key={days} value={days}>Within {days} day{days === 1 ? '' : 's'}</option>)}</select></div>;
           })}
         </div>
       </fieldset>

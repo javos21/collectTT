@@ -149,6 +149,22 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
     else setEmail(value);
   }
 
+  async function redirectAfterAuth() {
+    try {
+      const response = await fetch(`/api/auth/redirect-target?returnTo=${encodeURIComponent(callbackURL)}`, { cache: 'no-store' });
+      if (response.ok) {
+        const result = (await response.json()) as { destination?: string };
+        if (typeof result.destination === 'string' && result.destination.startsWith('/')) {
+          window.location.assign(result.destination);
+          return;
+        }
+      }
+    } catch {
+      // Fall back to the original destination if the post-auth role check cannot be reached.
+    }
+    window.location.assign(callbackURL);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
@@ -210,7 +226,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
         if (result.error.code === 'EMAIL_NOT_VERIFIED') setVerificationEmail(email);
         return;
       }
-      window.location.assign(callbackURL);
+      await redirectAfterAuth();
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -258,7 +274,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
         setError(errorMessage(result.error));
         return;
       }
-      window.location.assign(callbackURL);
+      await redirectAfterAuth();
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {

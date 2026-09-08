@@ -169,8 +169,9 @@ describe('custody track', () => {
     expect(canTransitionCustody('release_authorized', 'returned_to_seller')).toBe(true);
   });
 
-  it('only store staff and admins move the custody track', () => {
+  it('only the system, store staff, and admins move the custody track', () => {
     expect(canActorTransitionCustody('at_relay', 'release_authorized', 'store')).toBe(true);
+    expect(canActorTransitionCustody('at_relay', 'release_authorized', 'system')).toBe(true);
     expect(canActorTransitionCustody('at_relay', 'release_authorized', 'buyer')).toBe(false);
     expect(canActorTransitionCustody('at_relay', 'release_authorized', 'seller')).toBe(false);
   });

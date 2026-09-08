@@ -5,10 +5,10 @@ import { useState } from 'react';
 import { FULFILLMENT_PATHS } from '@/domain/states/transaction';
 
 const PATH_LABELS: Record<string, { title: string; detail: string }> = {
-  cash_meetup: { title: 'Public meetup', detail: 'Meet in a safe public place.' },
-  remote_ship: { title: 'Ship to buyer', detail: 'You arrange shipping.' },
-  relay: { title: 'Store drop-off', detail: 'Buyer collects from a store.' },
-  full_service: { title: 'Full-service delivery', detail: 'CollectTT handles delivery.' },
+  cash_meetup: { title: 'Meet in person', detail: 'Meet in a safe public place.' },
+  remote_ship: { title: 'Seller ships to buyer', detail: 'You arrange shipping.' },
+  relay: { title: 'Pick up at a store', detail: 'Buyer collects from a selected store.' },
+  full_service: { title: 'CollectTT delivery', detail: 'CollectTT handles delivery.' },
 };
 
 type RelayStore = { id: string; name: string; area: string };
@@ -79,7 +79,7 @@ export function DeliveryFields({
       )}
 
       {relaySelected && relayStoreOptions.length === 0 && (
-        <p className="form-note">Store drop-off is unavailable until a store is added.</p>
+        <p className="form-note">Store pickup is unavailable until a store is added.</p>
       )}
     </>
   );

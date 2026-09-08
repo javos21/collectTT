@@ -20,8 +20,8 @@ export async function updateDeliveryDefaultsAction(formData: FormData): Promise<
   if (profile[0]?.role !== 'admin') redirect('/admin');
 
   const days = Number(formData.get('fullServiceDeliveryDays') ?? NaN);
-  if (!Number.isInteger(days) || days < 1 || days > 60) redirect('/admin?settingsError=days#settings');
+  if (!Number.isInteger(days) || days < 1 || days > 60) redirect('/admin/settings?settingsError=days');
 
   await setFullServiceDeliveryDays(days, viewer.userId);
-  redirect('/admin?settings=saved#settings');
+  redirect('/admin/settings?settings=saved');
 }

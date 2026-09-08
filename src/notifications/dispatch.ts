@@ -45,6 +45,24 @@ export interface NotificationAdapter {
 
 const adapters = new Map<NotificationChannel, NotificationAdapter>();
 
+// The worker registers adapters at startup, but notifications can also be created by
+// the web process (server actions and route handlers). Lazily initialize here so a
+// notification is never marked `skipped` simply because the caller did not happen to
+// import the worker entry point first.
+let adapterRegistration: Promise<void> | null = null;
+
+async function ensureAdaptersRegistered(): Promise<void> {
+  if (adapterRegistration === null) {
+    adapterRegistration = import('./adapters/index')
+      .then(({ registerAdapters }) => registerAdapters())
+      .catch((error: unknown) => {
+        adapterRegistration = null;
+        throw error;
+      });
+  }
+  await adapterRegistration;
+}
+
 export function registerAdapter(adapter: NotificationAdapter): void {
   adapters.set(adapter.channel, adapter);
 }
@@ -76,6 +94,8 @@ export interface NotifyInput {
  * channel, then enqueues the dispatch job — all on the caller's transaction.
  */
 export async function notify(input: NotifyInput): Promise<void> {
+  await ensureAdaptersRegistered();
+
   const def = EVENTS[input.event];
   const data = input.data ?? {};
   const eventId = randomUUID();

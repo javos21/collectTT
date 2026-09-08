@@ -43,6 +43,5 @@ export default async function CatalogPage({ searchParams }: { searchParams: Prom
   const mergedValues = defaultValues().map((value) => storedByKey.get(`${value.kind}:${value.key}`) ?? value);
   for (const value of valueRows) if (!mergedValues.some((item) => item.kind === value.kind && item.key === value.key)) mergedValues.push(value);
 
-  return <AdminFrame viewer={viewer} activeNav="catalog"><main className="admin-main"><div className="admin-heading"><div><p className="admin-kicker">Marketplace structure</p><h1>Catalog</h1><p>Manage the vocabulary sellers use to describe what they collect.</p></div><span className="admin-environment">Admin only</span></div><CatalogManager categories={mergedCategories} values={mergedValues} notice={params.notice} /></main></AdminFrame>;
+  return <AdminFrame activeNav="catalog"><main className="admin-main"><div className="admin-heading"><div><h1>Catalog</h1><p>Manage the vocabulary sellers use to describe what they collect.</p></div><span className="admin-environment">Admin only</span></div><CatalogManager categories={mergedCategories} values={mergedValues} notice={params.notice} /></main></AdminFrame>;
 }
-

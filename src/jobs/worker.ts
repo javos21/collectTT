@@ -34,6 +34,9 @@ async function main(): Promise<void> {
   const options: RunnerOptions = {
     connectionString: e.DATABASE_URL,
     concurrency: Number(process.env.WORKER_CONCURRENCY ?? 4),
+    // The web process shares the same hosted Postgres session pool. A bounded worker
+    // pool prevents a local worker from consuming all connections needed by the UI.
+    maxPoolSize: Number(process.env.WORKER_POOL_MAX ?? 4),
     // Graphile Worker installs/updates its own schema in our Postgres. No Redis, no
     // separate queue service, no extra vendor.
     noHandleSignals: false,

@@ -75,7 +75,9 @@ export type NextCustodyState<S extends CustodyState> = (typeof CUSTODY_TRANSITIO
 export const CUSTODY_TRANSITION_ACTORS: Record<string, readonly ActorRole[]> = {
   'awaiting_dropoff->at_relay': ['store', 'admin'],
   'awaiting_dropoff->voided': ['system', 'admin'],
-  'at_relay->release_authorized': ['store', 'admin'],
+  // Payment confirmation performs this transition automatically. Keep `store`
+  // for legacy/admin tooling, but record the system actor as the normal path.
+  'at_relay->release_authorized': ['system', 'store', 'admin'],
   'at_relay->returned_to_seller': ['store', 'admin'],
   'release_authorized->picked_up': ['store', 'admin'],
   'release_authorized->returned_to_seller': ['store', 'admin'],

@@ -29,7 +29,9 @@ import { WINDOWS } from '../domain/policy/windows';
 import { enqueue } from '../jobs/enqueue';
 import { getFullServiceDeliveryDays } from './platform-settings';
 
-export const SETTLEMENT_METHODS = ['cash', 'bank_transfer', 'linx', 'other'] as const;
+import { SETTLEMENT_METHODS } from '../domain/policy/settlement';
+
+export { SETTLEMENT_METHODS };
 
 /** Everything except the category attributes, which are validated separately. */
 export const listingInputSchema = z
@@ -634,6 +636,16 @@ function selectBrowseRows(
       sellerCompletedSales: reputationCounters.sellCompleted,
       fulfillmentPaths: listings.fulfillmentPaths,
       settlementMethods: listings.settlementMethods,
+      relayStoreNames: sql<string[]>`coalesce(
+        (
+          select array_agg(rs.name order by rs.name)
+          from listing_relay_stores lrs
+          inner join relay_stores rs on rs.id = lrs.store_id
+          where lrs.listing_id = ${listings.id}
+            and rs.active = true
+        ),
+        ARRAY[]::text[]
+      )`,
       liveClaimCount: sql<number>`(
         select count(*)::int
           from claims c
@@ -735,7 +747,34 @@ export async function getListing(id: string) {
 
 export async function listingsBySeller(sellerId: string) {
   return db
-    .select()
+    .select({
+      id: listings.id,
+      title: listings.title,
+      category: listings.category,
+      saleType: listings.saleType,
+      status: listings.status,
+      priceCents: listings.priceCents,
+      startBidCents: listings.startBidCents,
+      currentBidCents: listings.currentBidCents,
+      liveClaimCount: sql<number>`(
+        select count(*)::int
+          from claims c
+         where c.listing_id = ${listings.id}
+           and c.status in ('active', 'queued', 'promoted')
+      )`,
+      liveBidCount: sql<number>`(
+        select count(*)::int
+          from bids b
+         where b.listing_id = ${listings.id}
+           and b.status = 'active'
+      )`,
+      activeTransactionCount: sql<number>`(
+        select count(*)::int
+          from transactions t
+         where t.listing_id = ${listings.id}
+           and t.state = 'open'
+      )`,
+    })
     .from(listings)
     .where(eq(listings.sellerId, sellerId))
     .orderBy(desc(listings.createdAt));

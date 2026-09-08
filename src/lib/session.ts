@@ -22,7 +22,16 @@ export interface CurrentUser {
 }
 
 export async function currentUser(): Promise<CurrentUser | null> {
-  const session = await auth.api.getSession({ headers: await headers() });
+  let session;
+  try {
+    session = await auth.api.getSession({ headers: await headers() });
+  } catch (error) {
+    // A browser can retain a session cookie after its database row has expired or
+    // been removed. Better Auth surfaces that as an API error; render the request as
+    // signed out instead of taking down every public page with a server error overlay.
+    if (error instanceof Error && error.message === 'Failed to get session') return null;
+    throw error;
+  }
   if (session === null) return null;
 
   const profile = await ensureProfile(session.user.id, session.user.email, session.user.name);

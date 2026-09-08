@@ -8,15 +8,17 @@
  * that caused it must commit together or not at all.
  */
 
-import { and, eq, gte, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 
-import type { Tx } from '../db/client';
+import type { DbOrTx, Tx } from '../db/client';
+import { listings } from '../db/schema/listings';
 import {
   reputationEvents,
   reputationCounters,
   restrictions,
   profiles,
 } from '../db/schema/profiles';
+import { transactions } from '../db/schema/transactions';
 import {
   THRESHOLDS,
   buyerRestrictions,
@@ -247,4 +249,101 @@ export async function publicProfile(tx: Tx, userId: string) {
     .where(eq(profiles.userId, userId))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export type TrustSnapshot = {
+  userId: string;
+  displayName: string;
+  handle: string;
+  area: string | null;
+  memberSince: Date;
+  counters: {
+    buyClaimsTotal: number;
+    buyCompleted: number;
+    buyReneged90d: number;
+    buyPaidOnTime: number;
+    sellCompleted: number;
+    sellReneged90d: number;
+  };
+  events: Array<{
+    id: string;
+    type: ReputationEventType;
+    title: string | null;
+    occurredAt: Date;
+  }>;
+};
+
+/**
+ * Read the small, public trust surface used when a seller reviews a buyer.
+ * Activity is capped per member so opening the modal never requires loading a full
+ * account history into the page.
+ */
+export async function trustSnapshotsForMembers(
+  tx: DbOrTx,
+  userIds: readonly string[],
+): Promise<Map<string, TrustSnapshot>> {
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return new Map();
+
+  const [profileRows, eventRows] = await Promise.all([
+    tx
+      .select({
+        userId: profiles.userId,
+        displayName: profiles.displayName,
+        handle: profiles.handle,
+        area: profiles.area,
+        memberSince: profiles.memberSince,
+        buyClaimsTotal: reputationCounters.buyClaimsTotal,
+        buyCompleted: reputationCounters.buyCompleted,
+        buyReneged90d: reputationCounters.buyReneged90d,
+        buyPaidOnTime: reputationCounters.buyPaidOnTime,
+        sellCompleted: reputationCounters.sellCompleted,
+        sellReneged90d: reputationCounters.sellReneged90d,
+      })
+      .from(profiles)
+      .leftJoin(reputationCounters, eq(reputationCounters.userId, profiles.userId))
+      .where(inArray(profiles.userId, ids)),
+    tx
+      .select({
+        id: reputationEvents.id,
+        userId: reputationEvents.userId,
+        type: reputationEvents.type,
+        title: listings.title,
+        occurredAt: reputationEvents.occurredAt,
+      })
+      .from(reputationEvents)
+      .leftJoin(transactions, eq(transactions.id, reputationEvents.transactionId))
+      .leftJoin(listings, eq(listings.id, transactions.listingId))
+      .where(inArray(reputationEvents.userId, ids))
+      .orderBy(desc(reputationEvents.occurredAt)),
+  ]);
+
+  const eventsByUser = new Map<string, TrustSnapshot['events']>();
+  for (const event of eventRows) {
+    const events = eventsByUser.get(event.userId) ?? [];
+    if (events.length < 8) events.push(event);
+    eventsByUser.set(event.userId, events);
+  }
+
+  return new Map(
+    profileRows.map((profile) => [
+      profile.userId,
+      {
+        userId: profile.userId,
+        displayName: profile.displayName,
+        handle: profile.handle,
+        area: profile.area,
+        memberSince: profile.memberSince,
+        counters: {
+          buyClaimsTotal: profile.buyClaimsTotal ?? 0,
+          buyCompleted: profile.buyCompleted ?? 0,
+          buyReneged90d: profile.buyReneged90d ?? 0,
+          buyPaidOnTime: profile.buyPaidOnTime ?? 0,
+          sellCompleted: profile.sellCompleted ?? 0,
+          sellReneged90d: profile.sellReneged90d ?? 0,
+        },
+        events: eventsByUser.get(profile.userId) ?? [],
+      },
+    ] as const),
+  );
 }

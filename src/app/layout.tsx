@@ -10,6 +10,8 @@ import { MobileNavigation } from '@/components/mobile-navigation';
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
 import { storesForStaff } from '@/services/custody';
+import { countDealsNeedingAttention } from '@/services/deals';
+import { countPendingOffersReceivedBySeller } from '@/services/offers';
 
 export const metadata: Metadata = {
   title: 'CollectTT — Collect with confidence',
@@ -29,14 +31,37 @@ function initials(name: string): string {
 
 async function SiteNavigation() {
   const viewer = await currentUser();
-  const stores = viewer === null ? [] : await storesForStaff(db, viewer.userId);
+  const [stores, dealActionCount, offerActionCount] = viewer === null
+    ? [[], 0, 0] as const
+    : await Promise.all([
+        storesForStaff(db, viewer.userId),
+        countDealsNeedingAttention(db, viewer.userId),
+        countPendingOffersReceivedBySeller(viewer.userId),
+      ]);
+  const dealsAttentionCount = dealActionCount + offerActionCount;
+
+  const dealsLabel = dealsAttentionCount > 0
+    ? `My Deals, ${dealsAttentionCount} needing your attention`
+    : 'My Deals';
 
   return (
     <>
       <nav aria-label="Primary navigation">
         <Link href="/listings"><SearchLg className="nav-icon" aria-hidden="true" />Browse</Link>
         <Link href="/listings/new"><Plus className="nav-icon" aria-hidden="true" />Sell</Link>
-        <Link href="/deals"><CoinsSwap01 className="nav-icon" aria-hidden="true" />My deals</Link>
+        <Link
+          className="nav-with-badge"
+          href="/deals"
+          aria-label={dealsLabel}
+        >
+          <CoinsSwap01 className="nav-icon" aria-hidden="true" />
+          <span>My Deals</span>
+          {dealsAttentionCount > 0 && (
+            <span className="notification-badge" aria-hidden="true">
+              {dealsAttentionCount > 99 ? '99+' : dealsAttentionCount}
+            </span>
+          )}
+        </Link>
         {stores.length > 0 && <Link href="/store"><Building05 className="nav-icon" aria-hidden="true" />Store</Link>}
         {viewer === null ? (
           <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
@@ -51,7 +76,11 @@ async function SiteNavigation() {
           </Link>
         )}
       </nav>
-      <MobileNavigation hasStore={stores.length > 0} signedIn={viewer !== null} />
+      <MobileNavigation
+        hasStore={stores.length > 0}
+        signedIn={viewer !== null}
+        dealsAttentionCount={dealsAttentionCount}
+      />
     </>
   );
 }

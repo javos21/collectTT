@@ -7,6 +7,7 @@ import { currentUser } from '@/lib/session';
 import { claimListing } from '@/db/atomic/claim-listing';
 import { placeBid } from '@/db/atomic/place-bid';
 import { parseMoneyInput } from '@/domain/money';
+import type { SettlementMethod } from '@/domain/policy/settlement';
 import type { FulfillmentPath } from '@/domain/states/transaction';
 import { acceptOffer, rejectOffer, submitOffer } from '@/services/offers';
 
@@ -19,9 +20,17 @@ export async function claimAction(formData: FormData): Promise<void> {
   if (user === null) redirect('/sign-in');
 
   const listingId = String(formData.get('listingId') ?? '');
-  const path = String(formData.get('fulfillmentPath') ?? 'cash_meetup') as FulfillmentPath;
+  const path = String(formData.get('fulfillmentPath') ?? '') as FulfillmentPath | '';
+  const settlementMethod = String(formData.get('settlementMethod') ?? '') as SettlementMethod | '';
   const storeIdRaw = String(formData.get('relayStoreId') ?? '');
   const relayStoreId = storeIdRaw === '' ? null : storeIdRaw;
+
+  if (path === '') {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a delivery option')}`);
+  }
+  if (settlementMethod === '') {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a payment method')}`);
+  }
 
   let result;
   try {
@@ -29,7 +38,37 @@ export async function claimAction(formData: FormData): Promise<void> {
       listingId,
       claimantId: user.userId,
       fulfillmentPath: path,
+      settlementMethod,
       relayStoreId,
+    });
+  } catch (error) {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent(message(error))}`);
+  }
+
+  revalidatePath(`/listings/${listingId}`);
+
+  if (result.outcome === 'claimed' && result.transactionId !== undefined) {
+    redirect(`/deals/${result.transactionId}`);
+  }
+  redirect(`/listings/${listingId}?queued=${result.position ?? ''}`);
+}
+
+export async function cancelOfferAndClaimAction(formData: FormData): Promise<void> {
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+
+  const listingId = String(formData.get('listingId') ?? '');
+  const offerId = String(formData.get('offerId') ?? '');
+  if (offerId === '') {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent('This offer could not be cancelled')}`);
+  }
+
+  let result;
+  try {
+    result = await claimListing({
+      listingId,
+      claimantId: user.userId,
+      cancelPendingOfferId: offerId,
     });
   } catch (error) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent(message(error))}`);
@@ -55,7 +94,15 @@ export async function bidAction(formData: FormData): Promise<void> {
   }
 
   const path = String(formData.get('fulfillmentPath') ?? '') as FulfillmentPath | '';
+  const settlementMethod = String(formData.get('settlementMethod') ?? '') as SettlementMethod | '';
   const storeIdRaw = String(formData.get('relayStoreId') ?? '');
+
+  if (path === '') {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a delivery option')}`);
+  }
+  if (settlementMethod === '') {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a payment method')}`);
+  }
 
   let result;
   try {
@@ -63,7 +110,8 @@ export async function bidAction(formData: FormData): Promise<void> {
       listingId,
       bidderId: user.userId,
       amountCents,
-      ...(path !== '' ? { fulfillmentPath: path } : {}),
+      fulfillmentPath: path,
+      settlementMethod,
       relayStoreId: storeIdRaw === '' ? null : storeIdRaw,
     });
   } catch (error) {
@@ -84,11 +132,18 @@ export async function submitOfferAction(formData: FormData): Promise<void> {
 
   const listingId = String(formData.get('listingId') ?? '');
   const amountCents = parseMoneyInput(String(formData.get('offerAmount') ?? ''));
-  const path = String(formData.get('offerFulfillmentPath') ?? '') as FulfillmentPath;
-  const storeIdRaw = String(formData.get('offerRelayStoreId') ?? '');
+  const path = String(formData.get('offerFulfillmentPath') ?? formData.get('fulfillmentPath') ?? '') as FulfillmentPath | '';
+  const settlementMethod = String(formData.get('offerSettlementMethod') ?? formData.get('settlementMethod') ?? '') as SettlementMethod | '';
+  const storeIdRaw = String(formData.get('offerRelayStoreId') ?? formData.get('relayStoreId') ?? '');
 
   if (amountCents === null || amountCents <= 0) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Enter a valid offer amount')}`);
+  }
+  if (path === '') {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a delivery option')}`);
+  }
+  if (settlementMethod === '') {
+    redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a payment method')}`);
   }
 
   try {
@@ -97,6 +152,7 @@ export async function submitOfferAction(formData: FormData): Promise<void> {
       buyerId: user.userId,
       amountCents,
       fulfillmentPath: path,
+      settlementMethod,
       relayStoreId: storeIdRaw === '' ? null : storeIdRaw,
     });
   } catch (error) {

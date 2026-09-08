@@ -3,7 +3,8 @@
  *
  * A pending offer is not a transaction and does not reserve the item. The seller's
  * acceptance is the atomic moment that claims the listing and opens the normal deal
- * lifecycle at the offered amount.
+ * lifecycle at the offered amount. A buyer can cancel a pending offer before claiming
+ * at the asking price.
  */
 
 import { sql } from 'drizzle-orm';
@@ -35,6 +36,8 @@ export const offers = pgTable(
       .references(() => profiles.userId),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
+    /** The buyer's chosen payment method for this offer. Nullable for legacy rows. */
+    settlementMethod: text('settlement_method'),
     relayStoreId: uuid('relay_store_id').references(() => relayStores.id),
     status: offerStatusEnum('status').notNull().default('pending'),
     respondedAt: timestamp('responded_at', { withTimezone: true }),
@@ -51,6 +54,10 @@ export const offers = pgTable(
     check(
       'offer_relay_store_required',
       sql`${t.fulfillmentPath} <> 'relay' or ${t.relayStoreId} is not null`,
+    ),
+    check(
+      'offer_settlement_method_valid',
+      sql`${t.settlementMethod} is null or ${t.settlementMethod} in ('cash', 'bank_transfer', 'linx', 'other')`,
     ),
   ],
 );

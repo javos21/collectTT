@@ -12,7 +12,6 @@ export function AdminDenied({ signedIn }: { signedIn: boolean }) {
           <div className="admin-denied__mark"><ShieldCheck size={26} aria-hidden="true" /></div>
         </div>
         <div className="admin-modal__copy">
-          <p className="admin-kicker">CollectTT Admin</p>
           <h1 id="admin-access-title">Admin access required</h1>
           <p>{signedIn ? 'Your account is signed in, but it does not have administrator access.' : 'Sign in with an administrator account to continue.'}</p>
         </div>
@@ -26,4 +25,3 @@ export function AdminDenied({ signedIn }: { signedIn: boolean }) {
     </main>
   );
 }
-

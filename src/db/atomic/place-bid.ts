@@ -28,6 +28,7 @@ import { notify } from '../../notifications/dispatch';
 import { enqueue } from '../../jobs/enqueue';
 import { bidIncrement, formatMoney, minimumNextBid } from '../../domain/money';
 import { fallbackFulfillmentPath, type FulfillmentPath } from '../../domain/states/transaction';
+import type { SettlementMethod } from '../../domain/policy/settlement';
 
 export interface BidResult {
   bidId: string;
@@ -49,6 +50,8 @@ export async function placeBid(opts: {
    *   first store-free declared path when the ladder is walked.
    */
   fulfillmentPath?: FulfillmentPath;
+  /** Which payment method the bidder will use. Required by the web action. */
+  settlementMethod?: SettlementMethod;
   /** Which relay store the bidder will collect from. Required when path === 'relay'. */
   relayStoreId?: string | null;
 }): Promise<BidResult> {
@@ -63,6 +66,14 @@ export async function placeBid(opts: {
     }
     if (listing.status !== 'active') {
       throw new ConflictError('This auction has closed');
+    }
+
+    // Keep direct callers from creating an unqualified bid while retaining a safe
+    // fallback for bids created by older jobs/tests before payment choices were stored.
+    const settlementMethod =
+      opts.settlementMethod ?? (listing.settlementMethods[0] as SettlementMethod | undefined);
+    if (settlementMethod === undefined || !listing.settlementMethods.includes(settlementMethod)) {
+      throw new ConflictError('Choose a payment method accepted by the seller');
     }
 
     const restrictions = await activeRestrictions(tx, opts.bidderId);
@@ -109,6 +120,7 @@ export async function placeBid(opts: {
         bidderId: opts.bidderId,
         amountCents: opts.amountCents,
         isBuyout,
+        settlementMethod,
         fulfillmentPath: opts.fulfillmentPath ?? null,
         relayStoreId: opts.relayStoreId ?? null,
         status: 'active',
@@ -230,6 +242,7 @@ export async function placeBid(opts: {
         winningBidId: bid.id,
         listingTitle: listing.title,
         paymentWindowHours: listing.paymentWindowHours,
+        settlementMethod,
         relayStoreId: opts.relayStoreId ?? null,
       });
 

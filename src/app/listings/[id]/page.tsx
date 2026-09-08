@@ -1,29 +1,32 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Pencil } from 'lucide-react';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 
 import { getListing, getListingActivity } from '@/services/listings';
 import { candidateStoresFor } from '@/services/relay-stores';
 import { getCategory } from '@/domain/categories/definitions';
 import { formatMoney, minimumNextBid } from '@/domain/money';
+import { SETTLEMENT_METHOD_LABELS } from '@/domain/policy/settlement';
 import { imageVariants } from '@/services/images';
 import { currentUser } from '@/lib/session';
 import { db } from '@/db/client';
 import { bids, claims } from '@/db/schema/listings';
 import { profiles } from '@/db/schema/profiles';
-import { acceptOfferAction, bidAction, claimAction, rejectOfferAction, submitOfferAction } from './actions';
+import { acceptOfferAction, bidAction, cancelOfferAndClaimAction, claimAction, rejectOfferAction, submitOfferAction } from './actions';
 import { AuctionLive } from './bid-panel';
 import { latestOfferForBuyer, pendingOffersForSeller } from '@/services/offers';
 import { SignInRequiredModal } from '@/components/sign-in-required-modal';
 import { QueueJoinedModal } from './queue-joined-modal';
+import { SettlementFields } from './settlement-fields';
 
 export const dynamic = 'force-dynamic';
 
-const PATH_LABELS: Record<string, string> = {
-  cash_meetup: 'Cash on meetup',
-  remote_ship: 'Remote payment + seller ships',
-  relay: 'Store drop-off',
-  full_service: 'Pickup & delivery',
+const DELIVERY_LABELS: Record<string, string> = {
+  cash_meetup: 'Meet in person',
+  remote_ship: 'Seller ships to you',
+  relay: 'Pick up at a store',
+  full_service: 'CollectTT delivery',
 };
 
 export default async function ListingPage({
@@ -114,54 +117,25 @@ export default async function ListingPage({
   // ★ Never offer a path the member cannot actually complete. A listing can declare
   //   `relay` while every store the seller nominated has since been deactivated or
   //   stopped accepting this size — `candidateStoresFor` then returns nothing, no
-  //   picker renders, and choosing "Store drop-off" is refused only AFTER the
+  //   picker renders, and choosing "Pick up at a store" is refused only AFTER the
   //   form is submitted. Both the bid form and the claim form read this list.
   const choosablePaths = listing.fulfillmentPaths.filter(
     (path) => path !== 'relay' || relayCandidates.length > 0,
   );
+  const paymentWindowDays = Math.ceil(listing.paymentWindowHours / 24);
+  const canMakeOffer = !isAuction && viewer !== null && !isSeller && listing.status === 'active' && listing.acceptsOffers;
 
-  const statusBadge =
-    listing.status === 'active'
-      ? { cls: 'badge badge--live', text: 'Available' }
-      : listing.status === 'claimed'
-        ? { cls: 'badge badge--claimed', text: 'Claimed' }
-        : { cls: 'badge badge--ended', text: listing.status.replace(/_/g, ' ') };
-
-  const settleForm = (idPrefix: string, fieldPrefix = '') =>
-    choosablePaths.length === 0 ? (
-      <p className="buybox__note">
-        No settlement method is available right now — the seller only offers store
-        drop-off and none of their stores can take this item.
-      </p>
-    ) : (
-      <>
-        <label htmlFor={`${idPrefix}fulfillmentPath`}>How do you want to settle this?</label>
-        <select id={`${idPrefix}fulfillmentPath`} name={`${fieldPrefix}fulfillmentPath`}>
-          {choosablePaths.map((path) => (
-            <option key={path} value={path}>
-              {PATH_LABELS[path] ?? path}
-            </option>
-          ))}
-        </select>
-        {relayCandidates.length > 0 && (
-          <>
-            <label htmlFor={`${idPrefix}relayStoreId`}>Which store will you collect from?</label>
-            <select
-              id={`${idPrefix}relayStoreId`}
-              name={`${fieldPrefix}relayStoreId`}
-              defaultValue={relayCandidates[0]!.id}
-            >
-              {relayCandidates.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name} — {store.area}
-                </option>
-              ))}
-            </select>
-            <p className="buybox__note">Only used if you pick store drop-off.</p>
-          </>
-        )}
-      </>
-    );
+  const settleForm = (idPrefix: string, fieldPrefix = '') => (
+    <SettlementFields
+      idPrefix={idPrefix}
+      fieldPrefix={fieldPrefix}
+      paths={choosablePaths}
+      pathLabels={DELIVERY_LABELS}
+      paymentMethods={listing.settlementMethods}
+      paymentLabels={SETTLEMENT_METHOD_LABELS}
+      relayCandidates={relayCandidates}
+    />
+  );
 
   const attributeRows = category.attributes.filter(
     (attr) => attributes[attr.key] !== undefined,
@@ -190,11 +164,6 @@ export default async function ListingPage({
           Browse
         </Link>
         <h1>{listing.title}</h1>
-        <div className="badge-row">
-          <span className="badge">{category.label}</span>
-          <span className="badge">{isAuction ? 'Auction' : 'Straight sale'}</span>
-          <span className={statusBadge.cls}>{statusBadge.text}</span>
-        </div>
       </div>
 
       {flash.error !== undefined && (
@@ -226,7 +195,8 @@ export default async function ListingPage({
 
       <div className="listing-body">
         {/* ------------------------------------------------ gallery */}
-        <div className="gallery">
+        <div className="listing-main">
+          <div className="gallery">
           {images.length > 0 ? (
             <>
               <div className="gallery__track">
@@ -262,6 +232,98 @@ export default async function ListingPage({
           ) : (
             <div className="gallery__empty">No photos yet</div>
           )}
+          </div>
+
+          <div className="listing-details">
+            {listing.description !== null && listing.description !== '' && (
+              <section className="listing-detail-card" aria-labelledby="description-heading">
+                <h2 id="description-heading" className="listing-detail-title">Description</h2>
+                <p className="prose">{listing.description}</p>
+              </section>
+            )}
+
+            <section className="listing-detail-card listing-settlement-card" aria-label="Settlement options">
+              <div className="listing-settlement-panel">
+                <h2 id="delivery-heading" className="listing-detail-title">Delivery options</h2>
+                {choosablePaths.length > 0 ? (
+                  <ul className="settle-list">
+                    {choosablePaths.map((path) => {
+                      const term = fulfillmentTerms.find((item) => item.fulfillmentPath === path);
+                      return (
+                        <li key={path}>
+                          <span className="settle-list__copy">
+                            <strong>{DELIVERY_LABELS[path] ?? path}</strong>
+                            {term !== undefined && (
+                              <span className="settle-list__meta">
+                                Expected within {term.expectedDeliveryDays} day{term.expectedDeliveryDays === 1 ? '' : 's'}
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="buybox__note">No delivery options are currently available for this item.</p>
+                )}
+              </div>
+              <div className="listing-settlement-panel">
+                <h2 id="payment-heading" className="listing-detail-title">Payment options</h2>
+                <ul className="payment-options-list" aria-label="Accepted payment methods">
+                  {listing.settlementMethods.map((method) => (
+                    <li key={method}>{SETTLEMENT_METHOD_LABELS[method as keyof typeof SETTLEMENT_METHOD_LABELS] ?? method}</li>
+                  ))}
+                </ul>
+                <div className="listing-settlement-panel__notes">
+                  <p>
+                    <strong>Payment is made directly between buyer and seller.</strong>
+                    <strong>
+                      Payment is expected within {paymentWindowDays} day{paymentWindowDays === 1 ? '' : 's'} after a deal opens.
+                    </strong>
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="listing-detail-card" aria-labelledby="listing-details-heading">
+              <h2 id="listing-details-heading" className="listing-detail-title">Listing details</h2>
+              <dl className="attrs">
+                <div className="attrs__item">
+                  <dt>Category</dt>
+                  <dd>{category.label}</dd>
+                </div>
+                <div className="attrs__item">
+                  <dt>Sale type</dt>
+                  <dd>{isAuction ? 'Auction' : 'Straight sale'}</dd>
+                </div>
+              </dl>
+            </section>
+
+            {attributeRows.length > 0 && (
+              <section className="listing-detail-card" aria-labelledby="attributes-heading">
+                <h2 id="attributes-heading" className="listing-detail-title">{category.label} details</h2>
+                <dl className="attrs">
+                  {attributeRows.map((attr) => {
+                    const value = attributes[attr.key];
+                    const display =
+                      attr.type === 'enum'
+                        ? (attr.optionLabels?.[String(value)] ?? String(value))
+                        : attr.type === 'boolean'
+                          ? value === true
+                            ? 'Yes'
+                            : 'No'
+                          : String(value);
+                    return (
+                      <div className="attrs__item" key={attr.key}>
+                        <dt>{attr.label}</dt>
+                        <dd>{display}</dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </section>
+            )}
+          </div>
         </div>
 
         {/* ------------------------------------------------ buy box */}
@@ -294,15 +356,31 @@ export default async function ListingPage({
               <Link href={`/listings/${id}?auth=buy#buy-panel`}>sign in</Link> to {isAuction ? 'bid' : 'claim this or make an offer'}.
             </div>
           ) : isSeller ? (
-            <div className="buybox__state">
-              This is your listing.
-              {pendingOffers.length > 0 && ` ${pendingOffers.length} offer${pendingOffers.length === 1 ? '' : 's'} waiting.`}
-              {sellerActivity?.locked ? (
-                <><br /><span className="buybox__lock-note">Editing and cancellation are locked while buyer activity is active.</span></>
-              ) : (listing.status === 'active' || listing.status === 'draft') && (
-                <><br /><Link href={`/listings/${id}/edit`}>Edit listing →</Link></>
+            <>
+              <div className="buybox__owner-notice">
+                <strong>This is your listing.</strong>
+                {!sellerActivity?.locked && (listing.status === 'active' || listing.status === 'draft') && (
+                  <Link
+                    className="buybox__edit-link"
+                    href={`/listings/${id}/edit`}
+                    aria-label="Edit listing"
+                    title="Edit listing"
+                  >
+                    <Pencil aria-hidden="true" />
+                  </Link>
+                )}
+              </div>
+              {pendingOffers.length > 0 && (
+                <p className="buybox__owner-detail">
+                  {pendingOffers.length} offer{pendingOffers.length === 1 ? '' : 's'} waiting.
+                </p>
               )}
-            </div>
+              {sellerActivity?.locked && (
+                <p className="buybox__lock-note">
+                  Editing and cancellation are locked while buyer activity is active.
+                </p>
+              )}
+            </>
           ) : isAuction ? (
             isOpen ? (
               <form className="buybox__form" action={bidAction}>
@@ -322,6 +400,26 @@ export default async function ListingPage({
             ) : (
               <div className="buybox__state">This auction has closed.</div>
             )
+          ) : myOffer?.status === 'pending' ? (
+            <div className="buybox__pending-offer">
+              <div className="buybox__state">
+                Your offer of <strong>{formatMoney(myOffer.amountCents)}</strong> is waiting for the seller.
+                <p className="buybox__note">
+                  Cancel the offer if you want to buy this item at the asking price.
+                </p>
+                {(listing.status === 'active' || (listing.status === 'claimed' && stackDepth < 3)) && (
+                  <form className="buybox__form" action={cancelOfferAndClaimAction}>
+                    <input type="hidden" name="listingId" value={id} />
+                    <input type="hidden" name="offerId" value={myOffer.id} />
+                    <button type="submit">
+                      {listing.status === 'active'
+                        ? 'Cancel offer and claim at full price'
+                        : 'Cancel offer and join the backup queue'}
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
           ) : myClaim !== undefined ? (
             <div className="buybox__state">
               {myClaim.status === 'active'
@@ -349,38 +447,28 @@ export default async function ListingPage({
                   automatically if they don&apos;t pay in time.
                 </p>
               )}
+              {canMakeOffer && (
+                <div className="buybox__offer-wrap">
+                  <hr />
+                  <details className="buybox__offer-disclosure">
+                    <summary>Make an offer</summary>
+                    <div className="buybox__offer-fields">
+                      <label htmlFor="offerAmount">Your offer</label>
+                      <input
+                        id="offerAmount"
+                        name="offerAmount"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder={(Math.max(1, (listing.priceCents ?? 1) - 1) / 100).toFixed(2)}
+                      />
+                      <button className="secondary" type="submit" formAction={submitOfferAction}>Submit offer</button>
+                    </div>
+                  </details>
+                </div>
+              )}
             </form>
           ) : (
             <div className="buybox__state">This listing is no longer available for new claims.</div>
-          )}
-
-          {!isAuction && viewer !== null && !isSeller && listing.status === 'active' && listing.acceptsOffers && (
-            <>
-              <hr />
-              {myOffer?.status === 'pending' ? (
-                <div className="buybox__state">
-                  Your offer of <strong>{formatMoney(myOffer.amountCents)}</strong> is waiting for
-                  the seller. You can still claim at the asking price.
-                </div>
-              ) : (
-                <form className="buybox__form" action={submitOfferAction}>
-                  <input type="hidden" name="listingId" value={id} />
-                  <p className="buybox__price-label">Make an offer</p>
-                  <label htmlFor="offerAmount">Your offer</label>
-                  <input
-                    id="offerAmount"
-                    name="offerAmount"
-                    type="text"
-                    inputMode="decimal"
-                    placeholder={(Math.max(1, (listing.priceCents ?? 1) - 1) / 100).toFixed(2)}
-                    required
-                  />
-                  <p className="buybox__note">Must be below {formatMoney(listing.priceCents ?? 0)}.</p>
-                  {settleForm('offer-', 'offer')}
-                  <button className="secondary" type="submit">Submit offer</button>
-                </form>
-              )}
-            </>
           )}
 
           <div className="trust">
@@ -404,6 +492,25 @@ export default async function ListingPage({
               cash, transfer, however you agree.
             </span>
           </div>
+
+          <div className="buybox__details">
+            <section className="buybox__section" aria-labelledby="seller-heading">
+              <h2 id="seller-heading" className="buybox__section-title">Seller</h2>
+              <div className="seller-card">
+                <span className="seller-card__avatar" aria-hidden="true">
+                  {sellerName.trim().charAt(0).toUpperCase()}
+                </span>
+                <span>
+                  <Link className="seller-card__name" href={`/members/${listing.sellerId}`}>
+                    {sellerName}
+                  </Link>
+                  <span className="seller-card__meta">
+                    Member since {sellerSince.toLocaleDateString('en-TT')}
+                  </span>
+                </span>
+              </div>
+            </section>
+          </div>
         </aside>
       </div>
 
@@ -416,7 +523,8 @@ export default async function ListingPage({
                 <tr>
                   <th>Buyer</th>
                   <th>Offer</th>
-                  <th>Fulfillment</th>
+                  <th>Delivery</th>
+                  <th>Payment</th>
                   <th>Received</th>
                   <th><span className="sr-only">Actions</span></th>
                 </tr>
@@ -426,7 +534,8 @@ export default async function ListingPage({
                   <tr key={offer.id}>
                     <td>{offer.buyerName}</td>
                     <td className="num"><strong>{formatMoney(offer.amountCents)}</strong></td>
-                    <td>{offer.fulfillmentPath.replace('_', ' ')}</td>
+                    <td>{DELIVERY_LABELS[offer.fulfillmentPath] ?? offer.fulfillmentPath}</td>
+                    <td>{offer.settlementMethod === null ? 'Legacy offer' : SETTLEMENT_METHOD_LABELS[offer.settlementMethod as keyof typeof SETTLEMENT_METHOD_LABELS] ?? offer.settlementMethod}</td>
                     <td className="muted">{offer.createdAt.toLocaleString('en-TT')}</td>
                     <td>
                       <div className="offer-actions">
@@ -501,80 +610,6 @@ export default async function ListingPage({
         </>
       )}
 
-      {listing.description !== null && listing.description !== '' && (
-        <>
-          <h2 className="section-label">Description</h2>
-          <p className="prose">{listing.description}</p>
-        </>
-      )}
-
-      {attributeRows.length > 0 && (
-        <>
-          <h2 className="section-label">{category.label} details</h2>
-          <dl className="attrs">
-            {attributeRows.map((attr) => {
-              const value = attributes[attr.key];
-              const display =
-                attr.type === 'enum'
-                  ? (attr.optionLabels?.[String(value)] ?? String(value))
-                  : attr.type === 'boolean'
-                    ? value === true
-                      ? 'Yes'
-                      : 'No'
-                    : String(value);
-              return (
-                <div key={attr.key} style={{ display: 'contents' }}>
-                  <dt>{attr.label}</dt>
-                  <dd>{display}</dd>
-                </div>
-              );
-            })}
-          </dl>
-        </>
-      )}
-
-      <h2 className="section-label">How this deal can settle</h2>
-      <ul className="settle-list">
-        {listing.fulfillmentPaths.map((path) => (
-          <li key={path}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M5 12l5 5 9-11"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>
-              {PATH_LABELS[path] ?? path}
-              {fulfillmentTerms.find((term) => term.fulfillmentPath === path) !== undefined && (
-                <> · expected within {fulfillmentTerms.find((term) => term.fulfillmentPath === path)!.expectedDeliveryDays} day{fulfillmentTerms.find((term) => term.fulfillmentPath === path)!.expectedDeliveryDays === 1 ? '' : 's'}</>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <p className="muted" style={{ marginTop: '.85rem' }}>
-        Accepted payment: {listing.settlementMethods.join(', ')}. Payment always flows
-        directly between buyer and seller — CollectTT never holds funds. Payment is expected
-        within {listing.paymentWindowHours} hours after a deal opens.
-      </p>
-
-      <h2 className="section-label">Seller</h2>
-      <div className="seller-card">
-        <span className="seller-card__avatar" aria-hidden="true">
-          {sellerName.trim().charAt(0).toUpperCase()}
-        </span>
-        <span>
-          <Link className="seller-card__name" href={`/members/${listing.sellerId}`}>
-            {sellerName}
-          </Link>
-          <span className="seller-card__meta">
-            Member since {sellerSince.toLocaleDateString('en-TT')}
-          </span>
-        </span>
-      </div>
     </main>
   );
 }

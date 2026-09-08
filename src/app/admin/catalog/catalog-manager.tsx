@@ -54,7 +54,7 @@ export function CatalogManager({ categories, values, notice }: { categories: Cat
 
       <section className="admin-panel catalog-panel">
         <div className="catalog-panel__toolbar">
-          <div><p className="admin-kicker">{title}</p><h2>{description}</h2></div>
+          <div><h2>{description}</h2></div>
           <button className="admin-button" type="button" onClick={openAdd}><Plus size={16} aria-hidden="true" />Add {tab === 'categories' ? 'category' : tab === 'games' ? 'game' : 'condition'}</button>
         </div>
         <div className="catalog-list-toolbar">
@@ -81,7 +81,7 @@ function CatalogForm({ tab, item, onClose }: { tab: Tab; item: CategoryItem | Va
   return (
     <div className="catalog-form-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <section className="catalog-form" role="dialog" aria-modal="true" aria-labelledby="catalog-form-title">
-        <div className="catalog-form__header"><div><p className="admin-kicker">Catalog setup</p><h2 id="catalog-form-title">{item ? `Edit ${label}` : `Add ${label}`}</h2></div><button className="catalog-form__close" type="button" onClick={onClose} aria-label="Close form">×</button></div>
+        <div className="catalog-form__header"><div><h2 id="catalog-form-title">{item ? `Edit ${label}` : `Add ${label}`}</h2></div><button className="catalog-form__close" type="button" onClick={onClose} aria-label="Close form">×</button></div>
         <form action={isCategory ? saveCategoryAction : saveCatalogValueAction}>
           {!isCategory && <input type="hidden" name="kind" value={value?.kind ?? (tab === 'games' ? 'game' : 'condition')} />}
           {isCategory && <input type="hidden" name="originalKey" value={category?.key ?? ''} />}
@@ -96,4 +96,3 @@ function CatalogForm({ tab, item, onClose }: { tab: Tab; item: CategoryItem | Va
     </div>
   );
 }
-

@@ -1,7 +1,7 @@
 'use server';
 
 /**
- * The four things a clerk does at the counter.
+ * The three things a clerk does at the counter: receive, collect, or return.
  *
  * ★ `requireStoreStaff` here is routing and UX, NOT the security boundary.
  *   `assertStoreAuthority` inside services/custody.ts re-checks staff membership
@@ -17,7 +17,6 @@ import { requireStoreStaff, NotStoreStaffError, type StoreSession } from '@/lib/
 import {
   findHoldingByCode,
   markReceived,
-  authorizeRelease,
   markPickedUp,
   returnToSeller,
 } from '@/services/custody';
@@ -88,38 +87,6 @@ export async function receiveByCodeAction(formData: FormData): Promise<void> {
 
   revalidatePath(`/store/${storeId}`);
   redirect(storeUrl(storeId, `ok=${encodeURIComponent(`Received "${found.listingTitle}"`)}`, dashboardView));
-}
-
-/**
- * ★ Deliberately its own act, separate from "Mark picked up". The payment gate is this
- *   system's most important check and it earns its own actor and timestamp — and
- *   `release_authorized` is a real durable state on the full_service courier path.
- */
-export async function authorizeReleaseAction(formData: FormData): Promise<void> {
-  const storeId = String(formData.get('storeId') ?? '');
-  const holdingId = String(formData.get('holdingId') ?? '');
-  const dashboardView = view(formData);
-  const session = await counterSession(storeId);
-
-  try {
-    await db.transaction(async (tx) => {
-      await authorizeRelease({
-        tx,
-        holdingId,
-        actorUserId: session.user.userId,
-        actorRole: 'store',
-      });
-    });
-  } catch (error) {
-    redirect(storeUrl(storeId, `error=${encodeURIComponent(message(error))}`, dashboardView));
-  }
-
-  revalidatePath(`/store/${storeId}`);
-  redirect(
-    storeUrl(storeId, `ok=${encodeURIComponent(
-      'Cleared for collection. Hand it over and mark it picked up.',
-    )}`, dashboardView),
-  );
 }
 
 export async function markPickedUpAction(formData: FormData): Promise<void> {

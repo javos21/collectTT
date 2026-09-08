@@ -19,6 +19,7 @@ import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { dbNow, type Tx } from '../db/client';
 import { transactions, transactionEvents } from '../db/schema/transactions';
 import { listings, claims, bids } from '../db/schema/listings';
+import { offers } from '../db/schema/offers';
 import { custodyHoldings } from '../db/schema/custody';
 import { profiles } from '../db/schema/profiles';
 import { enqueue } from '../jobs/enqueue';
@@ -47,6 +48,20 @@ import {
   type TransactionSource,
 } from '../domain';
 import { formatMoney } from '../domain/money';
+import type { SettlementMethod } from '../domain/policy/settlement';
+
+/**
+ * Promotion jobs are at-least-once. Two deliveries can both pass the open-row check
+ * before one wins the database's partial unique index, so that collision is a safe
+ * no-op rather than a failed job.
+ */
+function isOpenTransactionCollision(error: unknown): boolean {
+  for (let e: unknown = error; e !== null && e !== undefined; e = (e as { cause?: unknown }).cause) {
+    const pg = e as { code?: string; constraint?: string };
+    if (pg.code === '23505' && pg.constraint === 'tx_one_open_per_listing') return true;
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------- audit log
 
@@ -92,6 +107,8 @@ export interface OpenTransactionInput {
   paymentWindowHours?: number;
   /** Which relay store the buyer chose. Required for the `relay` path only. */
   relayStoreId?: string | null;
+  /** The buyer's selected payment method. Nullable for legacy transactions. */
+  settlementMethod?: string | null;
 }
 
 /**
@@ -124,6 +141,7 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
       offerId: input.offerId ?? null,
       amountCents: input.amountCents,
       fulfillmentPath: input.fulfillmentPath,
+      settlementMethod: input.settlementMethod ?? null,
       state: 'open',
       paymentState: 'pending',
       custodyState: usesCustodyTrack(input.fulfillmentPath) ? 'awaiting_dropoff' : 'not_applicable',
@@ -352,8 +370,35 @@ export async function confirmPayment(
     idempotencyKey: `payment_confirmed:${transactionId}`,
   });
 
-  // ★ On a custody path this is what unlocks the store's release action, and it
-  //   EXTENDS the shelf clock — paying for an item buys it more time on the shelf.
+  // An accepted offer does not displace competing offers until payment is
+  // authoritative. If the accepted buyer never pays, those offers remain available
+  // for the seller to review after the failed deal is released.
+  if (row.source === 'offer_accept') {
+    const competingOffers = await tx
+      .select({ id: offers.id, buyerId: offers.buyerId })
+      .from(offers)
+      .where(and(eq(offers.listingId, row.listingId), eq(offers.status, 'pending')));
+
+    await tx
+      .update(offers)
+      .set({ status: 'rejected', respondedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(and(eq(offers.listingId, row.listingId), eq(offers.status, 'pending')));
+
+    for (const offer of competingOffers) {
+      await notify({
+        tx,
+        userId: offer.buyerId,
+        event: 'offer_closed_after_payment_buyer',
+        data: { listingTitle: row.listingTitle },
+        linkUrl: `/listings/${row.listingId}`,
+        idempotencyKey: `offer_closed_after_payment:${transactionId}:${offer.id}`,
+      });
+    }
+  }
+
+  // ★ On a custody path this extends the shelf clock and automatically clears a
+  //   paid store-held item for collection — paying for an item buys it more time
+  //   on the shelf without asking a clerk to approve a second step.
   await onPaymentConfirmed(tx, transactionId);
 
   // For P2P paths custody is 'not_applicable', so this completes the deal outright.
@@ -477,10 +522,48 @@ export async function completeIfBothTracksDone(tx: Tx, transactionId: string): P
     .where(eq(listings.id, row.listingId));
 
   // Any still-queued backup claimers are now moot.
+  const queuedClaims = await tx
+    .select({ id: claims.id, claimantId: claims.claimantId })
+    .from(claims)
+    .where(and(eq(claims.listingId, row.listingId), eq(claims.status, 'queued')));
   await tx
     .update(claims)
     .set({ status: 'superseded' })
     .where(and(eq(claims.listingId, row.listingId), eq(claims.status, 'queued')));
+
+  for (const claim of queuedClaims) {
+    await notify({
+      tx,
+      userId: claim.claimantId,
+      event: 'claim_superseded_buyer',
+      data: { listingTitle: row.listingTitle },
+      linkUrl: `/listings/${row.listingId}`,
+      idempotencyKey: `claim_superseded:${transactionId}:${claim.id}`,
+    });
+  }
+
+  // Completion is the final authority for the listing. Resolve any pending offers
+  // that survived an older or unusual path so buyers cannot see stale actions after
+  // the item is complete.
+  const pendingOffers = await tx
+    .select({ id: offers.id, buyerId: offers.buyerId })
+    .from(offers)
+    .where(and(eq(offers.listingId, row.listingId), eq(offers.status, 'pending')));
+  await tx
+    .update(offers)
+    .set({ status: 'rejected', respondedAt: sql`now()`, updatedAt: sql`now()` })
+    .where(and(eq(offers.listingId, row.listingId), eq(offers.status, 'pending')));
+
+  for (const offer of pendingOffers) {
+    await notify({
+      tx,
+      userId: offer.buyerId,
+      event: 'offer_rejected_buyer',
+      data: { listingTitle: row.listingTitle },
+      linkUrl: `/listings/${row.listingId}`,
+      idempotencyKey: `offer_rejected:completed:${transactionId}:${offer.id}`,
+    });
+  }
 
   for (const userId of [row.buyerId, row.sellerId]) {
     await notify({
@@ -713,6 +796,7 @@ export async function promoteNextCandidate(
           winningBidId: candidate.bidId ?? null,
           listingTitle: listing.title,
           paymentWindowHours: listing.paymentWindowHours,
+          settlementMethod: candidate.settlementMethod,
           relayStoreId: candidate.relayStoreId ?? null,
         });
 
@@ -751,6 +835,11 @@ export async function promoteNextCandidate(
 
       return { promoted: true, transactionId };
     } catch (error) {
+      if (isOpenTransactionCollision(error)) {
+        // Another delivery won the one-open-attempt race. Its transaction is now the
+        // authoritative promotion, so this delivery has nothing left to do.
+        return { promoted: false };
+      }
       if (!(error instanceof CustodyConflictError)) throw error;
       // Everything this candidate wrote has been rolled back to the savepoint.
       console.warn(
@@ -766,6 +855,8 @@ interface Candidate {
   buyerId: string;
   amountCents: number;
   fulfillmentPath: FulfillmentPath;
+  /** The candidate's own payment choice, retained through promotion. */
+  settlementMethod?: SettlementMethod | null;
   /** The promoted claimer's OWN store choice, not the person's ahead of them. */
   relayStoreId?: string | null;
   claimId?: string;
@@ -784,7 +875,7 @@ async function nextFromClaimStack(
     .orderBy(claims.position);
 
   const listingRows = await tx
-    .select({ priceCents: listings.priceCents })
+    .select({ priceCents: listings.priceCents, settlementMethods: listings.settlementMethods })
     .from(listings)
     .where(eq(listings.id, listingId))
     .limit(1);
@@ -797,6 +888,9 @@ async function nextFromClaimStack(
       buyerId: row.claimantId,
       amountCents: price,
       fulfillmentPath: row.fulfillmentPath,
+      settlementMethod:
+        (row.settlementMethod as SettlementMethod | null) ??
+        (listingRows[0]?.settlementMethods[0] as SettlementMethod | undefined),
       relayStoreId: row.relayStoreId,
       claimId: row.id,
     };
@@ -816,7 +910,11 @@ async function nextFromBidLadder(
     .orderBy(desc(bids.amountCents));
 
   const listingRows = await tx
-    .select({ paths: listings.fulfillmentPaths, reserve: listings.reserveCents })
+    .select({
+      paths: listings.fulfillmentPaths,
+      reserve: listings.reserveCents,
+      settlementMethods: listings.settlementMethods,
+    })
     .from(listings)
     .where(eq(listings.id, listingId))
     .limit(1);
@@ -834,6 +932,9 @@ async function nextFromBidLadder(
       //   Falls back to the first store-free declared path only for bids placed before
       //   Phase 2, which carry neither a path nor a store — see fallbackFulfillmentPath.
       fulfillmentPath: row.fulfillmentPath ?? fallbackFulfillmentPath(listing.paths),
+      settlementMethod:
+        (row.settlementMethod as SettlementMethod | null) ??
+        (listing.settlementMethods[0] as SettlementMethod | undefined),
       relayStoreId: row.relayStoreId,
       bidId: row.id,
     };
@@ -862,13 +963,32 @@ async function resolveListingAfterFailure(
 
   const strandedHolding = stranded[0];
   if (strandedHolding !== undefined) {
-    await returnToSeller({
-      tx,
-      holdingId: strandedHolding.id,
-      actorUserId: '',
-      actorRole: 'system',
-      reason: 'no remaining buyers — unpaid item returns to the seller',
-    });
+    try {
+      await returnToSeller({
+        tx,
+        holdingId: strandedHolding.id,
+        actorUserId: '',
+        actorRole: 'system',
+        reason: 'no remaining buyers — unpaid item returns to the seller',
+      });
+    } catch (error) {
+      if (!(error instanceof CustodyConflictError)) throw error;
+
+      // A duplicate promotion can read the same live holding before the first
+      // delivery returns it. Re-check after the conflict; if it is no longer live,
+      // the other delivery already completed this transition.
+      const stillStranded = await tx
+        .select({ id: custodyHoldings.id })
+        .from(custodyHoldings)
+        .where(
+          and(
+            eq(custodyHoldings.id, strandedHolding.id),
+            sql`${custodyHoldings.state} in ('at_relay', 'release_authorized')`,
+          ),
+        )
+        .limit(1);
+      if (stillStranded[0] !== undefined) throw error;
+    }
   }
 
   const status = statusAfterFailedAttempt({
@@ -908,6 +1028,7 @@ export interface LoadedTransaction {
   paymentState: (typeof transactions.$inferSelect)['paymentState'];
   custodyState: (typeof transactions.$inferSelect)['custodyState'];
   fulfillmentPath: FulfillmentPath;
+  settlementMethod: string | null;
   amountCents: number;
   paymentDeadlineAt: Date;
   claimId: string | null;
@@ -936,6 +1057,7 @@ async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {
     paymentState: row.t.paymentState,
     custodyState: row.t.custodyState,
     fulfillmentPath: row.t.fulfillmentPath,
+    settlementMethod: row.t.settlementMethod,
     amountCents: row.t.amountCents,
     paymentDeadlineAt: row.t.paymentDeadlineAt,
     claimId: row.t.claimId,

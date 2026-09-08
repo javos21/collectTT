@@ -1,17 +1,18 @@
 import { desc, eq, or } from 'drizzle-orm';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 
 import { bids, claims, listings } from '@/db/schema/listings';
 import { db } from '@/db/client';
 import { offers } from '@/db/schema/offers';
-import { profiles, reputationCounters } from '@/db/schema/profiles';
+import { profiles, reputationCounters, reputationEvents } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
 import { formatMoney } from '@/domain/money';
 import { objectiveSummary } from '@/domain/policy/reputation';
 import { auth } from '@/lib/auth';
 import { currentUser } from '@/lib/session';
-import { listingsBySeller } from '@/services/listings';
+import { cancelListing, listingsBySeller } from '@/services/listings';
 import ProfilePage from './profile-page';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,22 @@ async function signOut(): Promise<void> {
   redirect('/');
 }
 
+async function deleteListingAction(formData: FormData): Promise<void> {
+  'use server';
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+
+  const listingId = String(formData.get('listingId') ?? '');
+  try {
+    await cancelListing(user.userId, listingId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not delete this listing.';
+    redirect(`/listings/${listingId}/edit?error=${encodeURIComponent(message)}`);
+  }
+  revalidatePath('/me');
+  redirect('/me');
+}
+
 function iso(date: Date | null): string | null {
   return date?.toISOString() ?? null;
 }
@@ -30,7 +47,7 @@ export default async function MePage() {
   const user = await currentUser();
   if (user === null) redirect('/sign-in');
 
-  const [profileRows, countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows] =
+  const [profileRows, countersRows, sellerListings, claimRows, bidRows, offerRows, receivedOfferRows, dealRows, reputationEventRows] =
     await Promise.all([
       db.select().from(profiles).where(eq(profiles.userId, user.userId)).limit(1),
       db.select().from(reputationCounters).where(eq(reputationCounters.userId, user.userId)).limit(1),
@@ -57,12 +74,28 @@ export default async function MePage() {
         .orderBy(desc(offers.createdAt))
         .limit(30),
       db
+        .select({ offer: offers, title: listings.title, buyerName: profiles.displayName })
+        .from(offers)
+        .innerJoin(listings, eq(listings.id, offers.listingId))
+        .innerJoin(profiles, eq(profiles.userId, offers.buyerId))
+        .where(eq(listings.sellerId, user.userId))
+        .orderBy(desc(offers.createdAt))
+        .limit(30),
+      db
         .select({ transaction: transactions, title: listings.title })
         .from(transactions)
         .innerJoin(listings, eq(listings.id, transactions.listingId))
         .where(or(eq(transactions.buyerId, user.userId), eq(transactions.sellerId, user.userId)))
         .orderBy(desc(transactions.createdAt))
         .limit(50),
+      db
+        .select({ event: reputationEvents, title: listings.title })
+        .from(reputationEvents)
+        .leftJoin(transactions, eq(transactions.id, reputationEvents.transactionId))
+        .leftJoin(listings, eq(listings.id, transactions.listingId))
+        .where(eq(reputationEvents.userId, user.userId))
+        .orderBy(desc(reputationEvents.occurredAt))
+        .limit(30),
     ]);
 
   const profile = profileRows[0];
@@ -71,6 +104,7 @@ export default async function MePage() {
     <main className="profile-page">
       <ProfilePage
         signOutAction={signOut}
+        deleteListingAction={deleteListingAction}
         profile={{
           displayName: user.displayName,
           handle: user.handle,
@@ -99,6 +133,9 @@ export default async function MePage() {
           category: listing.category,
           saleType: listing.saleType,
           status: listing.status,
+          claimCount: listing.liveClaimCount,
+          bidCount: listing.liveBidCount,
+          activeTransactionCount: listing.activeTransactionCount,
           amount: formatMoney(listing.saleType === 'auction'
             ? (listing.currentBidCents ?? listing.startBidCents ?? 0)
             : (listing.priceCents ?? 0)),
@@ -124,6 +161,20 @@ export default async function MePage() {
           amount: formatMoney(offer.amountCents),
           status: offer.status,
           createdAt: offer.createdAt.toISOString(),
+        }))}
+        receivedOffers={receivedOfferRows.map(({ offer, title, buyerName }) => ({
+          id: offer.id,
+          title,
+          buyerName,
+          amount: formatMoney(offer.amountCents),
+          status: offer.status,
+          createdAt: offer.createdAt.toISOString(),
+        }))}
+        reputationEvents={reputationEventRows.map(({ event, title }) => ({
+          id: event.id,
+          type: event.type,
+          title,
+          occurredAt: event.occurredAt.toISOString(),
         }))}
         deals={dealRows.map(({ transaction, title }) => ({
           id: transaction.id,

@@ -71,11 +71,29 @@ export const EVENTS = {
     title: (d) => `Your offer was declined for "${str(d, 'listingTitle')}"`,
     body: () => `The seller declined this offer. You can try again while the listing is available.`,
   },
+  offer_closed_after_payment_buyer: {
+    type: 'offer_closed_after_payment_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `Another offer completed for "${str(d, 'listingTitle')}"`,
+    body: () => `The accepted buyer paid, so this offer is now closed.`,
+  },
+  offer_cancelled_seller: {
+    type: 'offer_cancelled_seller',
+    channels: ['in_app'],
+    title: (d) => `An offer was cancelled for "${str(d, 'listingTitle')}"`,
+    body: () => `The buyer cancelled their offer and may have claimed the item at the asking price.`,
+  },
   claim_promoted_buyer: {
     type: 'claim_promoted_buyer',
     channels: ['in_app', 'email', 'whatsapp'],
     title: (d) => `You're up — "${str(d, 'listingTitle')}" is yours to claim`,
     body: (d) => `The previous buyer didn't pay in time. Pay by ${str(d, 'deadline')} to secure it.`,
+  },
+  claim_superseded_buyer: {
+    type: 'claim_superseded_buyer',
+    channels: ['in_app'],
+    title: (d) => `The claim queue closed for "${str(d, 'listingTitle')}"`,
+    body: () => `The item was completed by another buyer, so your backup claim is no longer active.`,
   },
 
   // ---------------------------------------------------------------- auctions

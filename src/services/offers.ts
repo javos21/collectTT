@@ -2,18 +2,20 @@
  * Fixed-price offer workflow.
  *
  * Offers are negotiations, not reservations. The listing remains active while offers
- * are pending. Accepting one locks the listing, rejects the rest, and opens the same
- * payment/custody transaction used by a normal claim.
+ * are pending. Accepting one locks the listing and opens the same payment/custody
+ * transaction used by a normal claim. Competing offers remain pending until payment.
  */
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, count, desc, eq, sql } from 'drizzle-orm';
 
 import { db, type Tx } from '../db/client';
 import { offers } from '../db/schema/offers';
 import { listings } from '../db/schema/listings';
+import { relayStores } from '../db/schema/custody';
 import { profiles } from '../db/schema/profiles';
 import { notify } from '../notifications/dispatch';
 import { FULFILLMENT_PATHS, type FulfillmentPath } from '../domain/states/transaction';
+import { SETTLEMENT_METHODS, type SettlementMethod } from '../domain/policy/settlement';
 import type { SizeClass } from '../domain/states/listing';
 import { formatMoney } from '../domain/money';
 import { activeRestrictions } from './reputation';
@@ -30,6 +32,8 @@ export interface SubmitOfferInput {
   buyerId: string;
   amountCents: number;
   fulfillmentPath: FulfillmentPath;
+  /** The buyer's chosen payment method. Required by the web action. */
+  settlementMethod?: SettlementMethod;
   relayStoreId?: string | null;
 }
 
@@ -58,6 +62,9 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
       throw new ConflictError('Your offer must be below the asking price');
     }
     assertPath(listing.fulfillment_paths, input.fulfillmentPath);
+    const settlementMethod =
+      input.settlementMethod ?? (listing.settlement_methods[0] as SettlementMethod | undefined);
+    assertSettlementMethod(listing.settlement_methods, settlementMethod);
 
     const restrictions = await activeRestrictions(tx, input.buyerId);
     if (restrictions.includes('claim_blocked')) {
@@ -93,6 +100,7 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
         buyerId: input.buyerId,
         amountCents: input.amountCents,
         fulfillmentPath: input.fulfillmentPath,
+        settlementMethod,
         relayStoreId,
         status: 'pending',
       })
@@ -127,6 +135,9 @@ export async function acceptOffer(
     if (row === undefined) throw new NotFoundError('Offer not found');
     if (row.seller_id !== sellerId) throw new ForbiddenError('Only the seller can accept this offer');
     if (row.offer_status !== 'pending') throw new ConflictError('This offer has already been answered');
+    if (row.active_transaction_id !== null) {
+      throw new ConflictError('A deal is already in progress for this listing');
+    }
     if (row.listing_status !== 'active' || row.sale_type !== 'straight_sale') {
       throw new ConflictError('This listing is no longer available for offers');
     }
@@ -141,6 +152,8 @@ export async function acceptOffer(
     }
 
     assertPath(row.fulfillment_paths, row.fulfillment_path);
+    const settlementMethod = row.settlement_method ?? (row.settlement_methods[0] as SettlementMethod | undefined);
+    assertSettlementMethod(row.settlement_methods, settlementMethod);
     const relayStoreId = row.fulfillment_path === 'relay' ? row.relay_store_id : null;
     const restrictions = await activeRestrictions(tx, row.buyer_id);
     if (restrictions.includes('claim_blocked')) {
@@ -161,24 +174,10 @@ export async function acceptOffer(
     `);
     if (claimed.rows.length === 0) throw new ConflictError('This listing is no longer available');
 
-    const competing = await tx.execute(sql`
-      select id, buyer_id
-        from offers
-       where listing_id = ${row.listing_id}
-         and status = 'pending'
-         and id <> ${offerId}
-       for update
-    `);
-
     await tx
       .update(offers)
       .set({ status: 'accepted', respondedAt: sql`now()`, updatedAt: sql`now()` })
       .where(and(eq(offers.id, offerId), eq(offers.status, 'pending')));
-
-    await tx
-      .update(offers)
-      .set({ status: 'rejected', respondedAt: sql`now()`, updatedAt: sql`now()` })
-      .where(and(eq(offers.listingId, row.listing_id), eq(offers.status, 'pending')));
 
     const opened = await openTransaction({
       tx,
@@ -191,19 +190,9 @@ export async function acceptOffer(
       offerId,
       listingTitle: row.listing_title,
       paymentWindowHours: Number(row.payment_window_hours),
+      settlementMethod,
       relayStoreId,
     });
-
-    for (const competitor of competing.rows as Array<{ buyer_id: string }>) {
-      await notify({
-        tx,
-        userId: competitor.buyer_id,
-        event: 'offer_rejected_buyer',
-        data: { listingTitle: row.listing_title },
-        linkUrl: `/listings/${row.listing_id}`,
-        idempotencyKey: `offer_rejected:${offerId}:${competitor.buyer_id}`,
-      });
-    }
 
     return { transactionId: opened.id };
   });
@@ -243,6 +232,7 @@ export async function pendingOffersForSeller(listingId: string, sellerId: string
       buyerName: profiles.displayName,
       amountCents: offers.amountCents,
       fulfillmentPath: offers.fulfillmentPath,
+      settlementMethod: offers.settlementMethod,
       relayStoreId: offers.relayStoreId,
       createdAt: offers.createdAt,
     })
@@ -257,6 +247,42 @@ export async function pendingOffersForSeller(listingId: string, sellerId: string
       ),
     )
     .orderBy(desc(offers.createdAt));
+}
+
+/** Pending offers across every listing owned by this seller, for their work inbox. */
+export async function pendingOffersReceivedBySeller(sellerId: string) {
+  return db
+    .select({
+      id: offers.id,
+      listingId: offers.listingId,
+      listingTitle: listings.title,
+      buyerId: offers.buyerId,
+      buyerName: profiles.displayName,
+      amountCents: offers.amountCents,
+      fulfillmentPath: offers.fulfillmentPath,
+      settlementMethod: offers.settlementMethod,
+      relayStoreName: relayStores.name,
+      relayStoreArea: relayStores.area,
+      listingStatus: listings.status,
+      activeTransactionId: listings.activeTransactionId,
+      createdAt: offers.createdAt,
+    })
+    .from(offers)
+    .innerJoin(profiles, eq(profiles.userId, offers.buyerId))
+    .innerJoin(listings, eq(listings.id, offers.listingId))
+    .leftJoin(relayStores, eq(relayStores.id, offers.relayStoreId))
+    .where(and(eq(offers.status, 'pending'), eq(listings.sellerId, sellerId)))
+    .orderBy(desc(offers.createdAt))
+    .limit(50);
+}
+
+export async function countPendingOffersReceivedBySeller(sellerId: string): Promise<number> {
+  const rows = await db
+    .select({ value: count() })
+    .from(offers)
+    .innerJoin(listings, eq(listings.id, offers.listingId))
+    .where(and(eq(offers.status, 'pending'), eq(listings.sellerId, sellerId)));
+  return Number(rows[0]?.value ?? 0);
 }
 
 export async function latestOfferForBuyer(listingId: string, buyerId: string) {
@@ -280,6 +306,15 @@ function assertPath(declared: string[], selected: FulfillmentPath): void {
   }
 }
 
+function assertSettlementMethod(
+  declared: string[],
+  selected: SettlementMethod | undefined,
+): asserts selected is SettlementMethod {
+  if (selected === undefined || !SETTLEMENT_METHODS.includes(selected) || !declared.includes(selected)) {
+    throw new ConflictError('Choose a payment method accepted by the seller');
+  }
+}
+
 async function displayName(tx: Tx, userId: string): Promise<string> {
   const rows = await tx
     .select({ name: profiles.displayName })
@@ -291,7 +326,7 @@ async function displayName(tx: Tx, userId: string): Promise<string> {
 
 async function lockedListing(tx: Tx, listingId: string): Promise<ListingRow> {
   const rows = await tx.execute(sql`
-    select id, seller_id, title, sale_type, status, price_cents, fulfillment_paths, size_class, accepts_offers
+    select id, seller_id, title, sale_type, status, price_cents, fulfillment_paths, settlement_methods, size_class, accepts_offers
       from listings
      where id = ${listingId}
      for update
@@ -309,14 +344,17 @@ function sqlOfferWithListing(offerId: string) {
       o.buyer_id,
       o.amount_cents,
       o.fulfillment_path,
+      o.settlement_method,
       o.relay_store_id,
       o.status as offer_status,
       l.seller_id,
       l.title as listing_title,
       l.sale_type,
       l.status as listing_status,
+      l.active_transaction_id,
       l.price_cents,
       l.fulfillment_paths,
+      l.settlement_methods,
       l.accepts_offers,
       l.payment_window_hours,
       l.size_class
@@ -335,6 +373,7 @@ interface ListingRow {
   status: string;
   price_cents: number | string | null;
   fulfillment_paths: string[];
+  settlement_methods: string[];
   accepts_offers: boolean;
   size_class: SizeClass;
 }
@@ -345,14 +384,17 @@ interface OfferWithListingRow {
   buyer_id: string;
   amount_cents: number | string;
   fulfillment_path: FulfillmentPath;
+  settlement_method: SettlementMethod | null;
   relay_store_id: string | null;
-  offer_status: 'pending' | 'accepted' | 'rejected';
+  offer_status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
   seller_id: string;
   listing_title: string;
   sale_type: 'straight_sale' | 'auction';
   listing_status: string;
+  active_transaction_id: string | null;
   price_cents: number | string | null;
   fulfillment_paths: string[];
+  settlement_methods: string[];
   accepts_offers: boolean;
   payment_window_hours: number | string;
   size_class: SizeClass;

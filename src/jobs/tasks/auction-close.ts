@@ -146,6 +146,7 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
           winningBidId: winner.id,
           listingTitle: listing.title,
           paymentWindowHours: listing.paymentWindowHours,
+          settlementMethod: winner.settlementMethod ?? listing.settlementMethods[0] ?? null,
           relayStoreId: winner.relayStoreId,
         });
 

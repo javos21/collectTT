@@ -5,7 +5,13 @@ import Link from 'next/link';
 import { Menu, UserRound, X } from 'lucide-react';
 import { Building05, CoinsSwap01, Plus, SearchLg, UserCircle } from '@untitledui/icons';
 
-export function MobileNavigation({ hasStore, signedIn }: { hasStore: boolean; signedIn: boolean }) {
+type MobileNavigationProps = {
+  hasStore: boolean;
+  signedIn: boolean;
+  dealsAttentionCount: number;
+};
+
+export function MobileNavigation({ hasStore, signedIn, dealsAttentionCount }: MobileNavigationProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -32,6 +38,10 @@ export function MobileNavigation({ hasStore, signedIn }: { hasStore: boolean; si
     setOpen(false);
     triggerRef.current?.focus();
   }
+
+  const dealsLabel = dealsAttentionCount > 0
+    ? `My Deals, ${dealsAttentionCount} needing your attention`
+    : 'My Deals';
 
   return (
     <>
@@ -63,7 +73,15 @@ export function MobileNavigation({ hasStore, signedIn }: { hasStore: boolean; si
               <Link href="/sign-in" tabIndex={open ? 0 : -1} onClick={closeMenu}><UserRound aria-hidden="true" /><span>Sign in</span></Link>
             )}
             {hasStore && <Link href="/store" tabIndex={open ? 0 : -1} onClick={closeMenu}><Building05 aria-hidden="true" /><span>Store</span></Link>}
-            <Link href="/deals" tabIndex={open ? 0 : -1} onClick={closeMenu}><CoinsSwap01 aria-hidden="true" /><span>My deals</span></Link>
+            <Link href="/deals" aria-label={dealsLabel} tabIndex={open ? 0 : -1} onClick={closeMenu}>
+              <CoinsSwap01 aria-hidden="true" />
+              <span>My Deals</span>
+              {dealsAttentionCount > 0 && (
+                <span className="notification-badge" aria-hidden="true">
+                  {dealsAttentionCount > 99 ? '99+' : dealsAttentionCount}
+                </span>
+              )}
+            </Link>
             <Link href="/listings/new" tabIndex={open ? 0 : -1} onClick={closeMenu}><Plus aria-hidden="true" /><span>Sell</span></Link>
             <Link href="/listings" tabIndex={open ? 0 : -1} onClick={closeMenu}><SearchLg aria-hidden="true" /><span>Browse</span></Link>
           </nav>

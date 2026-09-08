@@ -239,6 +239,10 @@ export async function markReceived(input: StoreActionInput): Promise<void> {
       idempotencyKey: `custody_received:${input.holdingId}`,
     });
   }
+
+  // Payment may already have been confirmed before the seller arrives. In that
+  // case the item becomes ready immediately after the store accepts it.
+  await maybeAutoAuthorizePaidHolding(input.tx, input.holdingId);
 }
 
 /**
@@ -251,6 +255,42 @@ export async function markReceived(input: StoreActionInput): Promise<void> {
 export async function authorizeRelease(input: StoreActionInput): Promise<void> {
   const { authorizeReleaseAtomic } = await import('../db/atomic/authorize-release');
   await authorizeReleaseAtomic(input);
+}
+
+/**
+ * Payment confirmation is the only thing needed to make a store-held item ready.
+ * Keep the release state and its notification for audit/history compatibility, but
+ * perform the transition automatically so a clerk never has to authorize and then
+ * collect as two separate actions.
+ */
+async function maybeAutoAuthorizePaidHolding(tx: Tx, holdingId: string): Promise<void> {
+  const rows = await tx
+    .select({
+      state: custodyHoldings.state,
+      storeId: custodyHoldings.storeId,
+      paymentState: transactions.paymentState,
+    })
+    .from(custodyHoldings)
+    .leftJoin(transactions, eq(transactions.id, custodyHoldings.currentTransactionId))
+    .where(eq(custodyHoldings.id, holdingId))
+    .limit(1);
+  const row = rows[0];
+
+  if (
+    row === undefined ||
+    row.storeId === null ||
+    row.state !== 'at_relay' ||
+    row.paymentState !== 'confirmed'
+  ) {
+    return;
+  }
+
+  await authorizeRelease({
+    tx,
+    holdingId,
+    actorUserId: '',
+    actorRole: 'system',
+  });
 }
 
 /** Buyer physically collected it. This is what completes a custody-path deal. */
@@ -414,21 +454,20 @@ export async function recomputeShelfClock(tx: Tx, holdingId: string): Promise<Da
 }
 
 /**
- * Payment just settled. Extend the shelf clock. Called from `confirmPayment`.
+ * Payment just settled. Extend the shelf clock and automatically clear a paid item
+ * for collection when it is already at a relay store. Called from `confirmPayment`.
  *
- * ★ IT DOES NOT NOTIFY. `custody_ready_for_pickup` is sent from exactly ONE place —
- *   the release authorization in src/db/atomic/authorize-release.ts — because that is
- *   the truthful "cleared for collection" moment: the store board deliberately splits
- *   "on the shelf, paid" from "ready for collection", and a buyer told to come and
- *   collect before a clerk has cleared the item is being told something the counter
- *   will not honour. Two producers of the same event also meant two inboxes entries
- *   under two different idempotency keys, which no dedupe could ever collapse.
+ * ★ `custody_ready_for_pickup` is still sent from exactly ONE place — the release
+ *   transition in src/db/atomic/authorize-release.ts — but that transition is now
+ *   invoked by this service under the system actor. The store no longer has to click
+ *   a separate authorization action.
  */
 export async function onPaymentConfirmed(tx: Tx, transactionId: string): Promise<void> {
   const holding = await liveHoldingForTransaction(tx, transactionId);
   if (holding === undefined) return;
 
   await recomputeShelfClock(tx, holding.id);
+  await maybeAutoAuthorizePaidHolding(tx, holding.id);
 }
 
 /**

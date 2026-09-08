@@ -550,9 +550,7 @@ describe('custody notification strings', () => {
 
   it('renders the collection deadline after payment extends the shelf clock, not the tight unpaid one', async () => {
     const { notifications } = await import('../../src/db/schema/notifications');
-    const { markReceived, onPaymentConfirmed, authorizeRelease } = await import(
-      '../../src/services/custody'
-    );
+    const { markReceived, onPaymentConfirmed } = await import('../../src/services/custody');
     const { transactions: transactionsTable } = await import('../../src/db/schema/transactions');
 
     const listingId = await makeRelayListing();
@@ -569,8 +567,8 @@ describe('custody notification strings', () => {
     });
 
     // Confirm payment: this extends the shelf clock from the tight unpaid window (3
-    // days) to the paid window (7 days) before the "ready for pickup" notification
-    // is sent.
+    // days) to the paid window (7 days), then automatically moves the item into the
+    // ready-for-collection state and sends the buyer notice.
     await db.transaction(async (tx) => {
       await tx
         .update(transactionsTable)
@@ -579,16 +577,12 @@ describe('custody notification strings', () => {
       await onPaymentConfirmed(tx, claim.transactionId!);
     });
 
-    // ★ The clerk clears it. `custody_ready_for_pickup` has exactly ONE producer, and
-    //   this is it — see src/db/atomic/authorize-release.ts.
-    await db.transaction(async (tx) => {
-      await authorizeRelease({ tx, holdingId: held[0]!.id, actorUserId: clerk, actorRole: 'store' });
-    });
-
     const holdingAfter = await db
       .select()
       .from(custodyHoldings)
       .where(eq(custodyHoldings.id, held[0]!.id));
+
+    expect(holdingAfter[0]!.state).toBe('release_authorized');
 
     const inbox = await db
       .select()
@@ -607,7 +601,7 @@ describe('custody notification strings', () => {
 
   it('sends the released buyer exactly ONE ready-to-collect notice, naming the real store and a real date', async () => {
     const { notifications } = await import('../../src/db/schema/notifications');
-    const { markReceived, authorizeRelease } = await import('../../src/services/custody');
+    const { markReceived } = await import('../../src/services/custody');
     const { markPaid, confirmPayment } = await import('../../src/services/transactions');
 
     const listingId = await makeRelayListing();
@@ -631,14 +625,12 @@ describe('custody notification strings', () => {
       await markPaid(tx, txId, buyerA);
       await confirmPayment(tx, txId, seller);
     });
-    await db.transaction(async (tx) => {
-      await authorizeRelease({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
-    });
-
     const holdingAfter = await db
       .select()
       .from(custodyHoldings)
       .where(eq(custodyHoldings.id, holdingId));
+
+    expect(holdingAfter[0]!.state).toBe('release_authorized');
 
     // Scoped to THIS deal: the fixture buyers are reused across tests.
     const inbox = await db
@@ -649,9 +641,8 @@ describe('custody notification strings', () => {
       (n) => n.eventType === 'custody_ready_for_pickup' && n.linkUrl === `/deals/${txId}`,
     );
 
-    // ★ ONE. Before this fix, confirmPayment fired the event under `custody_ready:…`
-    //   and the release authorization fired it again under `release_authorized:…`, so
-    //   the buyer got two — and the second, degraded one arrived last.
+    // ★ ONE. Payment confirmation is the single producer now, and the automatic
+    //   release transition keeps the notice deduplicated by its durable idempotency key.
     expect(ready).toHaveLength(1);
 
     const notice = ready[0]!;

@@ -203,6 +203,8 @@ export const claims = pgTable(
     position: integer('position').notNull(),
     status: claimStatusEnum('status').notNull(),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
+    /** The buyer's chosen payment method for this claim. Nullable for legacy rows. */
+    settlementMethod: text('settlement_method'),
     /**
      * Which relay store this claimant chose, for the `relay` path. Stored on the CLAIM
      * rather than the transaction so a backup claimer's choice survives until they are
@@ -232,6 +234,10 @@ export const claims = pgTable(
       'claim_stack_depth',
       sql`${t.position} between 1 and 3 or ${t.status} not in ('active', 'queued', 'promoted')`,
     ),
+    check(
+      'claim_settlement_method_valid',
+      sql`${t.settlementMethod} is null or ${t.settlementMethod} in ('cash', 'bank_transfer', 'linx', 'other')`,
+    ),
   ],
 );
 
@@ -247,6 +253,8 @@ export const bids = pgTable(
       .references(() => profiles.userId),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     isBuyout: boolean('is_buyout').notNull().default(false),
+    /** The bidder's chosen payment method. Nullable for bids placed before this field existed. */
+    settlementMethod: text('settlement_method'),
     /**
      * ★ The bidder's chosen settlement, mirroring what `claims` has always carried.
      *   Without these a relay auction cannot close: openTransaction would insert a
@@ -269,5 +277,9 @@ export const bids = pgTable(
     index('bids_ladder').on(t.listingId, t.amountCents.desc()),
     index('bids_bidder').on(t.bidderId, t.placedAt.desc()),
     check('bid_positive', sql`${t.amountCents} > 0`),
+    check(
+      'bid_settlement_method_valid',
+      sql`${t.settlementMethod} is null or ${t.settlementMethod} in ('cash', 'bank_transfer', 'linx', 'other')`,
+    ),
   ],
 );
