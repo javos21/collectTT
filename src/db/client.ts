@@ -38,7 +38,9 @@ export const pool = new Pool({
   // Small and boring: 50 concurrent users do not need a big pool, and Render Postgres
   // Basic has a modest connection ceiling shared with the worker process. Keep the
   // default below Supabase session-pool limits; pg queues excess work for us.
-  max: Number(process.env.PG_POOL_MAX ?? 5),
+  // The worker can override this independently when it reuses the app pool. The
+  // regular PG_POOL_MAX setting remains the explicit, higher-priority override.
+  max: Number(process.env.PG_POOL_MAX ?? process.env.WORKER_POOL_MAX ?? 5),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   ...sslConfig(connectionString),
