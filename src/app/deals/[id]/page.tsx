@@ -66,18 +66,18 @@ const STATE_LABELS: Record<string, string> = {
 const PAYMENT_STEPS = ['Awaiting payment', 'Marked paid', 'Confirmed'];
 const PAYMENT_INDEX: Record<string, number> = { pending: 0, buyer_marked_paid: 1, confirmed: 2 };
 
-const CUSTODY_STEPS = ['Awaiting drop-off', 'On the shelf', 'Cleared for release', 'Collected'];
+const CUSTODY_STEPS = ['Awaiting drop-off', 'On the shelf', 'Collected'];
 const CUSTODY_INDEX: Record<string, number> = {
   awaiting_dropoff: 0,
   at_relay: 1,
-  release_authorized: 2,
-  picked_up: 3,
+  release_authorized: 1,
+  picked_up: 2,
 };
 
 const CUSTODY_LABELS: Record<string, string> = {
   awaiting_dropoff: 'Awaiting drop-off',
   at_relay: 'On the shelf',
-  release_authorized: 'Cleared for release',
+  release_authorized: 'Ready for pickup',
   picked_up: 'Collected',
   returned_to_seller: 'Returned to seller',
   voided: 'Drop-off cancelled',
@@ -263,7 +263,7 @@ export default async function DealPage({
             </>
           )}
 
-          {isOpen && isSeller && t.paymentState === 'pending' && custodyPanel?.state === 'awaiting_dropoff' && (
+          {isOpen && isSeller && t.paymentState !== 'buyer_marked_paid' && custodyPanel?.state === 'awaiting_dropoff' && (
             <>
               <p className="deal-action-card__eyebrow">Your next step</p>
               <h2 id="deal-action-title">Drop off the item</h2>
