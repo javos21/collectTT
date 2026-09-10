@@ -142,7 +142,7 @@ export const REASON_TO_STATE: Record<TerminationReason, TransactionState> = {
 
 export const TRANSACTION_SOURCES = [
   'claim', // straight sale, first claimant
-  'claim_promotion', // straight sale, promoted from the backup stack
+  'claim_promotion', // historical straight-sale retry rows; no longer created
   'offer_accept', // fixed-price offer accepted by the seller
   'auction_win', // auction, highest bidder
   'auction_runner_up', // auction, promoted down the bid ladder
@@ -150,7 +150,7 @@ export const TRANSACTION_SOURCES = [
 
 export type TransactionSource = (typeof TRANSACTION_SOURCES)[number];
 
-/** Straight-sale sources walk the claim stack; auction sources walk the bid ladder. */
+/** Historical claim sources are retained for old transactions; active promotion uses bids. */
 export function candidateLadderFor(source: TransactionSource): 'claims' | 'bids' {
   return source === 'claim' || source === 'claim_promotion' || source === 'offer_accept'
     ? 'claims'

@@ -19,7 +19,6 @@ import {
   LISTING_STATUSES,
   PAYMENT_STATES,
   SALE_TYPES,
-  SIZE_CLASSES,
   TERMINATION_REASONS,
   TRANSACTION_SOURCES,
   TRANSACTION_STATES,
@@ -45,7 +44,6 @@ export const saleTypeEnum = pgEnum('sale_type', tuple(SALE_TYPES));
 export const fulfillmentPathEnum = pgEnum('fulfillment_path', tuple(FULFILLMENT_PATHS));
 export const terminationReasonEnum = pgEnum('termination_reason', tuple(TERMINATION_REASONS));
 export const transactionSourceEnum = pgEnum('transaction_source', tuple(TRANSACTION_SOURCES));
-export const sizeClassEnum = pgEnum('size_class', tuple(SIZE_CLASSES));
 export const actorRoleEnum = pgEnum('actor_role', tuple(ACTOR_ROLES));
 export const eventTrackEnum = pgEnum('event_track', tuple(EVENT_TRACKS));
 

@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { profiles } from '@/db/schema/profiles';
 import { currentUser } from '@/lib/session';
-import { confirmStoreApplication, declineStoreApplication } from '@/services/store-applications';
+import { confirmStoreApplication, declineStoreApplication, deleteRelayStore } from '@/services/store-applications';
 
 async function requireAdmin() {
   const viewer = await currentUser();
@@ -49,4 +49,16 @@ export async function declineStoreApplicationAction(formData: FormData): Promise
     finish(error instanceof Error ? error.message : 'The Store application could not be declined.');
   }
   finish('Store application declined.');
+}
+
+export async function deleteStoreAction(formData: FormData): Promise<void> {
+  const viewer = await requireAdmin();
+  const id = text(formData, 'storeId');
+  if (id === '') finish('Choose a Store first.');
+  try {
+    await deleteRelayStore(id, viewer.userId);
+  } catch (error) {
+    finish(error instanceof Error ? error.message : 'The Store could not be deleted.');
+  }
+  finish('Store deleted.');
 }

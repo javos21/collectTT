@@ -23,6 +23,7 @@ import { profiles } from './profiles';
 import { listings } from './listings';
 import { relayStores } from './custody';
 import { fulfillmentPathEnum, offerStatusEnum } from './enums';
+import { marketplaceOptions } from './settings';
 
 export const offers = pgTable(
   'offers',
@@ -36,6 +37,7 @@ export const offers = pgTable(
       .references(() => profiles.userId),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
+    deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
     /** The buyer's chosen payment method for this offer. Nullable for legacy rows. */
     settlementMethod: text('settlement_method'),
     relayStoreId: uuid('relay_store_id').references(() => relayStores.id),
@@ -54,10 +56,6 @@ export const offers = pgTable(
     check(
       'offer_relay_store_required',
       sql`${t.fulfillmentPath} <> 'relay' or ${t.relayStoreId} is not null`,
-    ),
-    check(
-      'offer_settlement_method_valid',
-      sql`${t.settlementMethod} is null or ${t.settlementMethod} in ('cash', 'bank_transfer', 'linx', 'other')`,
     ),
   ],
 );

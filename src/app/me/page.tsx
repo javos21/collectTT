@@ -144,7 +144,7 @@ export default async function MePage() {
           id: claim.id,
           title,
           status: claim.status,
-          position: claim.position,
+          transactionId: claim.transactionId,
           fulfillmentPath: claim.fulfillmentPath,
           claimedAt: claim.claimedAt.toISOString(),
         }))}

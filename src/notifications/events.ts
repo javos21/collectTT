@@ -41,12 +41,6 @@ export const EVENTS = {
     title: (d) => `You claimed "${str(d, 'listingTitle')}"`,
     body: (d) => `Pay the seller by ${str(d, 'deadline')}, then mark it paid in the app.`,
   },
-  claim_queued_buyer: {
-    type: 'claim_queued_buyer',
-    channels: ['in_app'],
-    title: (d) => `You're #${str(d, 'position')} in line for "${str(d, 'listingTitle')}"`,
-    body: () => `If the current claimer doesn't pay in time, it comes to you automatically.`,
-  },
   offer_received_seller: {
     type: 'offer_received_seller',
     channels: ['in_app', 'email'],
@@ -83,17 +77,11 @@ export const EVENTS = {
     title: (d) => `An offer was cancelled for "${str(d, 'listingTitle')}"`,
     body: () => `The buyer cancelled their offer and may have claimed the item at the asking price.`,
   },
-  claim_promoted_buyer: {
-    type: 'claim_promoted_buyer',
+  auction_runner_up_buyer: {
+    type: 'auction_runner_up_buyer',
     channels: ['in_app', 'email', 'whatsapp'],
-    title: (d) => `You're up — "${str(d, 'listingTitle')}" is yours to claim`,
-    body: (d) => `The previous buyer didn't pay in time. Pay by ${str(d, 'deadline')} to secure it.`,
-  },
-  claim_superseded_buyer: {
-    type: 'claim_superseded_buyer',
-    channels: ['in_app'],
-    title: (d) => `The claim queue closed for "${str(d, 'listingTitle')}"`,
-    body: () => `The item was completed by another buyer, so your backup claim is no longer active.`,
+    title: (d) => `You're up for "${str(d, 'listingTitle')}"`,
+    body: (d) => `The previous auction buyer did not complete the deal. Pay by ${str(d, 'deadline')} to secure it.`,
   },
 
   // ---------------------------------------------------------------- auctions

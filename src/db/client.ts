@@ -33,7 +33,21 @@ function sslConfig(url: string): { ssl: { rejectUnauthorized: boolean } } | Reco
   return isLocal ? {} : { ssl: { rejectUnauthorized: false } };
 }
 
-export const pool = new Pool({
+/**
+ * Next's development server can evaluate this module again after every server-side
+ * edit. Keep the pool on globalThis so those reloads reuse the same sockets instead
+ * of leaving an old pool behind until its idle timeout expires. The listener flag is
+ * just as important: attaching an error listener on every reload causes its own
+ * EventEmitter warning and makes the original problem harder to diagnose.
+ */
+type DbGlobals = typeof globalThis & {
+  __collectttPool?: Pool;
+  __collectttPoolErrorListenerAttached?: boolean;
+};
+
+const globalForDb = globalThis as DbGlobals;
+
+export const pool = globalForDb.__collectttPool ?? new Pool({
   connectionString,
   // Small and boring: 50 concurrent users do not need a big pool, and Render Postgres
   // Basic has a modest connection ceiling shared with the worker process. Keep the
@@ -46,9 +60,22 @@ export const pool = new Pool({
   ...sslConfig(connectionString),
 });
 
-pool.on('error', (err) => {
-  console.error('[db] idle client error', err);
-});
+if (process.env.NODE_ENV !== 'production') {
+  globalForDb.__collectttPool = pool;
+}
+
+if (!globalForDb.__collectttPoolErrorListenerAttached) {
+  pool.on('error', (err) => {
+    console.error('[db] idle client error', {
+      code: 'code' in err ? err.code : undefined,
+      message: err.message,
+      total: pool.totalCount,
+      idle: pool.idleCount,
+      waiting: pool.waitingCount,
+    });
+  });
+  globalForDb.__collectttPoolErrorListenerAttached = true;
+}
 
 export const db = drizzle(pool, { schema });
 

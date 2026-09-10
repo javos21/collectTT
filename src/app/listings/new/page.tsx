@@ -5,7 +5,8 @@ import { db } from '@/db/client';
 import { SignInRequiredModal } from '@/components/sign-in-required-modal';
 import { createListingAction } from './actions';
 import { ListingForm } from './listing-form';
-import { getFullServiceDeliveryDays } from '@/services/platform-settings';
+import { getFullServiceDeliveryDays, listMarketplaceOptions } from '@/services/platform-settings';
+import { activeCategoryDefinitions } from '@/services/catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,9 +36,12 @@ export default async function NewListingPage({
     );
   }
 
-  const [relayStoreOptions, fullServiceDefaultDays] = await Promise.all([
+  const [relayStoreOptions, fullServiceDefaultDays, deliveryOptions, paymentOptions, categories] = await Promise.all([
     listRelayStores(db),
     getFullServiceDeliveryDays(),
+    listMarketplaceOptions('delivery', { activeOnly: true }),
+    listMarketplaceOptions('payment', { activeOnly: true }),
+    activeCategoryDefinitions(),
   ]);
 
   return (
@@ -46,7 +50,7 @@ export default async function NewListingPage({
       <header className="create-header">
         <div>
           <h1>Create a listing</h1>
-          <p>Five quick steps, then you’re live.</p>
+          <p>Four quick steps, then you’re live.</p>
         </div>
         <img src="/assets/collecttt_logo.png" alt="" aria-hidden="true" />
       </header>
@@ -58,7 +62,17 @@ export default async function NewListingPage({
           name: store.name,
           area: store.area,
         }))}
-        fullServiceDefaultDays={fullServiceDefaultDays}
+        deliveryOptions={deliveryOptions.map((option) => ({
+          id: option.id,
+          label: option.label,
+          description: option.description ?? '',
+          requiresStore: option.requiresStore,
+          defaultDays: option.fulfillmentPath === 'full_service'
+            ? fullServiceDefaultDays
+            : option.requiresStore || option.fulfillmentPath === 'remote_ship' ? 5 : 2,
+        }))}
+        paymentOptions={paymentOptions.map((option) => ({ key: option.key, label: option.label }))}
+        categories={categories}
         error={error}
       />
     </main>

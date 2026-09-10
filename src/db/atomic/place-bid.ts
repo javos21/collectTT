@@ -29,6 +29,7 @@ import { enqueue } from '../../jobs/enqueue';
 import { bidIncrement, formatMoney, minimumNextBid } from '../../domain/money';
 import { fallbackFulfillmentPath, type FulfillmentPath } from '../../domain/states/transaction';
 import type { SettlementMethod } from '../../domain/policy/settlement';
+import { getListingDeliveryOption } from '../../services/platform-settings';
 
 export interface BidResult {
   bidId: string;
@@ -45,11 +46,12 @@ export async function placeBid(opts: {
   bidderId: string;
   amountCents: number;
   /**
-   * ★ The bidder's own settlement choice, recorded on the bid the way the claim stack
-   *   has always recorded it. Optional: a bid without one falls back to the listing's
+   * ★ The bidder's own settlement choice, retained on the bid for runner-up promotion.
+   *   Optional: a bid without one falls back to the listing's
    *   first store-free declared path when the ladder is walked.
    */
   fulfillmentPath?: FulfillmentPath;
+  deliveryOptionId?: string;
   /** Which payment method the bidder will use. Required by the web action. */
   settlementMethod?: SettlementMethod;
   /** Which relay store the bidder will collect from. Required when path === 'relay'. */
@@ -81,18 +83,31 @@ export async function placeBid(opts: {
       throw new ForbiddenError('Bidding is paused on your account because of recent unpaid deals.');
     }
 
-    // ★ The SAME gate the claim stack runs — literally the same function, so a bidder
-    //   and a claimer are refused for the same reasons in the same words. It only runs
+    let fulfillmentPath = opts.fulfillmentPath;
+    if (opts.deliveryOptionId !== undefined) {
+      const option = await getListingDeliveryOption(tx, opts.listingId, opts.deliveryOptionId);
+      if (option === null || option.fulfillmentPath === null) {
+        throw new ConflictError('Choose a delivery option offered by the seller');
+      }
+      fulfillmentPath = option.fulfillmentPath as FulfillmentPath;
+      if (option.requiresStore && (opts.relayStoreId === undefined || opts.relayStoreId === null)) {
+        throw new ConflictError('Choose which pickup store you want to collect from');
+      }
+    }
+
+    // ★ The SAME eligibility gate claims use, so a bidder and a claimer are refused for
+    //   the same reasons in the same words. It only runs
     //   when the bidder actually made a choice; a bid without one carries no path and
     //   no store.
-    if (opts.fulfillmentPath !== undefined) {
-      if (!listing.fulfillmentPaths.includes(opts.fulfillmentPath)) {
+    if (fulfillmentPath !== undefined) {
+      if (!listing.fulfillmentPaths.includes(fulfillmentPath)) {
         throw new ConflictError('The seller does not accept that fulfillment method');
       }
       await assertFulfillmentEligible(tx, {
-        path: opts.fulfillmentPath,
+        listingId: opts.listingId,
+        path: fulfillmentPath,
+        requireListedStore: opts.deliveryOptionId !== undefined,
         relayStoreId: opts.relayStoreId,
-        sizeClass: listing.sizeClass,
         buyerRestrictions: restrictions,
       });
     }
@@ -121,7 +136,8 @@ export async function placeBid(opts: {
         amountCents: opts.amountCents,
         isBuyout,
         settlementMethod,
-        fulfillmentPath: opts.fulfillmentPath ?? null,
+        fulfillmentPath: fulfillmentPath ?? null,
+        deliveryOptionId: opts.deliveryOptionId ?? null,
         relayStoreId: opts.relayStoreId ?? null,
         status: 'active',
       })
@@ -237,7 +253,8 @@ export async function placeBid(opts: {
         // ★ The buyer's OWN choice. Falls back to the first declared path that needs
         //   no store only when the bid carried none — see fallbackFulfillmentPath.
         fulfillmentPath:
-          opts.fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
+          fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
+        deliveryOptionId: opts.deliveryOptionId ?? null,
         source: 'auction_win',
         winningBidId: bid.id,
         listingTitle: listing.title,

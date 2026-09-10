@@ -153,7 +153,6 @@ async function main(): Promise<void> {
           : null,
       fulfillmentPaths: ['cash_meetup', 'relay'],
       settlementMethods: ['cash', 'bank_transfer'],
-      sizeClass: 'small',
       publishedAt: new Date(),
     });
     console.log(`[seed] listing ${item.title}`);
@@ -168,7 +167,6 @@ async function main(): Promise<void> {
       area: SEED_STORE.area,
       address: SEED_STORE.address,
       phoneE164: SEED_STORE.phoneE164,
-      acceptsSizeClasses: ['small'],
       active: true,
     })
     .onConflictDoUpdate({
@@ -176,7 +174,6 @@ async function main(): Promise<void> {
       set: {
         name: SEED_STORE.name,
         area: SEED_STORE.area,
-        acceptsSizeClasses: ['small'],
         active: true,
       },
     });

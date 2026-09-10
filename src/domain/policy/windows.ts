@@ -47,8 +47,6 @@ export const WINDOWS = {
     maxExtensions: null as number | null, // null = extend until bidding goes quiet
   },
 
-  /** How deep the straight-sale backup claim stack goes. */
-  maxClaimStackDepth: 3,
 } as const;
 
 export function paymentWindowMs(path: FulfillmentPath, paymentWindowHours?: number): number {

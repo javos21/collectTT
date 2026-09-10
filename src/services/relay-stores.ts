@@ -3,11 +3,10 @@
  * only the lookup half — what a seller may nominate and what a buyer may pick.
  */
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import type { DbOrTx } from '../db/client';
 import { relayStores, listingRelayStores } from '../db/schema/custody';
-import type { SizeClass } from '../domain/states/listing';
 
 export interface RelayStoreOption {
   id: string;
@@ -31,16 +30,13 @@ export async function listRelayStores(tx: DbOrTx): Promise<RelayStoreOption[]> {
 }
 
 /**
- * What a BUYER may pick for this listing: the seller's nominations, intersected with
- * active stores, intersected with those that accept the item's size class.
- *
- * ★ This is UX filtering only. `claimListing` re-runs the size gate server-side,
- *   because the form is client-supplied.
+ * What a BUYER may pick for this listing: the seller's nominations intersected with
+ * active stores. Pickup availability is determined only by the seller's nominations
+ * and each store's active status.
  */
 export async function candidateStoresFor(
   tx: DbOrTx,
   listingId: string,
-  sizeClass: SizeClass,
 ): Promise<RelayStoreOption[]> {
   return tx
     .select({
@@ -55,7 +51,6 @@ export async function candidateStoresFor(
       and(
         eq(listingRelayStores.listingId, listingId),
         eq(relayStores.active, true),
-        sql`${sizeClass} = any(${relayStores.acceptsSizeClasses})`,
       ),
     )
     .orderBy(relayStores.area, relayStores.name);

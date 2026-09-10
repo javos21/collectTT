@@ -17,6 +17,7 @@ export interface HomeListingRow {
   endsAt: string | null;
   acceptsOffers: boolean;
   liveClaimCount: number;
+  claimedAt?: string | null;
 }
 
 function priceFor(row: HomeListingRow): number {
@@ -44,6 +45,15 @@ function auctionUrgency(endsAt: string | null): 'urgent' | 'soon' | 'healthy' {
   return 'healthy';
 }
 
+function claimedAgo(claimedAt: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(claimedAt).getTime()) / 60_000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function ListingTile({ row }: { row: HomeListingRow }) {
   return (
     <Link className="home-listing-tile" href={`/listings/${row.id}`}>
@@ -68,11 +78,14 @@ function ListingTile({ row }: { row: HomeListingRow }) {
           <div className="home-listing-tile__sale-meta">
             <span className="home-listing-tile__price-label">Sale Price</span>
             <strong className="num">{formatMoney(priceFor(row))}</strong>
-            {row.acceptsOffers && <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>}
-            {row.liveClaimCount > 0 && <span className="home-listing-tile__offers">First claim in progress · {row.liveClaimCount}/3 claimed</span>}
+            {row.claimedAt !== undefined && row.claimedAt !== null ? (
+              <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Claimed {claimedAgo(row.claimedAt)}</span>
+            ) : row.acceptsOffers ? (
+              <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
+            ) : null}
           </div>
         )}
-        <span className="home-listing-tile__cta"><Eye aria-hidden="true" />{row.liveClaimCount > 0 ? 'Join queue' : 'View Listing'}</span>
+        <span className="home-listing-tile__cta"><Eye aria-hidden="true" />View Listing</span>
       </div>
     </Link>
   );

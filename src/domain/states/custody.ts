@@ -3,7 +3,7 @@
  *
  * The second of the two independent tracks. Custody follows the ITEM, so a
  * `custody_holdings` row belongs to a LISTING, not a transaction — that is what lets
- * a backup claimer be promoted while the item stays exactly where it is on the shelf.
+ * an auction runner-up be promoted while the item stays exactly where it is on the shelf.
  *
  *   not_applicable                                  (terminal — paths 1 & 2, never leaves)
  *

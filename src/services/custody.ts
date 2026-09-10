@@ -9,8 +9,8 @@
  *   subsystem where being wrong costs somebody their item.
  *
  * ★ CUSTODY FOLLOWS THE ITEM, PAYMENT FOLLOWS THE TRANSACTION. A holding belongs to a
- *   LISTING. When a buyer reneges and a backup is promoted, the item does not move —
- *   the holding just re-links to the new transaction attempt.
+ *   LISTING. When an auction buyer reneges and a runner-up is promoted, the item does
+ *   not move — the holding just re-links to the new transaction attempt.
  */
 
 import { and, eq, inArray, sql } from 'drizzle-orm';
@@ -24,7 +24,6 @@ import { users } from '../db/schema/auth';
 import { enqueue } from '../jobs/enqueue';
 import { notify } from '../notifications/dispatch';
 import { custodyExpiry } from '../domain/policy/windows';
-import { checkEligibility } from '../domain/policy/eligibility';
 import { generateDropoffCode } from '../domain/dropoff-code';
 import {
   assertCustodyTransition,
@@ -35,7 +34,6 @@ import {
 } from '../domain/states/custody';
 import type { ActorRole } from '../domain/states/actors';
 import type { FulfillmentPath } from '../domain/states/transaction';
-import type { SizeClass } from '../domain/states/listing';
 
 /** How many drop-off codes we will draw before giving up on finding a free one. */
 const DROPOFF_CODE_ATTEMPTS = 5;
@@ -93,7 +91,6 @@ export interface OpenHoldingInput {
   listingId: string;
   transactionId: string;
   path: Extract<FulfillmentPath, 'relay' | 'full_service'>;
-  sizeClass: SizeClass;
   /** Required for the relay rail; null routes to our own courier. */
   storeId: string | null;
 }
@@ -102,7 +99,7 @@ export interface OpenHoldingInput {
  * Create (or re-link) the holding for a custody-path transaction.
  *
  * Called from `openTransaction`. If a live holding already exists for this listing —
- * the promotion case, where the item is already on the shelf — it is re-linked to the
+ * auction runner-up promotion case, where the item is already on the shelf — it is re-linked to the
  * new transaction rather than duplicated. The partial unique index makes duplicating
  * it impossible anyway; this is the graceful half of that guarantee.
  */
@@ -136,13 +133,7 @@ export async function openOrRelinkHolding(input: OpenHoldingInput): Promise<{
     if (input.storeId === null) {
       throw new CustodyConflictError('A relay drop-off needs a store');
     }
-    const store = await loadStore(tx, input.storeId);
-    const eligibility = checkEligibility({
-      path: 'relay',
-      sizeClass: input.sizeClass,
-      storeAcceptedSizes: store.acceptsSizeClasses,
-    });
-    if (!eligibility.eligible) throw new CustodyConflictError(eligibility.reasons.join(' '));
+    await loadStore(tx, input.storeId);
   }
 
   // ★ Retry on the unique index rather than pre-checking. 31^4 codes against a few
@@ -162,7 +153,6 @@ export async function openOrRelinkHolding(input: OpenHoldingInput): Promise<{
             holder: input.path === 'relay' ? 'relay_store' : 'platform_courier',
             storeId: input.path === 'relay' ? input.storeId : null,
             state: 'awaiting_dropoff',
-            sizeClass: input.sizeClass,
             dropoffCode: generateDropoffCode(),
           })
           .returning({ id: custodyHoldings.id }),
@@ -475,7 +465,7 @@ export async function onPaymentConfirmed(tx: Tx, transactionId: string): Promise
  * Called from `terminateTransaction`.
  *
  *   - never dropped off        -> void the holding, free the shelf slot
- *   - on the shelf, candidates -> leave it exactly where it is; promotion re-links it
+ *   - on the shelf, an auction runner-up -> leave it exactly where it is; promotion re-links it
  *   - on the shelf, none left  -> return to seller
  */
 export async function onTransactionTerminated(
@@ -492,7 +482,7 @@ export async function onTransactionTerminated(
   }
 
   if (opts.candidatesRemain) {
-    // ★ The item stays exactly where it is. promoteNextCandidate re-links the holding.
+    // ★ The item stays exactly where it is. Auction runner-up promotion re-links it.
     await tx
       .update(custodyHoldings)
       .set({ currentTransactionId: null, updatedAt: sql`now()` })
@@ -515,7 +505,6 @@ export interface StoreBoardRow {
   holdingId: string;
   listingId: string;
   listingTitle: string;
-  sizeClass: SizeClass;
   state: CustodyState;
   sellerName: string;
   buyerName: string | null;
@@ -536,8 +525,8 @@ export interface StoreBoardRow {
 
 /**
  * The store's audit/control log. This IS the product for stores — given away free,
- * because their pain is abuse (bulky items, indefinite storage, no idea what is paid),
- * not a missing fee.
+ * because their pain is abuse, indefinite storage, and no idea what is paid, not a
+ * missing fee.
  */
 export async function storeBoard(tx: DbOrTx, storeId: string): Promise<StoreBoardRow[]> {
   const rows = await tx
@@ -581,7 +570,6 @@ export async function storeBoard(tx: DbOrTx, storeId: string): Promise<StoreBoar
     holdingId: r.h.id,
     listingId: r.h.listingId,
     listingTitle: r.listingTitle,
-    sizeClass: r.h.sizeClass,
     state: r.h.state,
     sellerName: r.sellerName,
     buyerName: r.buyerId === null ? null : (buyerNames.get(r.buyerId) ?? null),

@@ -61,7 +61,7 @@ export function SaleTypeFields({
           </label>
         </>
       ) : (
-        <div className="form-grid form-grid--three">
+        <div className="form-grid form-grid--three sale-type-auction-fields">
           <div className="form-field">
             <label className="sr-only" htmlFor="startBid">Starting bid</label>
             <div className="money-input"><span>TT$</span><input id="startBid" name="startBid" type="text" inputMode="decimal" placeholder="Starting bid" required /></div>
@@ -71,8 +71,9 @@ export function SaleTypeFields({
             <div className="money-input"><span>TT$</span><input id="buyout" name="buyout" type="text" inputMode="decimal" placeholder="Buyout (optional)" /></div>
           </div>
           <div className="form-field">
-            <label className="sr-only" htmlFor="durationHours">Duration</label>
-            <select id="durationHours" name="durationHours" defaultValue="48" aria-label="Auction duration">
+            <label className="sr-only" htmlFor="durationHours">Auction duration</label>
+            <select id="durationHours" name="durationHours" defaultValue="" required aria-label="Auction duration">
+              <option value="" hidden>Select auction length</option>
               <option value="24">1 day</option>
               <option value="48">2 days</option>
               <option value="72">3 days</option>

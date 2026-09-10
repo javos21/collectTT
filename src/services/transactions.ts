@@ -98,6 +98,8 @@ export interface OpenTransactionInput {
   buyerId: string;
   amountCents: number;
   fulfillmentPath: FulfillmentPath;
+  /** Exact admin-managed delivery choice; null for legacy records. */
+  deliveryOptionId?: string | null;
   source: TransactionSource;
   claimId?: string | null;
   winningBidId?: string | null;
@@ -121,7 +123,7 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
   const now = await dbNow(tx);
   const deadlines = computeDeadlines(input.fulfillmentPath, now, input.paymentWindowHours);
 
-  // Attempt numbers are unique per listing; a promotion opens the next one.
+  // Attempt numbers are unique per listing; an auction runner-up opens the next one.
   const prior = await tx
     .select({ n: sql<number>`coalesce(max(${transactions.attemptNumber}), 0)` })
     .from(transactions)
@@ -141,6 +143,7 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
       offerId: input.offerId ?? null,
       amountCents: input.amountCents,
       fulfillmentPath: input.fulfillmentPath,
+      deliveryOptionId: input.deliveryOptionId ?? null,
       settlementMethod: input.settlementMethod ?? null,
       state: 'open',
       paymentState: 'pending',
@@ -157,18 +160,11 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
   //   case — openOrRelinkHolding re-links the existing holding instead of creating a
   //   second one, because custody follows the item and the item has not moved.
   if (usesCustodyTrack(input.fulfillmentPath)) {
-    const sizeRows = await tx
-      .select({ sizeClass: listings.sizeClass })
-      .from(listings)
-      .where(eq(listings.id, input.listingId))
-      .limit(1);
-
     await openOrRelinkHolding({
       tx,
       listingId: input.listingId,
       transactionId: created.id,
       path: input.fulfillmentPath as 'relay' | 'full_service',
-      sizeClass: sizeRows[0]?.sizeClass ?? 'small',
       storeId: input.relayStoreId ?? null,
     });
   }
@@ -521,27 +517,6 @@ export async function completeIfBothTracksDone(tx: Tx, transactionId: string): P
     })
     .where(eq(listings.id, row.listingId));
 
-  // Any still-queued backup claimers are now moot.
-  const queuedClaims = await tx
-    .select({ id: claims.id, claimantId: claims.claimantId })
-    .from(claims)
-    .where(and(eq(claims.listingId, row.listingId), eq(claims.status, 'queued')));
-  await tx
-    .update(claims)
-    .set({ status: 'superseded' })
-    .where(and(eq(claims.listingId, row.listingId), eq(claims.status, 'queued')));
-
-  for (const claim of queuedClaims) {
-    await notify({
-      tx,
-      userId: claim.claimantId,
-      event: 'claim_superseded_buyer',
-      data: { listingTitle: row.listingTitle },
-      linkUrl: `/listings/${row.listingId}`,
-      idempotencyKey: `claim_superseded:${transactionId}:${claim.id}`,
-    });
-  }
-
   // Completion is the final authority for the listing. Resolve any pending offers
   // that survived an older or unusual path so buyers cannot see stale actions after
   // the item is complete.
@@ -587,13 +562,13 @@ export interface TerminateInput {
   reason: TerminationReason;
   actorRole: ActorRole;
   actorUserId?: string | null;
-  /** Skip promoting the next candidate (used when the seller is at fault). */
+  /** Skip auction runner-up promotion when the seller is at fault. */
   promoteNext?: boolean;
 }
 
 /**
- * End a transaction attempt unsuccessfully, record the objective facts, and hand the
- * listing to the next candidate if there is one.
+ * End a transaction attempt unsuccessfully, record the objective facts, and either
+ * hand an auction to its next bid or return a fixed-price listing to the seller.
  *
  * IDEMPOTENT: the conditional UPDATE means a duplicate job delivery no-ops.
  */
@@ -650,7 +625,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
     await evaluateRestrictions(tx, fact.user);
   }
 
-  // ---- close out the claim row, if this came from the claim stack
+  // ---- close out the fixed-price claim row, if this transaction came from a claim
   if (row.claimId !== null) {
     await tx
       .update(claims)
@@ -687,13 +662,21 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
     });
   }
 
-  // ---- hand on to the next candidate, unless the seller was at fault
-  const shouldPromote = input.promoteNext ?? toState === 'reneged_buyer';
+  const listingRows = await tx
+    .select({ saleType: listings.saleType, autoRelistOnRenege: listings.autoRelistOnRenege })
+    .from(listings)
+    .where(eq(listings.id, row.listingId))
+    .limit(1);
+  const listing = listingRows[0];
+  const isAuction = listing?.saleType === 'auction';
 
-  // ★ Decide what happens to the ITEM. If a promotion is coming, the item stays exactly
-  //   where it is and simply unlinks from this dead attempt — the whole point of
-  //   attaching custody to the listing. If nothing is coming, resolveListingAfterFailure
-  //   sends it back to the seller.
+  // Fixed-price claims never promote another claimant. Auction winners still walk the bid
+  // ladder when the buyer reneges, preserving the existing runner-up behavior.
+  const shouldPromote = isAuction && (input.promoteNext ?? toState === 'reneged_buyer');
+
+  // If an auction promotion is coming, custody stays with the item and is re-linked by
+  // the promotion job. A fixed-price failure has no next candidate, so the item returns
+  // to the seller and may be relisted according to their setting.
   await onTransactionTerminated(tx, transactionId, { candidatesRemain: shouldPromote });
 
   if (shouldPromote) {
@@ -704,7 +687,11 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
       { jobKey: `promote:${transactionId}` },
     );
   } else {
-    await resolveListingAfterFailure(tx, row.listingId, false);
+    await resolveListingAfterFailure(
+      tx,
+      row.listingId,
+      !isAuction && toState === 'reneged_buyer' ? (listing?.autoRelistOnRenege ?? false) : false,
+    );
   }
 
   return true;
@@ -713,9 +700,8 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
 // ---------------------------------------------------------------- promotion
 
 /**
- * ★ One algorithm, two ladders. A straight sale walks the claim stack by position; an
- *   auction walks the bid ladder by amount. Everything downstream of "who is next" is
- *   identical, which is why a reneged auction winner costs no extra machinery.
+ * Auction runner-up promotion walks the bid ladder by amount. Fixed-price claims have
+ * no fallback candidate; a failed attempt relists (or ends) the item instead.
  */
 export async function promoteNextCandidate(
   tx: Tx,
@@ -725,6 +711,29 @@ export async function promoteNextCandidate(
   const listingRows = await tx.select().from(listings).where(eq(listings.id, listingId)).limit(1);
   const listing = listingRows[0];
   if (listing === undefined) return { promoted: false };
+  if (listing.saleType !== 'auction') {
+    // Legacy queue jobs can still exist during rollout. Consume only a job for a
+    // terminal failed attempt on a still-claimed listing; never let a stale delivery
+    // relist an open deal or open a second fixed-price transaction.
+    if (listing.status !== 'claimed') return { promoted: false };
+    const failedRows = await tx
+      .select({ listingId: transactions.listingId, state: transactions.state })
+      .from(transactions)
+      .where(eq(transactions.id, failedTransactionId))
+      .limit(1);
+    const failed = failedRows[0];
+    if (failed === undefined || failed.listingId !== listingId || failed.state === 'open') {
+      return { promoted: false };
+    }
+    const openRows = await tx
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(and(eq(transactions.listingId, listingId), eq(transactions.state, 'open')))
+      .limit(1);
+    if (openRows[0] !== undefined) return { promoted: false };
+    await resolveListingAfterFailure(tx, listingId, listing.autoRelistOnRenege);
+    return { promoted: false };
+  }
 
   // Nothing to do if a later attempt is already open (duplicate job delivery).
   const openRows = await tx
@@ -747,17 +756,14 @@ export async function promoteNextCandidate(
     );
   const excluded = new Set(failed.map((f) => f.buyerId));
 
-  // ★ A promotion runs inside a JOB. Custody can refuse to open — the nominated store
-  //   was deactivated (the spec's designated way to take a shop offline), or it no
-  //   longer accepts this size. That refusal must not fail the job: a retried-to-death
+  // ★ A promotion runs inside a JOB. Custody can refuse to open when the nominated store
+  //   was deactivated (the spec's designated way to take a shop offline). That refusal
+  //   must not fail the job: a retried-to-death
   //   promotion strands the listing with no open attempt and nobody notified. So each
   //   candidate is attempted in its own SAVEPOINT, and a custody refusal moves to the
   //   next candidate instead of propagating. Anything else still throws.
   for (;;) {
-    const candidate =
-      listing.saleType === 'straight_sale'
-        ? await nextFromClaimStack(tx, listingId, excluded)
-        : await nextFromBidLadder(tx, listingId, excluded);
+    const candidate = await nextFromBidLadder(tx, listingId, excluded);
 
     if (candidate === null) {
       await resolveListingAfterFailure(tx, listingId, listing.autoRelistOnRenege);
@@ -766,24 +772,6 @@ export async function promoteNextCandidate(
 
     try {
       const transactionId = await tx.transaction(async (sp) => {
-        if (candidate.claimId !== undefined) {
-          // A promoted backup becomes the new first claimant. Re-number the remaining
-          // live queue behind them so a failed first claim frees the third slot for a
-          // new buyer instead of leaving a misleading historical position gap.
-          await sp
-            .update(claims)
-            .set({ status: 'active', position: 1 })
-            .where(eq(claims.id, candidate.claimId));
-          const remaining = await sp
-            .select({ id: claims.id })
-            .from(claims)
-            .where(and(eq(claims.listingId, listingId), eq(claims.status, 'queued')))
-            .orderBy(claims.position);
-          for (const [index, queued] of remaining.entries()) {
-            await sp.update(claims).set({ position: index + 2 }).where(eq(claims.id, queued.id));
-          }
-        }
-
         const opened = await openTransaction({
           tx: sp,
           listingId,
@@ -791,28 +779,21 @@ export async function promoteNextCandidate(
           buyerId: candidate.buyerId,
           amountCents: candidate.amountCents,
           fulfillmentPath: candidate.fulfillmentPath,
-          source: listing.saleType === 'straight_sale' ? 'claim_promotion' : 'auction_runner_up',
-          claimId: candidate.claimId ?? null,
-          winningBidId: candidate.bidId ?? null,
+          deliveryOptionId: candidate.deliveryOptionId ?? null,
+          source: 'auction_runner_up',
+          winningBidId: candidate.bidId,
           listingTitle: listing.title,
           paymentWindowHours: listing.paymentWindowHours,
           settlementMethod: candidate.settlementMethod,
           relayStoreId: candidate.relayStoreId ?? null,
         });
 
-        if (candidate.claimId !== undefined) {
-          await sp
-            .update(claims)
-            .set({ transactionId: opened.id })
-            .where(eq(claims.id, candidate.claimId));
-        }
-
-        // A promoted candidate gets a distinct, louder notification than a first
-        // claimer: they were not expecting this, and their clock is already running.
+        // A runner-up gets a distinct notification: they were not expecting this, and
+        // their payment clock starts when the promotion opens.
         await notify({
           tx: sp,
           userId: candidate.buyerId,
-          event: 'claim_promoted_buyer',
+          event: 'auction_runner_up_buyer',
           data: {
             listingTitle: listing.title,
             deadline: (await load(sp, opened.id)).paymentDeadlineAt.toLocaleString('en-TT'),
@@ -855,47 +836,12 @@ interface Candidate {
   buyerId: string;
   amountCents: number;
   fulfillmentPath: FulfillmentPath;
+  deliveryOptionId?: string | null;
   /** The candidate's own payment choice, retained through promotion. */
   settlementMethod?: SettlementMethod | null;
-  /** The promoted claimer's OWN store choice, not the person's ahead of them. */
+  /** The runner-up's own store choice, not the winner's. */
   relayStoreId?: string | null;
-  claimId?: string;
-  bidId?: string;
-}
-
-async function nextFromClaimStack(
-  tx: Tx,
-  listingId: string,
-  excluded: Set<string>,
-): Promise<Candidate | null> {
-  const rows = await tx
-    .select()
-    .from(claims)
-    .where(and(eq(claims.listingId, listingId), eq(claims.status, 'queued')))
-    .orderBy(claims.position);
-
-  const listingRows = await tx
-    .select({ priceCents: listings.priceCents, settlementMethods: listings.settlementMethods })
-    .from(listings)
-    .where(eq(listings.id, listingId))
-    .limit(1);
-  const price = listingRows[0]?.priceCents;
-  if (price === null || price === undefined) return null;
-
-  for (const row of rows) {
-    if (excluded.has(row.claimantId)) continue;
-    return {
-      buyerId: row.claimantId,
-      amountCents: price,
-      fulfillmentPath: row.fulfillmentPath,
-      settlementMethod:
-        (row.settlementMethod as SettlementMethod | null) ??
-        (listingRows[0]?.settlementMethods[0] as SettlementMethod | undefined),
-      relayStoreId: row.relayStoreId,
-      claimId: row.id,
-    };
-  }
-  return null;
+  bidId: string;
 }
 
 async function nextFromBidLadder(
@@ -928,10 +874,11 @@ async function nextFromBidLadder(
     return {
       buyerId: row.bidderId,
       amountCents: row.amountCents,
-      // ★ The bidder's OWN choice, mirroring how the claim stack has always worked.
-      //   Falls back to the first store-free declared path only for bids placed before
+      // ★ The bidder's OWN choice. Falls back to the first store-free declared path
+      //   only for bids placed before
       //   Phase 2, which carry neither a path nor a store — see fallbackFulfillmentPath.
       fulfillmentPath: row.fulfillmentPath ?? fallbackFulfillmentPath(listing.paths),
+      deliveryOptionId: row.deliveryOptionId,
       settlementMethod:
         (row.settlementMethod as SettlementMethod | null) ??
         (listing.settlementMethods[0] as SettlementMethod | undefined),
@@ -1002,7 +949,7 @@ async function resolveListingAfterFailure(
       status,
       activeTransactionId: null,
       resolvedAt: status === 'active' ? null : sql`now()`,
-      // A relisted straight sale starts a fresh stack.
+      // A relisted straight sale starts a fresh, winner-only claim attempt.
       updatedAt: sql`now()`,
     })
     .where(eq(listings.id, listingId));

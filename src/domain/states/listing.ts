@@ -46,8 +46,8 @@ export const LISTING_TRANSITIONS = {
   // 'claimed' covers both a straight-sale claim and an auction that resolved to a
   // winner but has not completed yet.
   active: ['claimed', 'ended_won', 'ended_no_sale', 'cancelled', 'expired'],
-  // A failed attempt with candidates left keeps the listing here; with none left it
-  // either returns to the shelf or gives up.
+  // A failed auction attempt with bids left keeps the listing here; with none left it
+  // either returns to the shelf or gives up. Fixed-price failures have no next claimant.
   claimed: ['active', 'ended_won', 'ended_no_sale', 'cancelled'],
   ended_won: [],
   ended_no_sale: ['active'], // seller may relist
@@ -121,10 +121,6 @@ export function statusAfterFailedAttempt(opts: {
   if (opts.hasRemainingCandidates) return 'claimed';
   return opts.autoRelistOnRenege ? 'active' : 'ended_no_sale';
 }
-
-export const SIZE_CLASSES = ['small', 'medium', 'large', 'oversize'] as const;
-
-export type SizeClass = (typeof SIZE_CLASSES)[number];
 
 export class IllegalListingTransitionError extends Error {
   constructor(

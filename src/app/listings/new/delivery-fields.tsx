@@ -2,51 +2,38 @@
 
 import { useState } from 'react';
 
-import { FULFILLMENT_PATHS } from '@/domain/states/transaction';
-
-const PATH_LABELS: Record<string, { title: string; detail: string }> = {
-  cash_meetup: { title: 'Meet in person', detail: 'Meet in a safe public place.' },
-  remote_ship: { title: 'Seller ships to buyer', detail: 'You arrange shipping.' },
-  relay: { title: 'Pick up at a store', detail: 'Buyer collects from a selected store.' },
-  full_service: { title: 'CollectTT delivery', detail: 'CollectTT handles delivery.' },
-};
-
 type RelayStore = { id: string; name: string; area: string };
+type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; defaultDays: number };
 
 export function DeliveryFields({
+  deliveryOptions,
   relayStoreOptions,
-  fullServiceDefaultDays,
 }: {
+  deliveryOptions: readonly DeliveryOption[];
   relayStoreOptions: RelayStore[];
-  fullServiceDefaultDays: number;
 }) {
-  const [relaySelected, setRelaySelected] = useState(false);
-  const [selectedPaths, setSelectedPaths] = useState<string[]>(['cash_meetup']);
-
-  const defaultDays: Record<string, number> = {
-    cash_meetup: 2,
-    remote_ship: 5,
-    relay: 5,
-    full_service: fullServiceDefaultDays,
-  };
+  const defaultOption = deliveryOptions[0];
+  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>(defaultOption === undefined ? [] : [defaultOption.id]);
+  const storeOptionSelected = deliveryOptions.some((option) => option.requiresStore && selectedOptionIds.includes(option.id));
 
   return (
     <>
       <div className="choice-grid">
-        {FULFILLMENT_PATHS.map((path) => (
-          <label className="choice-card" key={path} htmlFor={`path_${path}`}>
+        {deliveryOptions.map((option) => (
+          <label className="choice-card" key={option.id} htmlFor={`delivery_${option.id}`}>
             <input
-              id={`path_${path}`}
+              id={`delivery_${option.id}`}
               type="checkbox"
-              name="fulfillmentPaths"
-              value={path}
-              defaultChecked={path === 'cash_meetup'}
+              name="deliveryOptionIds"
+              value={option.id}
+              defaultChecked={option.id === defaultOption?.id}
               onChange={(event) => {
-                setSelectedPaths((current) => event.target.checked ? [...current, path] : current.filter((item) => item !== path));
-                if (path === 'relay') setRelaySelected(event.target.checked);
+                setSelectedOptionIds((current) => event.target.checked
+                  ? [...current, option.id]
+                  : current.filter((item) => item !== option.id));
               }}
             />
-            <span><strong>{PATH_LABELS[path]?.title}</strong><small>{PATH_LABELS[path]?.detail}</small></span>
+            <span><strong>{option.label}</strong><small>{option.description}</small></span>
           </label>
         ))}
       </div>
@@ -54,17 +41,17 @@ export function DeliveryFields({
       <div className="delivery-estimates">
         <h3>Expected delivery</h3>
         <p className="form-note">Tell buyers how long each selected option normally takes.</p>
-        {FULFILLMENT_PATHS.filter((path) => selectedPaths.includes(path)).map((path) => (
-          <div className="form-field form-field--compact" key={path}>
-            <label htmlFor={`deliveryEstimate__${path}`}>{PATH_LABELS[path]?.title}</label>
-            <select id={`deliveryEstimate__${path}`} name={`deliveryEstimate__${path}`} defaultValue={String(defaultDays[path] ?? 5)} required>
+        {deliveryOptions.filter((option) => selectedOptionIds.includes(option.id)).map((option) => (
+          <div className="form-field form-field--compact" key={option.id}>
+            <label htmlFor={`deliveryEstimate__${option.id}`}>{option.label}</label>
+            <select id={`deliveryEstimate__${option.id}`} name={`deliveryEstimate__${option.id}`} defaultValue={String(option.defaultDays)} required>
               {[1, 2, 3, 5, 7, 10, 14, 21, 30].map((days) => <option key={days} value={days}>Within {days} day{days === 1 ? '' : 's'}</option>)}
             </select>
           </div>
         ))}
       </div>
 
-      {relaySelected && relayStoreOptions.length > 0 && (
+      {storeOptionSelected && relayStoreOptions.length > 0 && (
         <div className="conditional-field">
           <h3>Choose stores</h3>
           <div className="choice-grid choice-grid--stores">
@@ -78,7 +65,7 @@ export function DeliveryFields({
         </div>
       )}
 
-      {relaySelected && relayStoreOptions.length === 0 && (
+      {storeOptionSelected && relayStoreOptions.length === 0 && (
         <p className="form-note">Store pickup is unavailable until a store is added.</p>
       )}
     </>

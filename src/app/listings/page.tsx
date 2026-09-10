@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { BadgeCheck, Clock3, UserRound } from 'lucide-react';
 
-import { browseListings, BROWSE_SORTS, SETTLEMENT_METHODS, type BrowseSort } from '@/services/listings';
-import { CATEGORY_LIST, isCategoryKey } from '@/domain/categories/definitions';
-import { filtersFor, coerceFilters } from '@/domain/categories/filters';
+import { browseListings, BROWSE_SORTS, type BrowseSort } from '@/services/listings';
+import { filtersForDefinition, coerceFiltersForDefinition } from '@/domain/categories/filters';
 import { formatMoney } from '@/domain/money';
-import { FULFILLMENT_PATHS, type FulfillmentPath } from '@/domain/states/transaction';
 import { FilterPanel } from './filter-panel';
+import { listMarketplaceOptions } from '@/services/platform-settings';
+import { activeCategoryDefinitions } from '@/services/catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,19 +23,9 @@ const PAYMENT_LABELS: Record<string, string> = {
   wam: 'WAM',
 };
 
-type SettlementMethod = (typeof SETTLEMENT_METHODS)[number];
-
 function stringValues(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) return value;
   return value === undefined ? [] : [value];
-}
-
-function isFulfillmentPath(value: string): value is FulfillmentPath {
-  return FULFILLMENT_PATHS.includes(value as FulfillmentPath);
-}
-
-function isSettlementMethod(value: string): value is SettlementMethod {
-  return SETTLEMENT_METHODS.includes(value as SettlementMethod);
 }
 
 function labelList(values: readonly string[], labels: Record<string, string>): string {
@@ -71,9 +61,17 @@ export default async function BrowsePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const [availableDeliveryOptions, availablePaymentOptions, availableCategories] = await Promise.all([
+    listMarketplaceOptions('delivery', { activeOnly: true }),
+    listMarketplaceOptions('payment', { activeOnly: true }),
+    activeCategoryDefinitions(),
+  ]);
   const query = typeof params.q === 'string' ? params.q.trim() : '';
-  const selectedCategories = stringValues(params.category).filter(isCategoryKey);
+  const categoryKeys = new Set(availableCategories.map((category) => category.key));
+  const categoryLabels = new Map(availableCategories.map((category) => [category.key, category.label]));
+  const selectedCategories = stringValues(params.category).filter((value) => categoryKeys.has(value));
   const activeCategory = selectedCategories.length === 1 ? selectedCategories[0] : undefined;
+  const activeCategoryDefinition = availableCategories.find((category) => category.key === activeCategory);
   const requestedSaleType =
     params.saleType === 'straight_sale' || params.saleType === 'auction'
       ? params.saleType
@@ -81,8 +79,10 @@ export default async function BrowsePage({
   // A search launched from the homepage should search the complete catalog. Keep
   // straight sales as the default only for an unfiltered visit to /listings.
   const saleType = requestedSaleType ?? (query === '' ? 'straight_sale' : undefined);
-  const delivery = stringValues(params.delivery).filter(isFulfillmentPath);
-  const payment = stringValues(params.payment).filter(isSettlementMethod);
+  const deliveryIds = new Set(availableDeliveryOptions.map((option) => option.id));
+  const paymentKeys = new Set(availablePaymentOptions.map((option) => option.key));
+  const delivery = stringValues(params.delivery).filter((value) => deliveryIds.has(value));
+  const payment = stringValues(params.payment).filter((value) => paymentKeys.has(value));
   const sort = BROWSE_SORTS.includes(params.sort as BrowseSort)
     ? (params.sort as BrowseSort)
     : 'newest';
@@ -100,21 +100,21 @@ export default async function BrowsePage({
   // cannot smuggle arbitrary JSONB predicates in), and each value is coerced to the
   // JSON type it is actually stored as — containment is type-strict.
   const raw: Record<string, string | undefined> = {};
-  if (activeCategory !== undefined) {
-    for (const filter of filtersFor(activeCategory)) {
+  if (activeCategoryDefinition !== undefined) {
+    for (const filter of filtersForDefinition(activeCategoryDefinition)) {
       const value = params[`attr_${filter.key}`];
       if (typeof value === 'string' && value !== '') raw[filter.key] = value;
     }
   }
   const attributes =
-    activeCategory !== undefined ? coerceFilters(activeCategory, raw) : {};
+    activeCategoryDefinition !== undefined ? coerceFiltersForDefinition(activeCategoryDefinition, raw) : {};
 
   const { rows, total, pageSize } = await browseListings({
     ...(query !== '' ? { query } : {}),
     ...(selectedCategories.length > 0 ? { categories: selectedCategories } : {}),
     ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
     ...(saleType !== undefined ? { saleType } : {}),
-    ...(delivery.length > 0 ? { fulfillmentPaths: delivery } : {}),
+    ...(delivery.length > 0 ? { deliveryOptionIds: delivery } : {}),
     ...(payment.length > 0 ? { settlementMethods: payment } : {}),
     ...(minPriceCents !== undefined ? { minPriceCents } : {}),
     ...(maxPriceCents !== undefined ? { maxPriceCents } : {}),
@@ -128,7 +128,7 @@ export default async function BrowsePage({
   const browseHref = (overrides: {
     saleType?: 'straight_sale' | 'auction' | null;
     sort?: BrowseSort | null;
-    delivery?: readonly FulfillmentPath[] | null;
+    delivery?: readonly string[] | null;
     payment?: readonly string[] | null;
     minPrice?: string | null;
     maxPrice?: string | null;
@@ -158,7 +158,7 @@ export default async function BrowsePage({
   };
   const pageHref = (n: number) => browseHref({ page: n });
 
-  const activeFilters = activeCategory !== undefined ? filtersFor(activeCategory) : [];
+  const activeFilters = activeCategoryDefinition !== undefined ? filtersForDefinition(activeCategoryDefinition) : [];
 
   const hasActiveFilters =
     query !== '' || selectedCategories.length > 0 || delivery.length > 0 || payment.length > 0 ||
@@ -196,7 +196,7 @@ export default async function BrowsePage({
             {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
             <fieldset className="filter-checklist">
               <legend>Category</legend>
-              {CATEGORY_LIST.map((c) => (
+              {availableCategories.map((c) => (
                 <label key={c.key}>
                   <input type="checkbox" name="category" value={c.key} defaultChecked={selectedCategories.includes(c.key as (typeof selectedCategories)[number])} />
                   <span>{c.label}</span>
@@ -206,20 +206,20 @@ export default async function BrowsePage({
 
             <fieldset className="filter-checklist">
               <legend>Delivery</legend>
-              {FULFILLMENT_PATHS.map((path) => (
-                <label key={path}>
-                  <input type="checkbox" name="delivery" value={path} defaultChecked={delivery.includes(path)} />
-                  <span>{PATH_LABELS[path]}</span>
+              {availableDeliveryOptions.map((option) => (
+                <label key={option.id}>
+                  <input type="checkbox" name="delivery" value={option.id} defaultChecked={delivery.includes(option.id)} />
+                  <span>{option.label}</span>
                 </label>
               ))}
             </fieldset>
 
             <fieldset className="filter-checklist">
               <legend>Payment</legend>
-              {SETTLEMENT_METHODS.map((method) => (
-                <label key={method}>
-                  <input type="checkbox" name="payment" value={method} defaultChecked={payment.includes(method)} />
-                  <span>{PAYMENT_LABELS[method] ?? method}</span>
+              {availablePaymentOptions.map((option) => (
+                <label key={option.key}>
+                  <input type="checkbox" name="payment" value={option.key} defaultChecked={payment.includes(option.key)} />
+                  <span>{option.label}</span>
                 </label>
               ))}
             </fieldset>
@@ -298,11 +298,15 @@ export default async function BrowsePage({
             <>
               <div className="catalog-results-grid">
                 {rows.map((row) => {
-                  const deliveryOptions = labelList(row.fulfillmentPaths, PATH_LABELS);
+                  const deliveryOptions = row.deliveryOptionLabels.length > 0
+                    ? row.deliveryOptionLabels.join(', ')
+                    : labelList(row.fulfillmentPaths, PATH_LABELS);
                   const storeOptions = row.fulfillmentPaths.includes('relay')
                     ? (row.relayStoreNames ?? []).join(', ') || 'None'
                     : 'None';
-                  const paymentOptions = labelList(row.settlementMethods, PAYMENT_LABELS);
+                  const paymentOptions = row.paymentOptionLabels.length > 0
+                    ? row.paymentOptionLabels.join(', ')
+                    : labelList(row.settlementMethods, PAYMENT_LABELS);
                   return (
                   <article className="catalog-card" key={row.id}>
                     <Link className="catalog-card__image" href={`/listings/${row.id}`} aria-label={`View ${row.title}`}>
@@ -311,7 +315,7 @@ export default async function BrowsePage({
                     <div className="catalog-card__body">
                       <div className="catalog-card__heading">
                         <h3><Link href={`/listings/${row.id}`}>{row.title}</Link></h3>
-                        <span className={`pill tag tag--${row.category}`}>{row.category.replace('_', ' ')}</span>
+                        <span className={`pill tag tag--${row.category}`}>{categoryLabels.get(row.category) ?? row.category.replace('_', ' ')}</span>
                       </div>
                       <div className="catalog-card__seller">
                         <UserRound aria-hidden="true" />
@@ -335,9 +339,6 @@ export default async function BrowsePage({
                           {row.saleType === 'straight_sale' && row.acceptsOffers && (
                             <span className="catalog-card__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
                           )}
-                          {row.saleType === 'straight_sale' && row.liveClaimCount > 0 && (
-                            <span className="catalog-card__offers">First claim in progress</span>
-                          )}
                           {row.saleType === 'auction' && <small>{row.bidCount} bid{row.bidCount === 1 ? '' : 's'}</small>}
                           {row.saleType === 'auction' && (
                             <span className={`catalog-card__time catalog-card__time--${auctionUrgency(row.endsAt)}`}>
@@ -345,7 +346,7 @@ export default async function BrowsePage({
                             </span>
                           )}
                         </div>
-                        <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : row.liveClaimCount > 0 ? 'Join queue' : 'View listing'}</Link>
+                        <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : 'View listing'}</Link>
                       </div>
                     </div>
                   </article>

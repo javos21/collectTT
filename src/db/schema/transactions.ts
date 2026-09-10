@@ -28,6 +28,7 @@ import {
 import { profiles } from './profiles';
 import { listings, claims, bids } from './listings';
 import { relayStores, custodyHoldings } from './custody';
+import { marketplaceOptions } from './settings';
 import {
   transactionStateEnum,
   paymentStateEnum,
@@ -65,6 +66,7 @@ export const transactions = pgTable(
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     currency: char('currency', { length: 3 }).notNull().default('TTD'),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
+    deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
     /** The buyer's selected payment method. Nullable for transactions opened before this field existed. */
     settlementMethod: text('settlement_method'),
 
@@ -113,11 +115,6 @@ export const transactions = pgTable(
 
     check('tx_distinct_parties', sql`${t.buyerId} <> ${t.sellerId}`),
     check('tx_positive_amount', sql`${t.amountCents} > 0`),
-    check(
-      'tx_settlement_method_valid',
-      sql`${t.settlementMethod} is null or ${t.settlementMethod} in ('cash', 'bank_transfer', 'linx', 'other')`,
-    ),
-
     // ★ P2P paths never touch the custody track.
     check(
       'tx_p2p_no_custody',

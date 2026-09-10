@@ -2,8 +2,7 @@
  * PHASE 2 CUSTODY FLOW TESTS.
  *
  * The physical half of a deal: drop-off, the payment-gated release, collection,
- * return-to-seller, and the re-link that lets a promoted buyer inherit an item that
- * never moved.
+ * return-to-seller, and the auction runner-up custody path.
  *
  * Requires the local database: `docker compose up -d && npm run setup`.
  */
@@ -75,7 +74,6 @@ async function makeRelayListing(over: Partial<typeof listings.$inferInsert> = {}
       priceCents: 10_000,
       fulfillmentPaths: ['relay'],
       settlementMethods: ['cash'],
-      sizeClass: 'small',
       publishedAt: new Date(),
       ...over,
     })
@@ -92,7 +90,6 @@ beforeAll(async () => {
     .values({
       name: `Test Relay ${SUFFIX}`,
       area: 'Port of Spain',
-      acceptsSizeClasses: ['small'],
       paidCustodyDays: 7,
       unpaidCustodyDays: 3,
     })
@@ -199,7 +196,7 @@ describe('drop-off code', () => {
     expect(holdings[0]!.dropoffCode).toMatch(/^CT-[A-Z2-9]{4}$/);
   });
 
-  it('survives a re-link unchanged — the code belongs to the item, not the buyer', async () => {
+  it('rejects a second fixed-price claim instead of creating a backup holding', async () => {
     const listingId = await makeRelayListing();
     const first = await claimListing({
       listingId,
@@ -207,13 +204,14 @@ describe('drop-off code', () => {
       fulfillmentPath: 'relay',
       relayStoreId: storeId,
     });
-    // A backup buyer is waiting, so the failed attempt is followed by a real promotion.
-    await claimListing({
-      listingId,
-      claimantId: buyerB,
-      fulfillmentPath: 'relay',
-      relayStoreId: storeId,
-    });
+    await expect(
+      claimListing({
+        listingId,
+        claimantId: buyerB,
+        fulfillmentPath: 'relay',
+        relayStoreId: storeId,
+      }),
+    ).rejects.toThrow(/just claimed/i);
 
     const before = await db
       .select()
@@ -221,39 +219,15 @@ describe('drop-off code', () => {
       .where(eq(custodyHoldings.listingId, listingId));
     const originalCode = before[0]!.dropoffCode;
 
-    // The item is on the shelf when the first buyer's window lapses.
+    // The item remains linked to the sole active claim.
     await db
       .update(custodyHoldings)
       .set({ state: 'at_relay', droppedOffAt: sql`now()` })
       .where(eq(custodyHoldings.id, before[0]!.id));
 
-    const { terminateTransaction } = await import('../../src/services/transactions');
-    await db.transaction(async (tx) => {
-      await terminateTransaction({
-        tx,
-        transactionId: first.transactionId!,
-        reason: 'non_payment',
-        actorRole: 'system',
-      });
-    });
-
-    // The backup is promoted: a new transaction, the same item, the same shelf.
-    const { promoteNextCandidate } = await import('../../src/services/transactions');
-    const promotion = await db.transaction((tx) =>
-      promoteNextCandidate(tx, listingId, first.transactionId!),
-    );
-    expect(promotion.promoted).toBe(true);
-
-    const after = await db
-      .select()
-      .from(custodyHoldings)
-      .where(eq(custodyHoldings.listingId, listingId));
-
-    expect(after).toHaveLength(1);
-    expect(after[0]!.id).toBe(before[0]!.id); // the same holding, re-linked
-    expect(after[0]!.currentTransactionId).toBe(promotion.transactionId);
-    expect(after[0]!.dropoffCode).toBe(originalCode);
-    expect(after[0]!.state).toBe('at_relay'); // the item did not move
+    expect(before).toHaveLength(1);
+    expect(before[0]!.currentTransactionId).toBe(first.transactionId);
+    expect(before[0]!.dropoffCode).toBe(originalCode);
   });
 
   it('gives up rather than looping forever when every attempt collides', async () => {
@@ -331,7 +305,6 @@ describe('relay store nomination', () => {
           priceCents: 5000,
           fulfillmentPaths: ['relay'],
           settlementMethods: ['cash'],
-          sizeClass: 'small',
           relayStoreIds: [],
           attributes: {},
         },
@@ -351,7 +324,6 @@ describe('relay store nomination', () => {
         priceCents: 5000,
         fulfillmentPaths: ['relay'],
         settlementMethods: ['cash'],
-        sizeClass: 'small',
         relayStoreIds: [storeId],
         attributes: {
           game: 'pokemon',
@@ -371,19 +343,7 @@ describe('relay store nomination', () => {
     expect(rows[0]!.storeId).toBe(storeId);
   });
 
-  describe('size class', () => {
-    it('refuses a store that does not accept the size class', async () => {
-      const bigListing = await makeRelayListing({ sizeClass: 'large' });
-      await expect(
-        claimListing({
-          listingId: bigListing,
-          claimantId: buyerA,
-          fulfillmentPath: 'relay',
-          relayStoreId: storeId, // accepts 'small' only
-        }),
-      ).rejects.toThrow(/accepts small items only/i);
-    });
-
+  describe('relay claim requirements', () => {
     it('refuses a relay claim with no store chosen', async () => {
       const listingId = await makeRelayListing();
       await expect(
@@ -393,26 +353,12 @@ describe('relay store nomination', () => {
   });
 
   describe('candidateStoresFor', () => {
-    it('excludes a store whose size classes do not accept the listing size', async () => {
-      const largeListingId = await makeRelayListing({ sizeClass: 'large' });
-      await db.insert(listingRelayStores).values({ listingId: largeListingId, storeId });
-
-      // The fixture store only accepts 'small' — a 'large' listing should see nothing.
-      const candidates = await candidateStoresFor(db, largeListingId, 'large');
-      expect(candidates).toHaveLength(0);
-
-      // Sanity check: the same store IS a candidate for a 'small' listing.
-      const smallCandidates = await candidateStoresFor(db, largeListingId, 'small');
-      expect(smallCandidates.map((s) => s.id)).toContain(storeId);
-    });
-
     it('excludes an inactive store', async () => {
       const inactiveStores = await db
         .insert(relayStores)
         .values({
           name: `Inactive Relay ${SUFFIX}`,
           area: 'San Fernando',
-          acceptsSizeClasses: ['small'],
           paidCustodyDays: 7,
           unpaidCustodyDays: 3,
           active: false,
@@ -421,13 +367,13 @@ describe('relay store nomination', () => {
       const inactiveStoreId = inactiveStores[0]!.id;
 
       try {
-        const listingId = await makeRelayListing({ sizeClass: 'small' });
+        const listingId = await makeRelayListing();
         await db.insert(listingRelayStores).values([
           { listingId, storeId },
           { listingId, storeId: inactiveStoreId },
         ]);
 
-        const candidates = await candidateStoresFor(db, listingId, 'small');
+        const candidates = await candidateStoresFor(db, listingId);
         const candidateIds = candidates.map((s) => s.id);
 
         expect(candidateIds).toContain(storeId);
@@ -717,7 +663,7 @@ describe('custody notification strings', () => {
     // Another store cannot see it.
     const otherStore = await db
       .insert(relayStores)
-      .values({ name: `Other ${SUFFIX}`, area: 'San Fernando', acceptsSizeClasses: ['small'] })
+      .values({ name: `Other ${SUFFIX}`, area: 'San Fernando' })
       .returning({ id: relayStores.id });
     expect(await findHoldingByCode(db, otherStore[0]!.id, code)).toBeNull();
     await db.delete(relayStores).where(eq(relayStores.id, otherStore[0]!.id));
@@ -735,7 +681,7 @@ describe('custody notification strings', () => {
     // only, per the brief's "one test" scope.
     const isolatedStore = await db
       .insert(relayStores)
-      .values({ name: `Board ${SUFFIX}`, area: 'San Fernando', acceptsSizeClasses: ['small'] })
+      .values({ name: `Board ${SUFFIX}`, area: 'San Fernando' })
       .returning({ id: relayStores.id });
     const isolatedStoreId = isolatedStore[0]!.id;
 
@@ -751,7 +697,6 @@ describe('custody notification strings', () => {
         holder: 'relay_store',
         storeId: isolatedStoreId,
         state: 'awaiting_dropoff',
-        sizeClass: 'small',
         dropoffCode,
       })
       .returning({ id: custodyHoldings.id });
@@ -831,7 +776,7 @@ describe('custody notification strings', () => {
     // rather than depending on what sibling tests happened to leave on the shared store.
     const isolatedStore = await db
       .insert(relayStores)
-      .values({ name: `Buyers ${SUFFIX}`, area: 'San Fernando', acceptsSizeClasses: ['small'] })
+      .values({ name: `Buyers ${SUFFIX}`, area: 'San Fernando' })
       .returning({ id: relayStores.id });
     const isolatedStoreId = isolatedStore[0]!.id;
 
@@ -901,7 +846,7 @@ describe('a deactivated store does not brick the jobs that depend on it', () => 
     //   `active` past its endsAt with no winner and nobody told.
     const dying = await db
       .insert(relayStores)
-      .values({ name: `Closing ${SUFFIX}`, area: 'Arima', acceptsSizeClasses: ['small'] })
+      .values({ name: `Closing ${SUFFIX}`, area: 'Arima' })
       .returning({ id: relayStores.id });
     const dyingStoreId = dying[0]!.id;
 
@@ -1040,7 +985,7 @@ describe('the full custody loop', () => {
 
   it('returns an unpaid item to the seller when the window lapses and nobody is left', async () => {
     const { markReceived } = await import('../../src/services/custody');
-    const { paymentWindowExpired, promoteNext } = await import(
+    const { paymentWindowExpired } = await import(
       '../../src/jobs/tasks/transaction-windows'
     );
     const { transactions } = await import('../../src/db/schema/transactions');
@@ -1048,7 +993,7 @@ describe('the full custody loop', () => {
       logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} },
     } as never;
 
-    // No backup claimer: this listing has exactly one candidate, so the stack empties.
+    // This listing has exactly one fixed-price claimant.
     const listingId = await makeRelayListing();
     const claim = await claimListing({
       listingId,
@@ -1080,25 +1025,14 @@ describe('the full custody loop', () => {
 
     await paymentWindowExpired({ transactionId: txId }, helpers);
 
-    // The buyer reneged. The item does NOT go back yet — terminateTransaction unlinks
-    // it and enqueues promote_next, because a backup might still be waiting.
+    // The buyer reneged. With no fixed-price backup queue, the item returns immediately.
     const midway = await db
       .select()
       .from(custodyHoldings)
       .where(eq(custodyHoldings.id, holdingId));
-    expect(midway[0]!.state).toBe('at_relay');
-    expect(midway[0]!.currentTransactionId).toBeNull();
-
-    // The promotion job is what discovers the stack is empty. Run it as the worker
-    // would; resolveListingAfterFailure then sends the stranded item home.
-    await promoteNext({ listingId, failedTransactionId: txId }, helpers);
-
-    const after = await db
-      .select()
-      .from(custodyHoldings)
-      .where(eq(custodyHoldings.id, holdingId));
-    expect(after[0]!.state).toBe('returned_to_seller');
-    expect(after[0]!.returnedAt).not.toBeNull();
+    expect(midway[0]!.state).toBe('returned_to_seller');
+    expect(midway[0]!.returnedAt).not.toBeNull();
+    expect(midway[0]!.currentTransactionId).toBe(txId);
 
     const failed = await db.select().from(transactions).where(eq(transactions.id, txId));
     expect(failed[0]!.state).toBe('reneged_buyer');

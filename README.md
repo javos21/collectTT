@@ -10,8 +10,9 @@ performed. See [product-design-document.md](product-design-document.md) for the 
 rationale.
 
 **Status: Phase 2 complete — Store custody is live.** A full deal now runs end to end,
-peer to peer: atomic claims with a backup queue, auctions with anti-snipe soft close,
-the mark-paid/confirm-received handshake, automatic renege-and-promote, objective
+peer to peer: atomic winner-only claims, auctions with anti-snipe soft close and
+runner-up promotion, the mark-paid/confirm-received handshake, automatic fixed-price
+relisting after a failed claim, objective
 reputation with automatic restrictions, and blind mutual ratings. On top of that the
 item track is real: a seller drops an item at a Store under a drop-off code, the Store
 holds it on a time-bounded shelf clock, and it is released to the buyer only once payment
@@ -57,12 +58,12 @@ mode, verification codes and password-reset links print in the terminal running
 ### Verifying it works
 
 ```bash
-npm test              # 175 tests: auth safety, state machine, categories, DB constraints,
+npm test              # 174 tests: auth safety, state machine, categories, DB constraints,
                       # trading flows, custody flows
 npm run typecheck
 npm run verify        # Phase 0 end-to-end: presign -> upload -> worker -> variants
 npm run verify:phase1 # Phase 1 end-to-end against the LIVE worker: auction close,
-                      # renege, runner-up promotion, backup-claim promotion
+                      # renege, auction runner-up promotion
 npm run verify:phase2 # Phase 2 end-to-end against the LIVE worker: claim -> drop-off
                       # code -> shelf clock -> overstay sweep -> store eviction notice
 ```
@@ -139,8 +140,8 @@ that can release an unpaid item.
 
 **2. Custody follows the ITEM; payment follows the TRANSACTION.**
 
-A `custody_holdings` row belongs to a *listing*. That is what lets a backup claimer be
-promoted while the item sits untouched on the shelf — the buyer changes, the holding
+A `custody_holdings` row belongs to a *listing*. That is what lets an auction runner-up
+be promoted while the item sits untouched on the shelf — the buyer changes, the holding
 re-links, the item never moves.
 
 **3. Adding a category requires no migration.**
@@ -171,8 +172,8 @@ is what the holding opens against. From there the item walks the custody states
 alphabet that omits `I`, `L`, `O`, `0` and `1`, so a misread character cannot resolve to
 a different real code. The seller quotes it at the counter and the clerk types it in; a
 buyer shows the same code back when collecting. The code belongs to the **item**, not to
-the buyer — when a buyer reneges and a backup is promoted, the holding re-links to the
-new attempt and the code on the parcel stays valid, because nothing physically moved. A
+the buyer — when an auction buyer reneges and a runner-up is promoted, the holding
+re-links to the new attempt and the code on the parcel stays valid, because nothing physically moved. A
 collision on insert is retried against a fresh code rather than handed to the clerk as
 an error.
 
@@ -264,7 +265,7 @@ Production authentication/email requires:
 
 - `APP_URL` and `BETTER_AUTH_URL` set to the canonical HTTPS origin;
 - `EMAIL_ADAPTER=brevo`, `BREVO_API_KEY`, and a verified `EMAIL_FROM` on the web service;
-- the same Brevo delivery settings on the worker for queued deal notifications; and
+- the same Brevo delivery settings on the worker for deal notifications; and
 - Brevo domain verification/DKIM/DMARC records published at the active DNS provider.
 
 ```bash
@@ -279,7 +280,7 @@ npm run db:migrate && npm run seed:categories   # after first deploy
 listing active
    │
    ├─ straight sale ──► ★ atomic claim (one conditional UPDATE picks the winner)
-   │                       everyone else joins the backup stack, depth 4
+   │                       everyone else receives a conflict; a later relist starts fresh
    │
    └─ auction ────────► bids on a total-ordered ladder; a bid inside the closing
                          window pushes the deadline out (soft close)
@@ -293,13 +294,13 @@ transaction opens ──► payment window starts, deadline jobs enqueued in the
    │
    └─ window lapses ──► reneged_buyer, fact recorded, restrictions re-evaluated
                           │
-                          ├─ next candidate exists ──► promoted at THEIR OWN price,
-                          │                             fresh window, seller does nothing
-                          └─ none left ──► relisted, or ended_no_sale
+                          ├─ auction runner-up exists ──► promoted at THEIR OWN price,
+                          │                                fresh window, seller does nothing
+                          └─ no candidate ──► relisted, or ended_no_sale
 ```
 
-The claim stack and the bid ladder are two ladders feeding **one** promotion algorithm,
-which is why a reneged auction winner costs no extra machinery.
+Only auctions use the promotion algorithm; fixed-price claims have one winner and a
+fresh relist when the seller allows it.
 
 ## What is built, and what is not
 
@@ -311,7 +312,8 @@ with in-app + console/Brevo email adapters · the full schema and state machine 
 later phase
 
 **Phase 1 — done**
-atomic straight-sale claim + backup-claim stack · auctions with anti-snipe soft close,
+atomic straight-sale winner-only claim · auctions with anti-snipe soft close and
+runner-up promotion,
 reserve and buyout · transaction lifecycle + mark-paid/confirm handshake with the
 dispute reversal · payment window → reneged → promote next candidate · symmetric seller
 deadlines · objective reputation events, counters and automatic restrictions · blind

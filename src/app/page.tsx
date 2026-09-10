@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, Gavel, Plus, Search, Store, Tag } from 'lucide-react';
 
-import { browseListings } from '@/services/listings';
+import { browseListings, recentlyClaimedListings } from '@/services/listings';
 import { HomeListingCarousel, type HomeListingRow } from './home-listing-carousel';
 
 export const dynamic = 'force-dynamic';
@@ -20,13 +20,32 @@ function toHomeListingRow(row: BrowseRow): HomeListingRow {
     endsAt: row.endsAt?.toISOString() ?? null,
     acceptsOffers: row.acceptsOffers,
     liveClaimCount: row.liveClaimCount,
+    claimedAt: null,
+  };
+}
+
+type RecentlyClaimedRow = Awaited<ReturnType<typeof recentlyClaimedListings>>[number];
+
+function toRecentlyClaimedRow(row: RecentlyClaimedRow): HomeListingRow {
+  return {
+    id: row.id,
+    title: row.title,
+    primaryImageId: row.primaryImageId,
+    saleType: 'straight_sale',
+    currentBidCents: null,
+    startBidCents: null,
+    priceCents: row.priceCents,
+    endsAt: null,
+    acceptsOffers: false,
+    liveClaimCount: 0,
+    claimedAt: row.claimedAt.toISOString(),
   };
 }
 
 export default async function HomePage() {
-  const [recentSale, lastChance, auctions] = await Promise.all([
+  const [recentSale, recentlyClaimed, auctions] = await Promise.all([
     browseListings({ saleType: 'straight_sale', surface: 'recent', pageSize: 16, sort: 'newest' }),
-    browseListings({ saleType: 'straight_sale', surface: 'last_chance', pageSize: 16, sort: 'newest' }),
+    recentlyClaimedListings(16),
     browseListings({ saleType: 'auction', pageSize: 16, sort: 'ending_soon' }),
   ]);
 
@@ -99,15 +118,15 @@ export default async function HomePage() {
         <p className="home-catalog-note"><span className="home-catalog-note__dot" aria-hidden="true" /> {total} active listing{total === 1 ? '' : 's'} across the catalog · secure local handoff options available</p>
       </section>
 
-      <section className="home-section home-section--recent" aria-labelledby="last-chance-title">
+      <section className="home-section home-section--recent" aria-labelledby="recently-claimed-title">
         <div className="home-section__heading">
-          <div><h2 id="last-chance-title">Last chance to claim</h2><p>These items have a claim in progress, but there is still room in the queue.</p></div>
+          <div><h2 id="recently-claimed-title">Recently Claimed</h2><p>See what collectors are picking up right now.</p></div>
           <Link href="/listings?saleType=straight_sale">See All <ArrowRight aria-hidden="true" /></Link>
         </div>
-        {lastChance.rows.length > 0 ? (
-          <HomeListingCarousel label="last chance to claim listings" rows={lastChance.rows.map(toHomeListingRow)} />
+        {recentlyClaimed.length > 0 ? (
+          <HomeListingCarousel label="recently claimed listings" rows={recentlyClaimed.map(toRecentlyClaimedRow)} />
         ) : (
-          <div className="home-empty"><strong>No last-chance listings right now.</strong><span>When a fixed-price item has one or two claims, it will appear here.</span></div>
+          <div className="home-empty"><strong>No recent claims yet.</strong><span>When collectors claim items, they will appear here.</span></div>
         )}
       </section>
 

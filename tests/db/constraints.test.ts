@@ -118,8 +118,8 @@ beforeAll(async () => {
   await createListing(ids.listing, ids.seller);
   await createListing(ids.listing2, ids.seller);
   await pool.query(
-    `insert into relay_stores (id, name, area, accepts_size_classes)
-     values ($1, 'Test Store', 'Port of Spain', ARRAY['small']::size_class[])`,
+    `insert into relay_stores (id, name, area)
+     values ($1, 'Test Store', 'Port of Spain')`,
     [ids.store],
   );
 });
@@ -175,11 +175,11 @@ describe('★ claims_one_active — exactly one live claimant per listing', () =
     );
   });
 
-  it('allows a queued backup claim alongside the active one', async () => {
+  it('allows a terminal claim history row for the same buyer after a relist', async () => {
     await pool.query(
       `insert into claims (listing_id, claimant_id, position, status, fulfillment_path)
-       values ($1, $2, 2, 'queued', 'cash_meetup')`,
-      [ids.listing, ids.buyer2],
+       values ($1, $2, 1, 'reneged', 'cash_meetup')`,
+      [ids.listing, ids.buyer],
     );
     const { rows } = await pool.query(
       `select count(*)::int as n from claims where listing_id = $1`,
@@ -188,21 +188,28 @@ describe('★ claims_one_active — exactly one live claimant per listing', () =
     expect(rows[0].n).toBe(2);
   });
 
-  it('REJECTS the same person claiming twice', async () => {
-    await expectRejected(
-      `insert into claims (listing_id, claimant_id, position, status, fulfillment_path)
-       values ($1, $2, 3, 'queued', 'cash_meetup')`,
-      [ids.listing, ids.buyer],
-      'claims_one_per_claimant',
+  it('allows a fresh active claim after the previous claim is terminal', async () => {
+    await pool.query(
+      `update claims set status = 'reneged' where listing_id = $1 and status = 'active'`,
+      [ids.listing],
     );
+    await pool.query(
+      `insert into claims (listing_id, claimant_id, position, status, fulfillment_path)
+       values ($1, $2, 1, 'active', 'cash_meetup')`,
+      [ids.listing, ids.buyer],
+    );
+    const { rows } = await pool.query(
+      `select count(*)::int as n from claims where listing_id = $1 and status = 'active'`,
+      [ids.listing],
+    );
+    expect(rows[0].n).toBe(1);
   });
 
-  it('REJECTS a claim stack deeper than 4', async () => {
+  it('REJECTS two active claims for the same buyer', async () => {
     await expectRejected(
       `insert into claims (listing_id, claimant_id, position, status, fulfillment_path)
-       values ($1, $2, 5, 'queued', 'cash_meetup')`,
-      [ids.listing2, ids.buyer],
-      'claim_stack_depth',
+       values ($1, $2, 1, 'active', 'cash_meetup')`,
+      [ids.listing, ids.buyer],
     );
   });
 });
@@ -407,8 +414,8 @@ describe('★ path/track coherence', () => {
 describe('★ custody_one_live_per_listing — an item cannot be on two shelves', () => {
   it('accepts the first live holding', async () => {
     await pool.query(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
-       values ($1, 'relay_store', $2, 'at_relay', 'small', 'CT-TEST')`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, dropoff_code)
+       values ($1, 'relay_store', $2, 'at_relay', 'CT-TEST')`,
       [ids.listing, ids.store],
     );
     const { rows } = await pool.query(
@@ -420,8 +427,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
 
   it('REJECTS a second live holding for the same item', async () => {
     await expectRejected(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
-       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'small', 'CT-TES2')`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, dropoff_code)
+       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'CT-TES2')`,
       [ids.listing, ids.store],
       'custody_one_live_per_listing',
     );
@@ -434,8 +441,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
       [ids.listing],
     );
     const { rows } = await pool.query(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
-       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'small', 'CT-TES3') returning id`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, dropoff_code)
+       values ($1, 'relay_store', $2, 'awaiting_dropoff', 'CT-TES3') returning id`,
       [ids.listing, ids.store],
     );
     expect(rows[0].id).toBeTruthy();
@@ -443,8 +450,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
 
   it('REJECTS a relay holding with no store', async () => {
     await expectRejected(
-      `insert into custody_holdings (listing_id, holder, state, size_class, dropoff_code)
-       values ($1, 'relay_store', 'awaiting_dropoff', 'small', 'CT-TES4')`,
+      `insert into custody_holdings (listing_id, holder, state, dropoff_code)
+       values ($1, 'relay_store', 'awaiting_dropoff', 'CT-TES4')`,
       [ids.listing2],
       'custody_store_required',
     );
@@ -452,8 +459,8 @@ describe('★ custody_one_live_per_listing — an item cannot be on two shelves'
 
   it('REJECTS a courier holding attached to a store', async () => {
     await expectRejected(
-      `insert into custody_holdings (listing_id, holder, store_id, state, size_class, dropoff_code)
-       values ($1, 'platform_courier', $2, 'awaiting_dropoff', 'small', 'CT-TES5')`,
+      `insert into custody_holdings (listing_id, holder, store_id, state, dropoff_code)
+       values ($1, 'platform_courier', $2, 'awaiting_dropoff', 'CT-TES5')`,
       [ids.listing2, ids.store],
       'custody_courier_has_no_store',
     );

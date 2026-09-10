@@ -4,9 +4,9 @@
  * These exercise the behaviours that only show up under real concurrency and real
  * scheduling — the ones unit tests structurally cannot reach:
  *
- *   · N simultaneous claims resolve to exactly one winner and an ordered backup stack
+ *   · N simultaneous claims resolve to exactly one winner and reject every loser
  *   · N simultaneous bids produce a total order with no lost updates
- *   · a lapsed payment window renegesd, records the fact, and promotes the next candidate
+ *   · a lapsed auction payment window reneges, records the fact, and promotes the runner-up
  *   · a late bid extends the auction, and the close job reschedules rather than closing
  *   · a reneged auction winner hands off to the runner-up AT THEIR OWN BID
  *
@@ -130,7 +130,7 @@ afterAll(async () => {
 // ════════════════════════════════════════════════════════ atomic claim
 
 describe('★ atomic straight-sale claim', () => {
-  it('resolves 6 SIMULTANEOUS claims to exactly one winner and an ordered stack', async () => {
+  it('resolves 6 SIMULTANEOUS claims to exactly one winner with no backup rows', async () => {
     const listingId = await makeListing();
 
     // All six fire at once against the same row.
@@ -144,24 +144,18 @@ describe('★ atomic straight-sale claim', () => {
     const claimed = fulfilled.filter(
       (r) => (r as PromiseFulfilledResult<{ outcome: string }>).value.outcome === 'claimed',
     );
-    const queued = fulfilled.filter(
-      (r) => (r as PromiseFulfilledResult<{ outcome: string }>).value.outcome === 'queued',
-    );
+    const rejected = results.filter((r) => r.status === 'rejected');
 
     // ★ Exactly one winner, decided by the database, not by luck of ordering.
     expect(claimed).toHaveLength(1);
 
-    // The stack is capped at 3 total live claimants (1 active + 2 queued).
-    expect(queued.length).toBeLessThanOrEqual(2);
-    expect(claimed.length + queued.length).toBeLessThanOrEqual(3);
+    expect(rejected).toHaveLength(5);
 
     const rows = await db.select().from(claims).where(eq(claims.listingId, listingId));
     expect(rows.filter((c) => c.status === 'active')).toHaveLength(1);
 
-    // Positions are unique and contiguous from 1.
-    const positions = rows.map((c) => c.position).sort((a, b) => a - b);
-    expect(new Set(positions).size).toBe(positions.length);
-    expect(positions[0]).toBe(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.position).toBe(1);
 
     // The listing moved to claimed, with exactly one open transaction.
     const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
@@ -188,7 +182,7 @@ describe('★ atomic straight-sale claim', () => {
     ).rejects.toThrow(/does not accept/i);
   });
 
-  it('is idempotent — claiming twice returns the same position', async () => {
+  it('is idempotent — claiming twice returns the same deal', async () => {
     const listingId = await makeListing();
     const first = await claimListing({
       listingId,
@@ -353,7 +347,6 @@ describe('★ fixed-price offers', () => {
     // auto-relist setting, rather than leaving the listing permanently claimed.
     await expirePaymentWindow(result.transactionId);
     await paymentWindowExpired({ transactionId: result.transactionId }, helpers);
-    await promoteNext({ listingId, failedTransactionId: result.transactionId }, helpers);
     expect((await db.select().from(listings).where(eq(listings.id, listingId)))[0]?.status).toBe('active');
     expect((await db.select().from(offers).where(eq(offers.id, second.id)))[0]?.status).toBe('pending');
   });
@@ -411,11 +404,6 @@ describe('★ mark-paid / confirm-received handshake', () => {
       fulfillmentPath: 'cash_meetup',
     });
     const txId = claim.transactionId!;
-    await claimListing({
-      listingId,
-      claimantId: buyers[1]!,
-      fulfillmentPath: 'cash_meetup',
-    });
     const pendingOfferRows = await db
       .insert(offers)
       .values({
@@ -443,7 +431,7 @@ describe('★ mark-paid / confirm-received handshake', () => {
     // The listing is done.
     const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
     expect(listing?.status).toBe('ended_won');
-    expect((await db.select().from(claims).where(eq(claims.listingId, listingId))).find((row) => row.claimantId === buyers[1])?.status).toBe('superseded');
+    expect((await db.select().from(claims).where(eq(claims.listingId, listingId))).filter((row) => row.status === 'active')).toHaveLength(1);
     expect((await db.select().from(offers).where(eq(offers.id, pendingOfferId)))[0]?.status).toBe('rejected');
 
     // Objective facts recorded for both parties, exactly once each.
@@ -496,10 +484,10 @@ describe('★ mark-paid / confirm-received handshake', () => {
   });
 });
 
-// ════════════════════════════════════════════════════════ renege + promotion
+// ════════════════════════════════════════════════════════ fixed-price failure
 
-describe('★ payment window lapse → renege → promote the backup', () => {
-  it('hands the item to the next claimer at the same price, with a fresh window', async () => {
+describe('★ fixed-price payment lapse → relist without a backup', () => {
+  it('returns the item to the catalog after the sole claimer reneges', async () => {
     const listingId = await makeListing();
 
     const first = await claimListing({
@@ -507,13 +495,7 @@ describe('★ payment window lapse → renege → promote the backup', () => {
       claimantId: buyers[0]!,
       fulfillmentPath: 'cash_meetup',
     });
-    const backup = await claimListing({
-      listingId,
-      claimantId: buyers[1]!,
-      fulfillmentPath: 'cash_meetup',
-    });
     expect(first.outcome).toBe('claimed');
-    expect(backup.outcome).toBe('queued');
 
     const firstTxId = first.transactionId!;
     await expirePaymentWindow(firstTxId);
@@ -533,20 +515,19 @@ describe('★ payment window lapse → renege → promote the backup', () => {
       );
     expect(facts.length).toBeGreaterThan(0);
 
-    // Promotion runs as its own job (enqueued in the same transaction as the renege).
+    // Fixed-price claims do not enqueue a promotion job.
     await promoteNext({ listingId, failedTransactionId: firstTxId }, helpers);
 
-    const promoted = await openTransactionFor(listingId);
-    expect(promoted).toBeDefined();
-    expect(promoted?.buyerId).toBe(buyers[1]!);
-    expect(promoted?.attemptNumber).toBe(2);
-    expect(promoted?.source).toBe('claim_promotion');
-    expect(promoted?.amountCents).toBe(10_000);
-    // A fresh window, not the inherited one.
-    expect(promoted!.paymentDeadlineAt.getTime()).toBeGreaterThan(Date.now());
+    const open = await openTransactionFor(listingId);
+    expect(open).toBeUndefined();
+    const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
+    expect(listing?.status).toBe('active');
+    const claimRows = await db.select().from(claims).where(eq(claims.listingId, listingId));
+    expect(claimRows).toHaveLength(1);
+    expect(claimRows[0]?.status).toBe('reneged');
   });
 
-  it('never re-promotes someone who already reneged on the same listing', async () => {
+  it('allows a fresh buyer to claim after a failed attempt is relisted', async () => {
     const listingId = await makeListing();
     const first = await claimListing({
       listingId,
@@ -556,15 +537,13 @@ describe('★ payment window lapse → renege → promote the backup', () => {
 
     await expirePaymentWindow(first.transactionId!);
     await paymentWindowExpired({ transactionId: first.transactionId! }, helpers);
-    await promoteNext({ listingId, failedTransactionId: first.transactionId! }, helpers);
-
-    // No backups existed, and the reneged buyer must not be handed it again.
-    const open = await openTransactionFor(listingId);
-    expect(open).toBeUndefined();
-
-    // auto_relist defaults true, so the listing goes back on the shelf.
-    const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
-    expect(listing?.status).toBe('active');
+    const second = await claimListing({
+      listingId,
+      claimantId: buyers[4]!,
+      fulfillmentPath: 'cash_meetup',
+    });
+    expect(second.outcome).toBe('claimed');
+    expect(second.transactionId).not.toBe(first.transactionId);
   });
 
   it('does not renege a deal whose payment was already confirmed', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { BadgeCheck, MapPin, UserRound, X } from 'lucide-react';
 
@@ -58,12 +58,27 @@ function initials(name: string): string {
     .toUpperCase() || 'C';
 }
 
-export function BuyerSnapshotLink({ snapshot }: { snapshot: BuyerSnapshotData }) {
+export function BuyerSnapshotLink({
+  snapshot,
+  subjectLabel = 'Buyer',
+  triggerClassName = 'deals-inbox-table__buyer-link',
+  triggerLabel,
+  triggerContent,
+  showTriggerIcon = true,
+}: {
+  snapshot: BuyerSnapshotData;
+  subjectLabel?: 'Buyer' | 'Seller';
+  triggerClassName?: string;
+  triggerLabel?: string;
+  triggerContent?: ReactNode;
+  showTriggerIcon?: boolean;
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLAnchorElement>(null);
   const titleId = `buyer-snapshot-title-${snapshot.userId}`;
+  const subject = subjectLabel.toLowerCase();
   const completedDeals = snapshot.counters.buyCompleted + snapshot.counters.sellCompleted;
   const paidOnTime = snapshot.counters.buyClaimsTotal > 0
     ? `${snapshot.counters.buyPaidOnTime} of ${snapshot.counters.buyClaimsTotal}`
@@ -113,17 +128,17 @@ export function BuyerSnapshotLink({ snapshot }: { snapshot: BuyerSnapshotData })
     <>
       <a
         ref={triggerRef}
-        className="deals-inbox-table__buyer-link"
+        className={triggerClassName}
         href={`/members/${snapshot.userId}`}
         aria-haspopup="dialog"
-        aria-label={`View trust snapshot for ${snapshot.displayName}`}
+        aria-label={`View ${subject} trust snapshot for ${snapshot.displayName}`}
         onClick={(event) => {
           event.preventDefault();
           setIsOpen(true);
         }}
       >
-        <UserRound aria-hidden="true" />
-        {snapshot.displayName}
+        {showTriggerIcon && <UserRound aria-hidden="true" />}
+        {triggerContent ?? triggerLabel ?? snapshot.displayName}
       </a>
 
       {isOpen && typeof document !== 'undefined' && createPortal(
@@ -141,7 +156,7 @@ export function BuyerSnapshotLink({ snapshot }: { snapshot: BuyerSnapshotData })
               className="buyer-snapshot-modal__close"
               type="button"
               onClick={() => setIsOpen(false)}
-              aria-label="Close buyer trust snapshot"
+              aria-label={`Close ${subject} trust snapshot`}
             >
               <X size={18} aria-hidden="true" />
             </button>
@@ -149,7 +164,7 @@ export function BuyerSnapshotLink({ snapshot }: { snapshot: BuyerSnapshotData })
             <header className="buyer-snapshot-modal__header">
               <div className="buyer-snapshot-modal__avatar" aria-hidden="true">{initials(snapshot.displayName)}</div>
               <div>
-                <p className="buyer-snapshot-modal__eyebrow">Buyer trust snapshot</p>
+                <p className="buyer-snapshot-modal__eyebrow">{subjectLabel} trust snapshot</p>
                 <h2 id={titleId}>{snapshot.displayName}</h2>
                 <p className="buyer-snapshot-modal__meta">
                   @{snapshot.handle} · member since {date(snapshot.memberSince)}

@@ -35,7 +35,7 @@ Store staff need an operational board with codes, shelf clocks, and clear counte
 
 The existing app includes Google-first authentication, verified email/password accounts,
 password recovery, listings, category-specific filters, image uploads, straight sales,
-auctions, backup claims, payment handshakes, reputation, ratings, Store custody, drop-off
+auctions, payment handshakes, reputation, ratings, Store custody, drop-off
 codes, shelf clocks, and store controls. Preserve all existing routes, server actions,
 state meanings, and accessibility/native browser affordances.
 

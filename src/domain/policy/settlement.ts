@@ -8,9 +8,10 @@
  */
 export const SETTLEMENT_METHODS = ['cash', 'bank_transfer', 'linx', 'other'] as const;
 
-export type SettlementMethod = (typeof SETTLEMENT_METHODS)[number];
+/** Stable admin-managed payment option key. */
+export type SettlementMethod = string;
 
-export const SETTLEMENT_METHOD_LABELS: Record<SettlementMethod, string> = {
+export const SETTLEMENT_METHOD_LABELS: Record<string, string> = {
   cash: 'Cash',
   bank_transfer: 'Bank transfer',
   linx: 'LINX',
@@ -18,5 +19,5 @@ export const SETTLEMENT_METHOD_LABELS: Record<SettlementMethod, string> = {
 };
 
 export function isSettlementMethod(value: string): value is SettlementMethod {
-  return (SETTLEMENT_METHODS as readonly string[]).includes(value);
+  return value.trim().length > 0;
 }

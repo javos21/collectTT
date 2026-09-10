@@ -71,7 +71,7 @@ type ListingData = {
   activeTransactionCount: number;
   amount: string;
 };
-type ClaimData = { id: string; title: string; status: string; position: number; fulfillmentPath: string; claimedAt: string };
+type ClaimData = { id: string; title: string; status: string; transactionId: string | null; fulfillmentPath: string; claimedAt: string };
 type BidData = { id: string; title: string; amount: string; status: string; placedAt: string };
 type OfferData = { id: string; title: string; amount: string; status: string; createdAt: string };
 type ReceivedOfferData = OfferData & { buyerName: string };
@@ -199,7 +199,7 @@ function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'coun
 }
 
 function ClaimsPanel({ claims }: Pick<ProfilePageProps, 'claims'>) {
-  return <div className="profile-content-stack">{claims.length === 0 ? <EmptyState icon={<ShoppingBag size={22} />} title="No claims yet">When you claim a fixed-price listing, it will appear here with its place in the queue.</EmptyState> : <div className="profile-list">{claims.map((claim) => <article className="profile-list-row" key={claim.id}><div className="profile-list-row__icon profile-list-row__icon--purple"><ShoppingBag size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{claim.title}</h3><p>Claimed {date(claim.claimedAt)} · {fulfillmentLabel(claim.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value={claim.status} /><small>Queue position {claim.position}</small></div></article>)}</div>}</div>;
+  return <div className="profile-content-stack">{claims.length === 0 ? <EmptyState icon={<ShoppingBag size={22} />} title="No claims yet">Your fixed-price claims and deal history will appear here.</EmptyState> : <div className="profile-list">{claims.map((claim) => <article className="profile-list-row" key={claim.id}><div className="profile-list-row__icon profile-list-row__icon--purple"><ShoppingBag size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{claim.title}</h3><p>Claimed {date(claim.claimedAt)} · {fulfillmentLabel(claim.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value={claim.status} />{claim.transactionId !== null && <Link href={`/deals/${claim.transactionId}`}>Open deal →</Link>}</div></article>)}</div>}</div>;
 }
 
 function listingActionLockReason(listing: ListingData): string | null {

@@ -14,12 +14,12 @@ import { listings } from '../db/schema/listings';
 import { relayStores } from '../db/schema/custody';
 import { profiles } from '../db/schema/profiles';
 import { notify } from '../notifications/dispatch';
-import { FULFILLMENT_PATHS, type FulfillmentPath } from '../domain/states/transaction';
-import { SETTLEMENT_METHODS, type SettlementMethod } from '../domain/policy/settlement';
-import type { SizeClass } from '../domain/states/listing';
+import type { FulfillmentPath } from '../domain/states/transaction';
+import type { SettlementMethod } from '../domain/policy/settlement';
 import { formatMoney } from '../domain/money';
 import { activeRestrictions } from './reputation';
 import { assertFulfillmentEligible } from './fulfillment-eligibility';
+import { getListingDeliveryOption } from './platform-settings';
 import {
   ConflictError,
   ForbiddenError,
@@ -31,7 +31,8 @@ export interface SubmitOfferInput {
   listingId: string;
   buyerId: string;
   amountCents: number;
-  fulfillmentPath: FulfillmentPath;
+  fulfillmentPath?: FulfillmentPath;
+  deliveryOptionId?: string;
   /** The buyer's chosen payment method. Required by the web action. */
   settlementMethod?: SettlementMethod;
   relayStoreId?: string | null;
@@ -61,7 +62,19 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
     if (input.amountCents >= askingPrice) {
       throw new ConflictError('Your offer must be below the asking price');
     }
-    assertPath(listing.fulfillment_paths, input.fulfillmentPath);
+    let fulfillmentPath = input.fulfillmentPath;
+    if (input.deliveryOptionId !== undefined) {
+      const option = await getListingDeliveryOption(tx, input.listingId, input.deliveryOptionId);
+      if (option === null || option.fulfillmentPath === null) {
+        throw new ConflictError('Choose a delivery option offered by the seller');
+      }
+      fulfillmentPath = option.fulfillmentPath as FulfillmentPath;
+      if (option.requiresStore && (input.relayStoreId === undefined || input.relayStoreId === null)) {
+        throw new ConflictError('Choose which pickup store you want to collect from');
+      }
+    }
+    if (fulfillmentPath === undefined) throw new ConflictError('Choose a delivery option offered by the seller');
+    assertPath(listing.fulfillment_paths, fulfillmentPath);
     const settlementMethod =
       input.settlementMethod ?? (listing.settlement_methods[0] as SettlementMethod | undefined);
     assertSettlementMethod(listing.settlement_methods, settlementMethod);
@@ -72,11 +85,12 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
         'Making offers is paused on your account because of recent unpaid claims.',
       );
     }
-    const relayStoreId = input.fulfillmentPath === 'relay' ? input.relayStoreId ?? null : null;
+    const relayStoreId = fulfillmentPath === 'relay' ? input.relayStoreId ?? null : null;
     await assertFulfillmentEligible(tx, {
-      path: input.fulfillmentPath,
+      listingId: input.listingId,
+      path: fulfillmentPath,
+      requireListedStore: input.deliveryOptionId !== undefined,
       relayStoreId,
-      sizeClass: listing.size_class,
       buyerRestrictions: restrictions,
     });
 
@@ -99,7 +113,8 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
         listingId: input.listingId,
         buyerId: input.buyerId,
         amountCents: input.amountCents,
-        fulfillmentPath: input.fulfillmentPath,
+        fulfillmentPath,
+        deliveryOptionId: input.deliveryOptionId ?? null,
         settlementMethod,
         relayStoreId,
         status: 'pending',
@@ -160,9 +175,10 @@ export async function acceptOffer(
       throw new ForbiddenError('This buyer cannot open a deal right now');
     }
     await assertFulfillmentEligible(tx, {
+      listingId: row.listing_id,
       path: row.fulfillment_path,
+      requireListedStore: row.delivery_option_id !== null,
       relayStoreId,
-      sizeClass: row.size_class,
       buyerRestrictions: restrictions,
     });
 
@@ -186,6 +202,7 @@ export async function acceptOffer(
       buyerId: row.buyer_id,
       amountCents: Number(row.amount_cents),
       fulfillmentPath: row.fulfillment_path,
+      deliveryOptionId: row.delivery_option_id,
       source: 'offer_accept',
       offerId,
       listingTitle: row.listing_title,
@@ -232,6 +249,7 @@ export async function pendingOffersForSeller(listingId: string, sellerId: string
       buyerName: profiles.displayName,
       amountCents: offers.amountCents,
       fulfillmentPath: offers.fulfillmentPath,
+      deliveryOptionId: offers.deliveryOptionId,
       settlementMethod: offers.settlementMethod,
       relayStoreId: offers.relayStoreId,
       createdAt: offers.createdAt,
@@ -260,6 +278,7 @@ export async function pendingOffersReceivedBySeller(sellerId: string) {
       buyerName: profiles.displayName,
       amountCents: offers.amountCents,
       fulfillmentPath: offers.fulfillmentPath,
+      deliveryOptionId: offers.deliveryOptionId,
       settlementMethod: offers.settlementMethod,
       relayStoreName: relayStores.name,
       relayStoreArea: relayStores.area,
@@ -301,7 +320,7 @@ export async function latestOfferForBuyer(listingId: string, buyerId: string) {
 }
 
 function assertPath(declared: string[], selected: FulfillmentPath): void {
-  if (!FULFILLMENT_PATHS.includes(selected) || !declared.includes(selected)) {
+  if (!declared.includes(selected)) {
     throw new ConflictError('The seller does not accept that fulfillment method');
   }
 }
@@ -310,7 +329,7 @@ function assertSettlementMethod(
   declared: string[],
   selected: SettlementMethod | undefined,
 ): asserts selected is SettlementMethod {
-  if (selected === undefined || !SETTLEMENT_METHODS.includes(selected) || !declared.includes(selected)) {
+  if (selected === undefined || !declared.includes(selected)) {
     throw new ConflictError('Choose a payment method accepted by the seller');
   }
 }
@@ -326,7 +345,7 @@ async function displayName(tx: Tx, userId: string): Promise<string> {
 
 async function lockedListing(tx: Tx, listingId: string): Promise<ListingRow> {
   const rows = await tx.execute(sql`
-    select id, seller_id, title, sale_type, status, price_cents, fulfillment_paths, settlement_methods, size_class, accepts_offers
+    select id, seller_id, title, sale_type, status, price_cents, fulfillment_paths, settlement_methods, accepts_offers
       from listings
      where id = ${listingId}
      for update
@@ -344,6 +363,7 @@ function sqlOfferWithListing(offerId: string) {
       o.buyer_id,
       o.amount_cents,
       o.fulfillment_path,
+      o.delivery_option_id,
       o.settlement_method,
       o.relay_store_id,
       o.status as offer_status,
@@ -356,8 +376,7 @@ function sqlOfferWithListing(offerId: string) {
       l.fulfillment_paths,
       l.settlement_methods,
       l.accepts_offers,
-      l.payment_window_hours,
-      l.size_class
+      l.payment_window_hours
       from offers o
       inner join listings l on l.id = o.listing_id
      where o.id = ${offerId}
@@ -375,7 +394,6 @@ interface ListingRow {
   fulfillment_paths: string[];
   settlement_methods: string[];
   accepts_offers: boolean;
-  size_class: SizeClass;
 }
 
 interface OfferWithListingRow {
@@ -384,6 +402,7 @@ interface OfferWithListingRow {
   buyer_id: string;
   amount_cents: number | string;
   fulfillment_path: FulfillmentPath;
+  delivery_option_id: string | null;
   settlement_method: SettlementMethod | null;
   relay_store_id: string | null;
   offer_status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
@@ -397,5 +416,4 @@ interface OfferWithListingRow {
   settlement_methods: string[];
   accepts_offers: boolean;
   payment_window_hours: number | string;
-  size_class: SizeClass;
 }

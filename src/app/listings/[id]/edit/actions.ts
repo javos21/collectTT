@@ -17,13 +17,13 @@ export async function updateListingAction(formData: FormData): Promise<void> {
   if (user === null) redirect('/sign-in');
 
   const listingId = String(formData.get('listingId') ?? '');
-  const fulfillmentPaths = formData.getAll('fulfillmentPaths').map(String);
-  const deliveryEstimates = Object.fromEntries(
-    fulfillmentPaths.flatMap((path) => {
-      const raw = String(formData.get(`deliveryEstimate__${path}`) ?? '').trim();
+  const deliveryOptionIds = formData.getAll('deliveryOptionIds').map(String);
+  const deliveryOptionEstimates = Object.fromEntries(
+    deliveryOptionIds.flatMap((optionId) => {
+      const raw = String(formData.get(`deliveryEstimate__${optionId}`) ?? '').trim();
       if (raw === '') return [];
       const days = Number(raw);
-      return Number.isInteger(days) ? [[path, days] as const] : [];
+      return Number.isInteger(days) ? [[optionId, days] as const] : [];
     }),
   );
   try {
@@ -33,7 +33,7 @@ export async function updateListingAction(formData: FormData): Promise<void> {
       priceCents: money(formData),
       acceptsOffers: formData.get('acceptsOffers') !== null,
       paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
-      ...(Object.keys(deliveryEstimates).length > 0 ? { deliveryEstimates } : {}),
+      ...(Object.keys(deliveryOptionEstimates).length > 0 ? { deliveryOptionEstimates } : {}),
       imageIds: formData.getAll('imageIds').map(String),
     });
     redirect(`/listings/${listingId}`);

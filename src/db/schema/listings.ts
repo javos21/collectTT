@@ -1,6 +1,5 @@
 /**
- * Categories, listings, images-on-listings, and the two candidate ladders
- * (claims for straight sales, bids for auctions).
+ * Categories, listings, images-on-listings, and the auction bid ladder.
  *
  * A listing is ONE indivisible lot. It resolves to at most one completed transaction,
  * though it may take several attempts to get there.
@@ -25,11 +24,11 @@ import {
 
 import { profiles } from './profiles';
 import { images } from './images';
+import { marketplaceOptions } from './settings';
 import {
   listingStatusEnum,
   saleTypeEnum,
   fulfillmentPathEnum,
-  sizeClassEnum,
   claimStatusEnum,
   bidStatusEnum,
 } from './enums';
@@ -96,7 +95,6 @@ export const listings = pgTable(
     // ---- settlement, declared up front so nobody claims blind
     fulfillmentPaths: fulfillmentPathEnum('fulfillment_paths').array().notNull(),
     settlementMethods: text('settlement_methods').array().notNull(),
-    sizeClass: sizeClassEnum('size_class').notNull().default('small'),
     autoRelistOnRenege: boolean('auto_relist_on_renege').notNull().default(true),
 
     /** The currently open transaction attempt, if any. FK added post-create. */
@@ -185,10 +183,29 @@ export const listingFulfillmentTerms = pgTable(
   ],
 );
 
+/** The exact admin-managed delivery choices offered on a listing. */
+export const listingDeliveryOptions = pgTable(
+  'listing_delivery_options',
+  {
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    optionId: uuid('option_id')
+      .notNull()
+      .references(() => marketplaceOptions.id, { onDelete: 'restrict' }),
+    expectedDeliveryDays: integer('expected_delivery_days').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listingId, t.optionId] }),
+    check('listing_delivery_option_days_positive', sql`${t.expectedDeliveryDays} between 1 and 60`),
+  ],
+);
+
 /**
- * Straight-sale backup claim stack. A fixed-price claim is a STACK, not a single
- * winner — when the top claimer's window lapses the next person is promoted
- * automatically and the seller does nothing.
+ * Fixed-price claim history. A listing has one active claim at a time; terminal rows
+ * remain for transaction linkage, audit history, and activity reporting. Legacy queue
+ * columns/statuses remain temporarily so existing rows can be migrated safely; new
+ * writes create only a single active claim.
  */
 export const claims = pgTable(
   'claims',
@@ -203,22 +220,22 @@ export const claims = pgTable(
     position: integer('position').notNull(),
     status: claimStatusEnum('status').notNull(),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
+    deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
     /** The buyer's chosen payment method for this claim. Nullable for legacy rows. */
     settlementMethod: text('settlement_method'),
-    /**
-     * Which relay store this claimant chose, for the `relay` path. Stored on the CLAIM
-     * rather than the transaction so a backup claimer's choice survives until they are
-     * promoted — they may well pick a different store from the person ahead of them.
-     */
+    /** Which relay store this claimant chose, for the `relay` path. */
     relayStoreId: uuid('relay_store_id'),
     transactionId: uuid('transaction_id'),
     /** ★ DB clock. Server receipt order is what resolves "I said mine first". */
     claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('claims_one_per_claimant').on(t.listingId, t.claimantId),
-    // Queue positions can be reused after a failed claim/relist; terminal rows remain
-    // in the audit history but must not block a fresh three-person queue.
+    // A buyer may claim the same listing again after a failed attempt is relisted, but
+    // duplicate active submissions must still resolve to the existing deal.
+    uniqueIndex('claims_one_per_claimant')
+      .on(t.listingId, t.claimantId)
+      .where(sql`${t.status} = 'active'`),
+    // Retained for compatibility with historical queue rows; no new code relies on it.
     uniqueIndex('claims_position')
       .on(t.listingId, t.position)
       .where(sql`${t.status} in ('active', 'queued', 'promoted')`),
@@ -228,15 +245,10 @@ export const claims = pgTable(
       .on(t.listingId)
       .where(sql`${t.status} = 'active'`),
     index('claims_stack').on(t.listingId, t.position),
-    // Terminal historical rows may retain an old position for audit purposes; only
-    // live queue rows are constrained to the three available slots.
+    // Retained for compatibility with historical queue rows during migration.
     check(
       'claim_stack_depth',
       sql`${t.position} between 1 and 3 or ${t.status} not in ('active', 'queued', 'promoted')`,
-    ),
-    check(
-      'claim_settlement_method_valid',
-      sql`${t.settlementMethod} is null or ${t.settlementMethod} in ('cash', 'bank_transfer', 'linx', 'other')`,
     ),
   ],
 );
@@ -256,13 +268,14 @@ export const bids = pgTable(
     /** The bidder's chosen payment method. Nullable for bids placed before this field existed. */
     settlementMethod: text('settlement_method'),
     /**
-     * ★ The bidder's chosen settlement, mirroring what `claims` has always carried.
+     * ★ The bidder's chosen settlement, retained for auction close and runner-up promotion.
      *   Without these a relay auction cannot close: openTransaction would insert a
      *   holding with holder='relay_store' and store_id=null, violating
      *   custody_store_required. Nullable because bids predating Phase 2 have neither;
      *   nextFromBidLadder falls back to the listing's first declared path.
      */
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path'),
+    deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
     relayStoreId: uuid('relay_store_id'),
     status: bidStatusEnum('status').notNull().default('active'),
     /** True if this bid triggered an anti-snipe extension. Shown in the live feed. */
@@ -277,9 +290,5 @@ export const bids = pgTable(
     index('bids_ladder').on(t.listingId, t.amountCents.desc()),
     index('bids_bidder').on(t.bidderId, t.placedAt.desc()),
     check('bid_positive', sql`${t.amountCents} > 0`),
-    check(
-      'bid_settlement_method_valid',
-      sql`${t.settlementMethod} is null or ${t.settlementMethod} in ('cash', 'bank_transfer', 'linx', 'other')`,
-    ),
   ],
 );

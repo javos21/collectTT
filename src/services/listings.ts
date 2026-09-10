@@ -14,20 +14,23 @@ import {
   listings,
   listingImages,
   listingAuditEvents,
+  listingDeliveryOptions,
   listingFulfillmentTerms,
   categories,
 } from '../db/schema/listings';
-import { listingRelayStores } from '../db/schema/custody';
+import { listingRelayStores, relayStores } from '../db/schema/custody';
 import { images } from '../db/schema/images';
 import { profiles, reputationCounters } from '../db/schema/profiles';
-import { parseAttributes } from '../domain/categories/build-schema';
+import { transactions } from '../db/schema/transactions';
+import { marketplaceOptions } from '../db/schema/settings';
+import { parseAttributesWithCatalogValues } from './catalog';
 import { CATEGORY_LIST } from '../domain/categories/definitions';
 import { FULFILLMENT_PATHS, type FulfillmentPath } from '../domain/states/transaction';
-import { SIZE_CLASSES, type ListingStatus } from '../domain/states/listing';
+import { type ListingStatus } from '../domain/states/listing';
 import { assertListingTransition } from '../domain/states/listing';
 import { WINDOWS } from '../domain/policy/windows';
 import { enqueue } from '../jobs/enqueue';
-import { getFullServiceDeliveryDays } from './platform-settings';
+import { getFullServiceDeliveryDays, UnavailableMarketplaceOptionError } from './platform-settings';
 
 import { SETTLEMENT_METHODS } from '../domain/policy/settlement';
 
@@ -47,9 +50,13 @@ export const listingInputSchema = z
     reserveCents: z.number().int().positive().optional(),
     buyoutCents: z.number().int().positive().optional(),
     durationHours: z.number().int().min(1).max(24 * 14).optional(),
-    fulfillmentPaths: z.array(z.enum(FULFILLMENT_PATHS)).min(1),
-    settlementMethods: z.array(z.enum(SETTLEMENT_METHODS)).min(1),
-    sizeClass: z.enum(SIZE_CLASSES).default('small'),
+    /** Admin-managed option ids used by the listing form. */
+    deliveryOptionIds: z.array(z.string().uuid()).default([]),
+    /** Stable admin-managed payment keys used by the listing form. */
+    paymentOptionKeys: z.array(z.string().trim().min(1)).default([]),
+    /** Legacy service inputs retained for existing scripts and historical tests. */
+    fulfillmentPaths: z.array(z.enum(FULFILLMENT_PATHS)).default([]),
+    settlementMethods: z.array(z.string().trim().min(1)).default([]),
     autoRelistOnRenege: z.boolean().default(true),
     imageIds: z.array(z.string().uuid()).max(8).default([]),
     /**
@@ -63,12 +70,11 @@ export const listingInputSchema = z
     attributes: z.record(z.unknown()).default({}),
   })
   .superRefine((value, ctx) => {
-    if (value.fulfillmentPaths.includes('relay') && value.relayStoreIds.length === 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['relayStoreIds'],
-        message: 'Nominate at least one relay store for drop-off',
-      });
+    if (value.deliveryOptionIds.length === 0 && value.fulfillmentPaths.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['deliveryOptionIds'], message: 'Choose at least one delivery option' });
+    }
+    if (value.paymentOptionKeys.length === 0 && value.settlementMethods.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['paymentOptionKeys'], message: 'Choose at least one payment option' });
     }
     if (value.saleType === 'straight_sale' && value.priceCents === undefined) {
       ctx.addIssue({ code: 'custom', path: ['priceCents'], message: 'A price is required' });
@@ -102,14 +108,62 @@ export async function createListing(
   opts: { publish?: boolean } = {},
 ): Promise<{ id: string }> {
   const input = listingInputSchema.parse(raw);
-  const fullServiceDays = input.fulfillmentPaths.includes('full_service')
-    ? await getFullServiceDeliveryDays()
-    : null;
+  const requestedDeliveryIds = [...new Set(input.deliveryOptionIds)];
+  const requestedPaymentKeys = [...new Set(input.paymentOptionKeys)];
+  const [selectedDeliveryOptions, selectedPaymentOptions] = await Promise.all([
+    requestedDeliveryIds.length === 0
+      ? Promise.resolve([])
+      : db.select().from(marketplaceOptions).where(and(
+          eq(marketplaceOptions.kind, 'delivery'),
+          eq(marketplaceOptions.active, true),
+          inArray(marketplaceOptions.id, requestedDeliveryIds),
+        )),
+    requestedPaymentKeys.length === 0
+      ? Promise.resolve([])
+      : db.select().from(marketplaceOptions).where(and(
+          eq(marketplaceOptions.kind, 'payment'),
+          eq(marketplaceOptions.active, true),
+          inArray(marketplaceOptions.key, requestedPaymentKeys),
+        )),
+  ]);
+  if (requestedDeliveryIds.length > 0 && selectedDeliveryOptions.length !== requestedDeliveryIds.length) {
+    throw new UnavailableMarketplaceOptionError('delivery');
+  }
+  if (requestedPaymentKeys.length > 0 && selectedPaymentOptions.length !== requestedPaymentKeys.length) {
+    throw new UnavailableMarketplaceOptionError('payment');
+  }
+
+  const fulfillmentPaths = requestedDeliveryIds.length > 0
+    ? [...new Set(selectedDeliveryOptions.map((option) => option.fulfillmentPath).filter((path): path is FulfillmentPath => path !== null))]
+    : input.fulfillmentPaths;
+  const settlementMethods = requestedPaymentKeys.length > 0 ? requestedPaymentKeys : input.settlementMethods;
+  if (fulfillmentPaths.length === 0) throw new UnavailableMarketplaceOptionError('delivery');
+  if (settlementMethods.length === 0) throw new UnavailableMarketplaceOptionError('payment');
+  if ((selectedDeliveryOptions.some((option) => option.requiresStore) || fulfillmentPaths.includes('relay')) && input.relayStoreIds.length === 0) {
+    throw new Error('Nominate at least one relay pickup store for store delivery');
+  }
+
+  const fullServiceDays = fulfillmentPaths.includes('full_service') ? await getFullServiceDeliveryDays() : null;
   // Throws UnknownCategoryError for an unseeded category, and ZodError with per-field
   // issues for bad attribute values.
-  const { attributes, version } = parseAttributes(input.category, input.attributes);
+  const { attributes, version } = await parseAttributesWithCatalogValues(input.category, input.attributes);
 
   return db.transaction(async (tx) => {
+    const selectedRelayStoreIds = [...new Set(input.relayStoreIds)];
+    if (selectedDeliveryOptions.some((option) => option.requiresStore) || fulfillmentPaths.includes('relay')) {
+      const selectedStores = await tx
+        .select({ id: relayStores.id, active: relayStores.active })
+        .from(relayStores)
+        .where(inArray(relayStores.id, selectedRelayStoreIds));
+      const selectedStoreIds = new Set(selectedStores.map((store) => store.id));
+      if (selectedStores.length !== selectedRelayStoreIds.length || selectedRelayStoreIds.some((id) => !selectedStoreIds.has(id))) {
+        throw new Error('One or more selected pickup stores no longer exists. Choose the available stores again.');
+      }
+      if (selectedStores.some((store) => !store.active)) {
+        throw new Error('One or more selected pickup stores is no longer accepting items. Choose the available stores again.');
+      }
+    }
+
     const inserted = await tx
       .insert(listings)
       .values({
@@ -136,9 +190,8 @@ export async function createListing(
         antisnipeWindowS: WINDOWS.antiSnipe.windowSeconds,
         antisnipeExtendS: WINDOWS.antiSnipe.extensionSeconds,
         maxExtensions: WINDOWS.antiSnipe.maxExtensions,
-        fulfillmentPaths: input.fulfillmentPaths,
-        settlementMethods: [...input.settlementMethods],
-        sizeClass: input.sizeClass,
+        fulfillmentPaths,
+        settlementMethods,
         autoRelistOnRenege: input.autoRelistOnRenege,
         publishedAt: opts.publish === true ? sql`now()` : null,
       })
@@ -150,12 +203,25 @@ export async function createListing(
     await attachImages(tx, listing.id, sellerId, input.imageIds);
 
     await tx.insert(listingFulfillmentTerms).values(
-      input.fulfillmentPaths.map((path) => ({
+      fulfillmentPaths.map((path) => ({
         listingId: listing.id,
         fulfillmentPath: path,
         expectedDeliveryDays: input.deliveryEstimates[path] ?? fullServiceDays ?? 14,
       })),
     );
+
+    if (selectedDeliveryOptions.length > 0) {
+      await tx.insert(listingDeliveryOptions).values(
+        selectedDeliveryOptions.map((option) => ({
+          listingId: listing.id,
+          optionId: option.id,
+          expectedDeliveryDays:
+            input.deliveryEstimates[option.id] ??
+            (option.fulfillmentPath === null ? 5 : input.deliveryEstimates[option.fulfillmentPath]) ??
+            (option.fulfillmentPath === 'full_service' ? fullServiceDays ?? 14 : 5),
+        })),
+      );
+    }
 
     await tx.insert(listingAuditEvents).values({
       listingId: listing.id,
@@ -166,7 +232,7 @@ export async function createListing(
 
     if (input.relayStoreIds.length > 0) {
       await tx.insert(listingRelayStores).values(
-        input.relayStoreIds.map((storeId) => ({ listingId: listing.id, storeId })),
+        selectedRelayStoreIds.map((storeId) => ({ listingId: listing.id, storeId })),
       );
     }
 
@@ -225,6 +291,7 @@ const listingEditSchema = z.object({
   acceptsOffers: z.boolean().optional(),
   paymentWindowHours: z.number().int().min(48).max(168).optional(),
   deliveryEstimates: z.record(z.string(), z.number().int().min(1).max(60)).optional(),
+  deliveryOptionEstimates: z.record(z.string().uuid(), z.number().int().min(1).max(60)).optional(),
   imageIds: z.array(z.string().uuid()).max(8).default([]),
 });
 
@@ -264,7 +331,7 @@ async function readListingActivity(executor: DbOrTx, listingId: string): Promise
       exists (
         select 1 from claims
         where listing_id = ${listingId}
-          and status in ('active', 'queued', 'promoted')
+          and status = 'active'
       ) as has_live_claims,
       exists (
         select 1 from transactions
@@ -354,6 +421,23 @@ export async function updateListingBasics(
       if (JSON.stringify(previous) !== JSON.stringify(normalized)) changes.deliveryEstimates = termChanges;
       input.deliveryEstimates = normalized;
     }
+    if (input.deliveryOptionEstimates !== undefined) {
+      const previousOptions = await tx
+        .select({ optionId: listingDeliveryOptions.optionId, expectedDeliveryDays: listingDeliveryOptions.expectedDeliveryDays })
+        .from(listingDeliveryOptions)
+        .where(eq(listingDeliveryOptions.listingId, listingId));
+      const previous = Object.fromEntries(previousOptions.map((option) => [option.optionId, option.expectedDeliveryDays]));
+      const normalized = Object.fromEntries(previousOptions.map((option) => [
+        option.optionId,
+        input.deliveryOptionEstimates?.[option.optionId] ?? option.expectedDeliveryDays,
+      ]));
+      const optionChanges = Object.fromEntries(previousOptions.map((option) => [option.optionId, {
+        from: previous[option.optionId],
+        to: normalized[option.optionId],
+      }]));
+      if (JSON.stringify(previous) !== JSON.stringify(normalized)) changes.deliveryOptionEstimates = optionChanges;
+      input.deliveryOptionEstimates = normalized;
+    }
 
     await tx
       .update(listings)
@@ -406,6 +490,18 @@ export async function updateListingBasics(
           target: [listingFulfillmentTerms.listingId, listingFulfillmentTerms.fulfillmentPath],
           set: { expectedDeliveryDays: sql`excluded.expected_delivery_days` },
         });
+    }
+
+    if (input.deliveryOptionEstimates !== undefined) {
+      for (const [optionId, expectedDeliveryDays] of Object.entries(input.deliveryOptionEstimates)) {
+        await tx
+          .update(listingDeliveryOptions)
+          .set({ expectedDeliveryDays })
+          .where(and(
+            eq(listingDeliveryOptions.listingId, listingId),
+            eq(listingDeliveryOptions.optionId, optionId),
+          ));
+      }
     }
 
     if (Object.keys(changes).length > 0) {
@@ -481,6 +577,8 @@ export interface BrowseFilters {
   attributes?: Record<string, string | number | boolean>;
   /** Narrow to one sale type; omitted means both. */
   saleType?: 'straight_sale' | 'auction';
+  /** Match listings that offer any selected admin-managed delivery option. */
+  deliveryOptionIds?: readonly string[];
   /** Match listings that offer this delivery/fulfillment path. */
   fulfillmentPath?: FulfillmentPath;
   /** Match listings that offer any selected delivery/fulfillment path. */
@@ -493,8 +591,8 @@ export interface BrowseFilters {
   minPriceCents?: number;
   maxPriceCents?: number;
   sort?: BrowseSort;
-  /** Discovery surface: recent means no claims; last chance means one or two live claims. */
-  surface?: 'catalog' | 'recent' | 'last_chance';
+  /** Discovery surface: recent means newly published fixed-price listings. */
+  surface?: 'catalog' | 'recent';
   /** 1-based page number. */
   page?: number;
   pageSize?: number;
@@ -509,34 +607,14 @@ export interface BrowsePage {
 }
 
 function browseConditions(filters: BrowseFilters) {
-  const liveClaims = sql`(
-    select count(*)::int
-      from claims c
-     where c.listing_id = ${listings.id}
-       and c.status in ('active', 'queued', 'promoted')
-  )`;
-  const confirmedPayment = sql`exists (
-    select 1
-      from transactions t
-     where t.listing_id = ${listings.id}
-       and t.state = 'open'
-       and t.payment_state = 'confirmed'
-  )`;
   const surface = filters.surface ?? 'catalog';
   const conditions = [
     surface === 'recent'
-      ? sql`${listings.status} = 'active' and ${listings.saleType} = 'straight_sale' and ${liveClaims} = 0 and not ${confirmedPayment}`
-      : surface === 'last_chance'
-        ? sql`${listings.status} = 'claimed' and ${listings.saleType} = 'straight_sale' and ${liveClaims} between 1 and 2 and not ${confirmedPayment}`
-        : sql`(
-            (${listings.status} = 'active' and ${listings.saleType} = 'auction')
-            or (
-              ${listings.saleType} = 'straight_sale'
-              and ${liveClaims} between 0 and 2
-              and ${listings.status} in ('active', 'claimed')
-              and not ${confirmedPayment}
-            )
-          )`,
+      ? sql`${listings.status} = 'active' and ${listings.saleType} = 'straight_sale'`
+      : sql`(
+          (${listings.status} = 'active' and ${listings.saleType} = 'auction')
+          or (${listings.status} = 'active' and ${listings.saleType} = 'straight_sale')
+        )`,
   ];
   const query = filters.query?.trim();
   if (query !== undefined && query !== '') {
@@ -562,6 +640,13 @@ function browseConditions(filters: BrowseFilters) {
     conditions.push(
       sql`${listings.fulfillmentPaths} @> ARRAY[${filters.fulfillmentPath}]::fulfillment_path[]`,
     );
+  }
+  if (filters.deliveryOptionIds !== undefined && filters.deliveryOptionIds.length > 0) {
+    conditions.push(sql`exists (
+      select 1 from listing_delivery_options ldo
+      where ldo.listing_id = ${listings.id}
+        and ldo.option_id in (${sql.join(filters.deliveryOptionIds.map((id) => sql`${id}::uuid`), sql`, `)})
+    )`);
   }
   if (filters.fulfillmentPaths !== undefined && filters.fulfillmentPaths.length > 0) {
     conditions.push(
@@ -636,6 +721,23 @@ function selectBrowseRows(
       sellerCompletedSales: reputationCounters.sellCompleted,
       fulfillmentPaths: listings.fulfillmentPaths,
       settlementMethods: listings.settlementMethods,
+      deliveryOptionLabels: sql<string[]>`coalesce(
+        (
+          select array_agg(mo.label order by mo.sort_order, mo.label)
+          from listing_delivery_options ldo
+          inner join marketplace_options mo on mo.id = ldo.option_id
+          where ldo.listing_id = ${listings.id}
+        ),
+        ARRAY[]::text[]
+      )`,
+      paymentOptionLabels: sql<string[]>`coalesce(
+        (
+          select array_agg(coalesce(mo.label, replace(method.key, '_', ' ')) order by method.position)
+          from unnest(${listings.settlementMethods}) with ordinality as method(key, position)
+          left join marketplace_options mo on mo.kind = 'payment' and mo.key = method.key
+        ),
+        ARRAY[]::text[]
+      )`,
       relayStoreNames: sql<string[]>`coalesce(
         (
           select array_agg(rs.name order by rs.name)
@@ -650,7 +752,7 @@ function selectBrowseRows(
         select count(*)::int
           from claims c
          where c.listing_id = ${listings.id}
-           and c.status in ('active', 'queued', 'promoted')
+           and c.status = 'active'
       )`,
       primaryImageId: sql<string | null>`(
         select i.id
@@ -706,6 +808,41 @@ export async function browseListings(filters: BrowseFilters = {}): Promise<Brows
   return { rows, total: totalRows[0]?.n ?? 0, page, pageSize };
 }
 
+/**
+ * Fixed-price activity for the homepage. Only successful claims or accepted offers with
+ * a live or completed transaction are shown, so a failed attempt never becomes
+ * misleading social proof. Buyer identity is intentionally omitted from this public query.
+ */
+export async function recentlyClaimedListings(limit = 16) {
+  return db
+    .select({
+      id: listings.id,
+      title: listings.title,
+      saleType: listings.saleType,
+      priceCents: listings.priceCents,
+      claimedAt: transactions.createdAt,
+      primaryImageId: sql<string | null>`(
+        select i.id
+        from listing_images li
+        inner join images i on i.id = li.image_id
+        where li.listing_id = ${listings.id}
+        order by li.position asc
+        limit 1
+      )`,
+    })
+    .from(transactions)
+    .innerJoin(listings, eq(listings.id, transactions.listingId))
+    .where(
+      and(
+        inArray(transactions.source, ['claim', 'offer_accept']),
+        sql`${transactions.state} in ('open', 'completed')`,
+        sql`${transactions.createdAt} >= now() - interval '72 hours'`,
+      ),
+    )
+    .orderBy(desc(transactions.createdAt), desc(transactions.id))
+    .limit(limit);
+}
+
 export async function getListing(id: string) {
   const rows = await db
     .select({
@@ -742,7 +879,59 @@ export async function getListing(id: string) {
     .from(listingFulfillmentTerms)
     .where(eq(listingFulfillmentTerms.listingId, id));
 
-  return { ...row, images: imageRows, fulfillmentTerms };
+  let deliveryOptions = await db
+    .select({
+      id: marketplaceOptions.id,
+      key: marketplaceOptions.key,
+      label: marketplaceOptions.label,
+      description: marketplaceOptions.description,
+      requiresStore: marketplaceOptions.requiresStore,
+      fulfillmentPath: marketplaceOptions.fulfillmentPath,
+      expectedDeliveryDays: listingDeliveryOptions.expectedDeliveryDays,
+    })
+    .from(listingDeliveryOptions)
+    .innerJoin(marketplaceOptions, eq(marketplaceOptions.id, listingDeliveryOptions.optionId))
+    .where(eq(listingDeliveryOptions.listingId, id))
+    .orderBy(asc(marketplaceOptions.sortOrder), asc(marketplaceOptions.label));
+
+  if (deliveryOptions.length === 0 && row.listing.fulfillmentPaths.length > 0) {
+    const legacyOptions = await db
+      .select()
+      .from(marketplaceOptions)
+      .where(and(
+        eq(marketplaceOptions.kind, 'delivery'),
+        inArray(marketplaceOptions.key, row.listing.fulfillmentPaths),
+      ))
+      .orderBy(asc(marketplaceOptions.sortOrder));
+    deliveryOptions = legacyOptions.map((option) => ({
+      id: option.id,
+      key: option.key,
+      label: option.label,
+      description: option.description,
+      requiresStore: option.requiresStore,
+      fulfillmentPath: option.fulfillmentPath,
+      expectedDeliveryDays: fulfillmentTerms.find((term) => term.fulfillmentPath === option.fulfillmentPath)?.expectedDeliveryDays ?? 5,
+    }));
+  }
+
+  const storedPaymentOptions = row.listing.settlementMethods.length === 0
+    ? []
+    : await db
+        .select()
+        .from(marketplaceOptions)
+        .where(and(
+          eq(marketplaceOptions.kind, 'payment'),
+          inArray(marketplaceOptions.key, row.listing.settlementMethods),
+        ));
+  const paymentByKey = new Map(storedPaymentOptions.map((option) => [option.key, option]));
+  const paymentOptions = row.listing.settlementMethods.map((key) => ({
+    id: paymentByKey.get(key)?.id ?? key,
+    key,
+    label: paymentByKey.get(key)?.label ?? key.replace(/_/g, ' ').replace(/^\w/, (letter) => letter.toUpperCase()),
+    description: paymentByKey.get(key)?.description ?? null,
+  }));
+
+  return { ...row, images: imageRows, fulfillmentTerms, deliveryOptions, paymentOptions };
 }
 
 export async function listingsBySeller(sellerId: string) {
@@ -760,7 +949,7 @@ export async function listingsBySeller(sellerId: string) {
         select count(*)::int
           from claims c
          where c.listing_id = ${listings.id}
-           and c.status in ('active', 'queued', 'promoted')
+           and c.status = 'active'
       )`,
       liveBidCount: sql<number>`(
         select count(*)::int

@@ -6,9 +6,9 @@
 
 ## 1. Executive status
 
-CollectTT already has the difficult domain foundation: accounts, listings, auctions, claims and backups, transaction state, reputation, ratings, relay custody, and the store counter workflow are implemented. The automated baseline is healthy:
+CollectTT already has the difficult domain foundation: accounts, listings, auctions, atomic claims, transaction state, reputation, ratings, relay custody, and the store counter workflow are implemented. The automated baseline is healthy:
 
-- 175 automated tests pass across auth safety, domain, database, browse, trading, and custody suites.
+- 174 automated tests pass across auth safety, domain, database, browse, trading, and custody suites.
 - TypeScript checking passes.
 - The optimized Next.js production build succeeds.
 - The repository contains deployment definitions for a web process, worker, and Postgres.
@@ -29,7 +29,7 @@ The recommended launch target is an **invite-only beta using email and in-app no
 |---|---|---|
 | Accounts and profiles | Auth cutover implemented; live-provider validation pending | Better Auth now provides Google-first sign-in plus verified email/password, email verification, and password recovery. Secure same-email account linking preserves stable user ownership. Google production callbacks and a real Brevo delivery still need to be exercised. Profile editing and polished onboarding remain. |
 | Listing creation and browse | Built | Category-aware listing creation, image processing, filters, pagination, straight sales, and auctions exist. Seller edit/withdraw/manage controls and general text search are not evident. |
-| Trading lifecycle | Built and tested | Atomic claims, backup queue, bidding, soft close, payment handshake, renege handling, and promotion are covered by flow tests. |
+| Trading lifecycle | Built and tested | Atomic winner-only claims, bidding, soft close, payment handshake, renege handling, and auction runner-up promotion are covered by flow tests. |
 | Trust and reputation | Built and tested | Objective counters, restrictions, blind ratings, and public trust pages exist. Admin review/override tooling does not. |
 | Relay custody | Built and tested | Store selection, drop-off code, shelf clock, payment-gated release, pickup, return, and overstay behavior exist. |
 | Store operations | Functional, visually unfinished | `/store` and `/store/[storeId]` provide staff access and counter actions. This is a store-clerk tool, not the platform-admin side. |
@@ -52,7 +52,7 @@ The recommended launch target is an **invite-only beta using email and in-app no
 - [x] Added same-origin post-auth redirect validation and tests.
 - [x] Preserved validated return destinations through password recovery.
 - [x] Hardened unverified sign-in resend, provider/network error handling, and encoded redirect-path validation.
-- [x] Passed 175 tests, TypeScript checking, the UI detector, and a production build.
+- [x] Passed 174 tests, TypeScript checking, the UI detector, and a production build.
 - [ ] Authenticate the sending domain in Brevo and add a production API key/verified sender.
 - [ ] Configure and exercise Google OAuth for localhost and the production hostname.
 - [ ] Manually test new registration, verification, sign-in, account linking, forgotten
@@ -121,7 +121,7 @@ Work in this order:
    - [ ] Replace the minimal profile listing table with a usable seller inventory view.
 2. **Browse and listing detail**
    - [ ] Finish mobile browse/filter behavior, image fallbacks, auction urgency, seller trust cues, and clear settlement/fulfillment explanations.
-   - [ ] Test realistic long titles, missing images, many attributes, ended listings, full backup queues, and bid errors.
+   - [ ] Test realistic long titles, missing images, many attributes, ended listings, relists, and bid errors.
 3. **Deals and trust**
    - [ ] Make the next required action unmistakable for each actor and state.
    - [ ] Clarify deadlines, counterparty responsibilities, custody location/code, dispute feedback, and rating availability.
@@ -280,6 +280,6 @@ These are the next concrete tasks, in order:
 
 ## 8. Latest verification snapshot
 
-As of 27 August 2026, the authentication/Brevo cutover and fixed-price offers pass **175 automated tests**,
+As of 27 August 2026, the authentication/Brevo cutover and fixed-price offers pass **174 automated tests**,
 TypeScript checking, the frontend UI detector, and an optimized Next.js production build.
 These checks do not replace the pending live Google OAuth callback and Brevo delivery tests.

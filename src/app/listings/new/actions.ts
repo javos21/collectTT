@@ -5,11 +5,11 @@ import { z } from 'zod';
 
 import { currentUser } from '@/lib/session';
 import { createListing } from '@/services/listings';
-import { getCategory } from '@/domain/categories/definitions';
+import { UnavailableMarketplaceOptionError } from '@/services/platform-settings';
+import { categoryDefinitionWithCatalogValues } from '@/services/catalog';
 import { parseMoneyInput } from '@/domain/money';
 
-function collectAttributes(categoryKey: string, formData: FormData): Record<string, unknown> {
-  const definition = getCategory(categoryKey);
+function collectAttributes(definition: Awaited<ReturnType<typeof categoryDefinitionWithCatalogValues>>, formData: FormData): Record<string, unknown> {
   const attributes: Record<string, unknown> = {};
 
   for (const attribute of definition.attributes) {
@@ -42,6 +42,7 @@ export async function createListingAction(formData: FormData): Promise<void> {
   const saleType = String(formData.get('saleType') ?? 'straight_sale');
 
   try {
+    const definition = await categoryDefinitionWithCatalogValues(category, { activeOnly: true });
     const listing = await createListing(user.userId, {
       category,
       title: String(formData.get('title') ?? ''),
@@ -52,20 +53,19 @@ export async function createListingAction(formData: FormData): Promise<void> {
       paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
       startBidCents: money(formData, 'startBid'),
       buyoutCents: money(formData, 'buyout'),
-      durationHours: saleType === 'auction' ? Number(formData.get('durationHours') ?? 48) : undefined,
-      fulfillmentPaths: formData.getAll('fulfillmentPaths').map(String),
-      settlementMethods: formData.getAll('settlementMethods').map(String),
+      durationHours: saleType === 'auction' ? Number(formData.get('durationHours') || 48) : undefined,
+      deliveryOptionIds: formData.getAll('deliveryOptionIds').map(String),
+      paymentOptionKeys: formData.getAll('paymentOptionKeys').map(String),
       relayStoreIds: formData.getAll('relayStoreIds').map(String),
       deliveryEstimates: Object.fromEntries(
-        formData.getAll('fulfillmentPaths').map(String).map((path) => [
-          path,
-          Number(formData.get(`deliveryEstimate__${path}`) ?? 0),
+        formData.getAll('deliveryOptionIds').map(String).map((optionId) => [
+          optionId,
+          Number(formData.get(`deliveryEstimate__${optionId}`) ?? 0),
         ]),
       ),
-      sizeClass: String(formData.get('sizeClass') ?? 'small'),
       autoRelistOnRenege: formData.get('autoRelistOnRenege') !== null,
       imageIds: formData.getAll('imageIds').map(String),
-      attributes: collectAttributes(category, formData),
+      attributes: collectAttributes(definition, formData),
     }, { publish: true });
 
     redirect(`/listings/${listing.id}`);
@@ -73,6 +73,9 @@ export async function createListingAction(formData: FormData): Promise<void> {
     if (error instanceof z.ZodError) {
       const detail = error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(' | ');
       redirect(`/listings/new?error=${encodeURIComponent(detail)}`);
+    }
+    if (error instanceof UnavailableMarketplaceOptionError) {
+      redirect(`/listings/new?error=${encodeURIComponent(error.message)}`);
     }
     throw error;
   }

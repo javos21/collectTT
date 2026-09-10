@@ -104,9 +104,9 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
 
     // ---- we have a winner
     //
-    // ★ The whole sale runs in a SAVEPOINT. Custody can refuse to open — the winner's
+    // ★ The whole sale runs in a SAVEPOINT. Custody can refuse to open when the winner's
     //   nominated store was deactivated (the spec's designated way to take a shop
-    //   offline), or it no longer accepts this size. Without the savepoint that refusal
+    //   offline). Without the savepoint that refusal
     //   fails the JOB, which graphile-worker retries to exhaustion, leaving the listing
     //   `active` past its `endsAt` with no winner and nobody told. Rolling back to the
     //   savepoint restores the listing and the bid ladder exactly as they were, so the
@@ -142,6 +142,7 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
           //   neither a path nor a store — see fallbackFulfillmentPath.
           fulfillmentPath:
             winner.fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
+          deliveryOptionId: winner.deliveryOptionId,
           source: 'auction_win',
           winningBidId: winner.id,
           listingTitle: listing.title,

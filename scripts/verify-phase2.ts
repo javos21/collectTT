@@ -83,7 +83,6 @@ async function main(): Promise<void> {
     .values({
       name: `Verify Relay ${S}`,
       area: 'Port of Spain',
-      acceptsSizeClasses: ['small'],
       paidCustodyDays: 7,
       unpaidCustodyDays: 3,
     })
@@ -104,13 +103,12 @@ async function main(): Promise<void> {
       priceCents: 12_000,
       fulfillmentPaths: ['relay'],
       settlementMethods: ['cash'],
-      sizeClass: 'small',
       publishedAt: new Date(),
     })
     .returning({ id: listings.id });
   const listingId = listingRows[0]!.id;
   await db.insert(listingRelayStores).values({ listingId, storeId });
-  console.log(`   store ${storeId} accepts small items; listing ${listingId} nominates it`);
+  console.log(`   store ${storeId} is ready; listing ${listingId} nominates it`);
 
   // ─────────────────────────────────────────────── 2. claim opens the holding
   console.log('2. buyer claims on the relay path — a holding and a drop-off code open…');

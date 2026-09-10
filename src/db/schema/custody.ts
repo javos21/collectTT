@@ -2,9 +2,9 @@
  * Relay stores and physical custody.
  *
  * ★ KEY MODELLING DECISION: custody follows the ITEM, payment follows the TRANSACTION.
- *   A `custody_holdings` row belongs to a LISTING. That is what makes backup promotion
- *   work when the item is already on the shelf — the buyer changes, the item does not
- *   move, and the holding simply re-links to the new transaction attempt.
+ *   A `custody_holdings` row belongs to a LISTING. That is what makes auction runner-up
+ *   promotion work when the item is already on the shelf — the buyer changes, the item
+ *   does not move, and the holding simply re-links to the new transaction attempt.
  */
 
 import { sql } from 'drizzle-orm';
@@ -24,7 +24,7 @@ import {
 
 import { profiles } from './profiles';
 import { listings } from './listings';
-import { sizeClassEnum, custodyStateEnum, custodyHolderEnum, storeStaffRoleEnum } from './enums';
+import { custodyStateEnum, custodyHolderEnum, storeStaffRoleEnum } from './enums';
 
 export const relayStores = pgTable('relay_stores', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -32,8 +32,6 @@ export const relayStores = pgTable('relay_stores', {
   area: text('area').notNull(),
   address: text('address'),
   phoneE164: text('phone_e164'),
-  /** The size gate. "If it's not in the log, it doesn't belong there." */
-  acceptsSizeClasses: sizeClassEnum('accepts_size_classes').array().notNull(),
   paidCustodyDays: integer('paid_custody_days').notNull().default(7),
   /** Tighter — an unpaid item is pure liability for the store. */
   unpaidCustodyDays: integer('unpaid_custody_days').notNull().default(3),
@@ -66,17 +64,16 @@ export const custodyHoldings = pgTable(
     listingId: uuid('listing_id')
       .notNull()
       .references(() => listings.id),
-    /** ★ Re-links on promotion. FK added post-create (transactions references us too). */
+    /** ★ Re-links on auction runner-up promotion. FK added post-create (transactions references us too). */
     currentTransactionId: uuid('current_transaction_id'),
 
     holder: custodyHolderEnum('holder').notNull(),
     storeId: uuid('store_id').references(() => relayStores.id),
     state: custodyStateEnum('state').notNull().default('awaiting_dropoff'),
-    sizeClass: sizeClassEnum('size_class').notNull(),
 
     /**
      * ★ The counter token. Shown to the seller for drop-off and to the buyer for
-     *   collection. NOT regenerated when a holding re-links on promotion — the code
+     *   collection. NOT regenerated when a holding re-links on runner-up promotion — the code
      *   belongs to the item on the shelf, not to the buyer.
      */
     dropoffCode: text('dropoff_code').notNull().unique(),

@@ -431,8 +431,4 @@ describe('deadline policy', () => {
     }
   });
 
-  it('the claim stack is bounded', () => {
-    expect(WINDOWS.maxClaimStackDepth).toBeGreaterThan(1);
-    expect(WINDOWS.maxClaimStackDepth).toBeLessThanOrEqual(3);
-  });
 });

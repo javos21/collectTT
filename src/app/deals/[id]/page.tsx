@@ -1,12 +1,27 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { eq, asc } from 'drizzle-orm';
+import { and, eq, asc } from 'drizzle-orm';
+import {
+  ArrowLeft,
+  Bell,
+  CalendarDays,
+  ChevronDown,
+  CircleDollarSign,
+  Clock3,
+  CreditCard,
+  FileClock,
+  Package,
+  Settings2,
+  Store,
+  UserRound,
+} from 'lucide-react';
 
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
 import { transactions, transactionEvents } from '@/db/schema/transactions';
 import { listings } from '@/db/schema/listings';
 import { profiles } from '@/db/schema/profiles';
+import { marketplaceOptions } from '@/db/schema/settings';
 import { custodyPanelFor } from '@/services/custody';
 import { formatMoney } from '@/domain/money';
 import { usesCustodyTrack } from '@/domain/states/transaction';
@@ -142,6 +157,18 @@ export default async function DealPage({
   // A deal is private to its two parties — this is not a public record.
   if (!isBuyer && !isSeller) notFound();
 
+  const [deliveryOption, paymentOption] = await Promise.all([
+    t.deliveryOptionId === null
+      ? Promise.resolve(null)
+      : db.select({ label: marketplaceOptions.label }).from(marketplaceOptions).where(eq(marketplaceOptions.id, t.deliveryOptionId)).limit(1).then((rows) => rows[0] ?? null),
+    t.settlementMethod === null
+      ? Promise.resolve(null)
+      : db.select({ label: marketplaceOptions.label }).from(marketplaceOptions).where(and(
+          eq(marketplaceOptions.kind, 'payment'),
+          eq(marketplaceOptions.key, t.settlementMethod),
+        )).limit(1).then((rows) => rows[0] ?? null),
+  ]);
+
   const counterpartyId = isBuyer ? t.sellerId : t.buyerId;
   const counterparty = (
     await db
@@ -174,18 +201,21 @@ export default async function DealPage({
     : [custodyPanel.storeName ?? 'the delivery team', custodyPanel.storeArea, custodyPanel.storeAddress]
         .filter((part): part is string => part !== null)
         .join(', ');
+  const settlementLabel = t.settlementMethod === null
+    ? 'Not recorded'
+    : paymentOption?.label ?? SETTLEMENT_LABELS[t.settlementMethod] ?? t.settlementMethod;
+  const fulfillmentLabel = deliveryOption?.label ?? PATH_LABELS[t.fulfillmentPath] ?? t.fulfillmentPath;
 
   return (
     <main className="deal-page">
       <div className="listing-head">
+        <Link className="deal-page__back" href="/deals">
+          <ArrowLeft aria-hidden="true" />
+          My Deals
+        </Link>
         <div className="deal-title-row">
-          <Link className="breadcrumb" href={`/listings/${t.listingId}`}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>{listing.title}</span>
-          </Link>
-          <h1 className="num">{formatMoney(t.amountCents)}</h1>
+          <h1><Link href={`/listings/${t.listingId}`}>{listing.title}</Link></h1>
+          <strong className="deal-title-price num">{formatMoney(t.amountCents)}</strong>
         </div>
       </div>
 
@@ -202,314 +232,161 @@ export default async function DealPage({
       {flash.done === 'confirmed' && <div className="alert alert--info">Payment confirmed.</div>}
       {flash.done === 'disputed' && <div className="alert alert--warn">Recorded. The buyer has been told nothing arrived.</div>}
 
-      <div className="listing-body">
-        {/* -------------------------------------------------- tracks + item + history */}
-        <div className="deal-progress">
-          <h2 className="section-label" style={{ marginTop: 0 }}>Progress</h2>
-          <div className="tracks">
-            <div className="track">
-              <div className="track__head">
-                <span className="track__title">Payment · the money</span>
-                <span className={`track__now${paymentFailed ? ' track__now--off' : ''}`}>
-                  {PAYMENT_LABELS[t.paymentState]}
-                </span>
+      <div className="deal-room">
+        <section className="deal-action-card" aria-labelledby="deal-action-title">
+          {isOpen && isBuyer && t.paymentState === 'pending' && (
+            <>
+              <p className="deal-action-card__eyebrow">Your next step</p>
+              <h2 id="deal-action-title">Pay {counterpartyName}</h2>
+              <dl className="deal-action-card__facts">
+                <div><CircleDollarSign aria-hidden="true" /><dt>Amount</dt><dd className="num">{formatMoney(t.amountCents)}</dd></div>
+                <div><CreditCard aria-hidden="true" /><dt>Payment method</dt><dd>{settlementLabel}</dd></div>
+                <div><CalendarDays aria-hidden="true" /><dt>Payment due</dt><dd><time dateTime={t.paymentDeadlineAt.toISOString()}>{formatDateTime(t.paymentDeadlineAt)}</time></dd></div>
+              </dl>
+              <p className="deal-action-card__help">
+                Pay using the method you agreed{t.fulfillmentPath === 'cash_meetup' ? ', or hand over cash when you meet' : ''}, then mark it here.
+              </p>
+              <form action={markPaidAction}>
+                <input type="hidden" name="transactionId" value={id} />
+                <button type="submit">Mark as paid</button>
+              </form>
+              <p className="deal-action-card__notice"><Bell aria-hidden="true" />Marking as paid notifies {counterpartyName}.</p>
+            </>
+          )}
+
+          {isOpen && isBuyer && t.paymentState === 'buyer_marked_paid' && (
+            <>
+              <p className="deal-action-card__eyebrow">Waiting on {counterpartyName}</p>
+              <h2 id="deal-action-title">Payment marked as sent</h2>
+              <p className="deal-action-card__help">The seller needs to confirm the money arrived. There is nothing else for you to do right now.</p>
+              <p className="deal-action-card__notice"><Bell aria-hidden="true" />We’ll let you know when the seller responds.</p>
+            </>
+          )}
+
+          {isOpen && isSeller && t.paymentState === 'pending' && custodyPanel?.state === 'awaiting_dropoff' && (
+            <>
+              <p className="deal-action-card__eyebrow">Your next step</p>
+              <h2 id="deal-action-title">Drop off the item</h2>
+              <dl className="deal-action-card__facts">
+                <div><Store aria-hidden="true" /><dt>Location</dt><dd>{storeLocation}</dd></div>
+                {dropoffDue !== null && <div><CalendarDays aria-hidden="true" /><dt>Drop-off due</dt><dd><time dateTime={dropoffDue.toISOString()}>{formatDateTime(dropoffDue)}</time></dd></div>}
+              </dl>
+              <span className="codebox" aria-label={`Drop-off code ${custodyPanel.dropoffCode}`}>
+                <span className="codebox__label">Drop-off code</span>
+                <span className="codebox__code">{custodyPanel.dropoffCode}</span>
+              </span>
+              <p className="deal-action-card__notice"><Bell aria-hidden="true" />Show this code when you hand the item to the store.</p>
+            </>
+          )}
+
+          {isOpen && isSeller && t.paymentState === 'pending' && custodyPanel?.state !== 'awaiting_dropoff' && (
+            <>
+              <p className="deal-action-card__eyebrow">Waiting on the buyer</p>
+              <h2 id="deal-action-title">Payment has not been marked as sent</h2>
+              <p className="deal-action-card__help">We’ll notify you when the buyer says they have paid.</p>
+            </>
+          )}
+
+          {isOpen && isSeller && t.paymentState === 'buyer_marked_paid' && (
+            <>
+              <p className="deal-action-card__eyebrow">Your next step</p>
+              <h2 id="deal-action-title">Did the money arrive?</h2>
+              <p className="deal-action-card__help">Confirm only after you can see the payment. Saying no returns the deal to awaiting payment without extending the deadline.</p>
+              <div className="deal-action-card__button-group">
+                <form action={confirmPaymentAction}>
+                  <input type="hidden" name="transactionId" value={id} />
+                  <button type="submit">Yes, I received it</button>
+                </form>
+                <form action={disputePaymentAction}>
+                  <input type="hidden" name="transactionId" value={id} />
+                  <button className="secondary" type="submit">No, nothing arrived</button>
+                </form>
               </div>
-              <Stepper steps={PAYMENT_STEPS} current={paymentFailed ? 0 : paymentIdx} off={paymentFailed} />
+            </>
+          )}
+
+          {!isOpen && (
+            <>
+              <p className="deal-action-card__eyebrow">{t.state === 'completed' ? 'Deal complete' : 'Deal closed'}</p>
+              <h2 id="deal-action-title">{STATE_LABELS[t.state]}</h2>
+              <p className="deal-action-card__help">{t.state === 'completed' ? 'This verified deal is included in both members’ trust activity.' : 'This deal is no longer active.'}</p>
+            </>
+          )}
+        </section>
+
+        {isOpen && custodyPanel?.state === 'awaiting_dropoff' && isBuyer && (
+          <section className="deal-dependency" aria-labelledby="deal-dependency-title">
+            <Clock3 aria-hidden="true" />
+            <div>
+              <p>Waiting on {counterpartyName}</p>
+              <h2 id="deal-dependency-title">Drop off at {custodyPanel.storeName ?? 'the delivery team'}</h2>
+              {dropoffDue !== null && <strong>By <time dateTime={dropoffDue.toISOString()}>{formatDateTime(dropoffDue)}</time></strong>}
+              <span>{counterpartyName} needs to drop the item off{custodyPanel.storeArea ? ` in ${custodyPanel.storeArea}` : ''}.</span>
             </div>
+          </section>
+        )}
 
+        {isOpen && isSeller && t.paymentState === 'pending' && custodyPanel?.state === 'awaiting_dropoff' && (
+          <section className="deal-dependency" aria-labelledby="deal-dependency-title">
+            <Clock3 aria-hidden="true" />
+            <div><p>Waiting on the buyer</p><h2 id="deal-dependency-title">Payment confirmation</h2><strong>Due {formatDateTime(t.paymentDeadlineAt)}</strong><span>The buyer still needs to mark {formatMoney(t.amountCents)} as paid.</span></div>
+          </section>
+        )}
+
+        <section className="deal-status" aria-labelledby="deal-progress-title">
+          <h2 id="deal-progress-title" className="deal-room__section-label">Deal progress</h2>
+          <div className="deal-status__list">
+            <details>
+              <summary>
+                <span className="deal-status__icon"><CreditCard aria-hidden="true" /></span>
+                <strong>Payment</strong>
+                <span className={paymentFailed ? 'is-off' : ''}>{PAYMENT_LABELS[t.paymentState]}</span>
+                <ChevronDown aria-hidden="true" />
+              </summary>
+              <div className="deal-status__steps"><Stepper steps={PAYMENT_STEPS} current={paymentFailed ? 0 : paymentIdx} off={paymentFailed} /></div>
+            </details>
             {hasCustody && (
-              <div className="track track--custody">
-                <div className="track__head">
-                  <span className="track__title">Custody · the item</span>
-                  <span className={`track__now${custodyOff ? ' track__now--off' : ''}`}>
-                    {CUSTODY_LABELS[t.custodyState] ?? humanize(t.custodyState)}
-                  </span>
-                </div>
-                <Stepper steps={CUSTODY_STEPS} current={custodyIdx} off={custodyOff} />
-
-                {custodyPanel !== null && (
-                  <div className="track__detail">
-                {custodyPanel.state === 'awaiting_dropoff' && isSeller && (
-                  <div className="custody-instruction">
-                      <div className="custody-instruction__copy">
-                      <p>
-                        <strong>{storeLocation}</strong>
-                      </p>
-                      {dropoffDue !== null && (
-                        <p className="custody-instruction__deadline">
-                          Drop off by <time dateTime={dropoffDue.toISOString()}>{formatDateTime(dropoffDue)}</time>
-                        </p>
-                      )}
-                    </div>
-                    <span className="codebox" aria-label={`Drop-off code ${custodyPanel.dropoffCode}`}>
-                      <span className="codebox__label">Drop-off code</span>
-                      <span className="codebox__code">{custodyPanel.dropoffCode}</span>
-                    </span>
-                  </div>
-                )}
-
-                {custodyPanel.state === 'awaiting_dropoff' && isBuyer && (
-                  <div className="custody-status-note">
-                    <strong>Waiting for the seller</strong>
-                    <p>
-                      {counterpartyName} needs to drop the item off at{' '}
-                      {custodyPanel.storeName ?? 'the delivery team'}
-                      {dropoffDue !== null && (
-                        <> by <time dateTime={dropoffDue.toISOString()}>{formatDateTime(dropoffDue)}</time></>
-                      )}.
-                    </p>
-                  </div>
-                )}
-
-                {custodyPanel.state === 'at_relay' && isBuyer && (
-                  <div className="custody-instruction">
-                    <div className="custody-instruction__copy">
-                    <strong>Collect your item</strong>
-                    <p>
-                      Your item is at <strong>{custodyPanel.storeName ?? 'the delivery team'}</strong>.
-                      {t.paymentState === 'confirmed'
-                        ? ' Show this code to collect it:'
-                        : ' Confirm your payment and the store will release it. Show this code to collect:'}
-                    </p>
-                    {t.paymentState === 'confirmed' && custodyPanel.custodyExpiresAt !== null && (
-                      <p className="custody-instruction__deadline">
-                        Collect by <time dateTime={custodyPanel.custodyExpiresAt.toISOString()}>{formatDateTime(custodyPanel.custodyExpiresAt)}</time>
-                      </p>
-                    )}
-                    </div>
-                    <span className="codebox" aria-label={`Collection code ${custodyPanel.dropoffCode}`}>
-                      <span className="codebox__label">Your collection code</span>
-                      <span className="codebox__code">{custodyPanel.dropoffCode}</span>
-                    </span>
-                  </div>
-                )}
-
-                {custodyPanel.state === 'at_relay' && isSeller && (
-                  <div className="custody-status-note">
-                    <strong>Item received by the store</strong>
-                    <p>Dropped off at {custodyPanel.storeName ?? 'the delivery team'}. Waiting for the buyer to collect it.</p>
-                  </div>
-                )}
-
-                {custodyPanel.state === 'release_authorized' && isBuyer && (
-                  <div className="custody-instruction">
-                    <div className="custody-instruction__copy">
-                    <strong>Collect your item</strong>
-                    <p>
-                      Cleared for collection at{' '}
-                      <strong>{custodyPanel.storeName ?? 'the delivery team'}</strong>. Show this code:
-                    </p>
-                    </div>
-                    <span className="codebox" aria-label={`Collection code ${custodyPanel.dropoffCode}`}>
-                      <span className="codebox__label">Collection code</span>
-                      <span className="codebox__code">{custodyPanel.dropoffCode}</span>
-                    </span>
-                  </div>
-                )}
-
-                {custodyPanel.state === 'release_authorized' && isSeller && (
-                  <div className="custody-status-note">
-                    <strong>Ready for the buyer</strong>
-                    <p>Cleared for collection at {custodyPanel.storeName ?? 'the delivery team'}. Waiting for the buyer to pick it up.</p>
-                  </div>
-                )}
-
-                {custodyPanel.state === 'picked_up' && (
-                  <div className="custody-status-note custody-status-note--complete">
-                    <strong>Item collected</strong>
-                    <p>{isBuyer ? 'You collected this' : 'The buyer collected this'} from {custodyPanel.storeName ?? 'the delivery team'}.</p>
-                  </div>
-                )}
-
-                {custodyPanel.state === 'returned_to_seller' && (
-                  <div className="custody-status-note"><strong>Returned to seller</strong><p>This item went back to the seller.</p></div>
-                )}
-                {custodyPanel.state === 'voided' && (
-                  <div className="custody-status-note"><strong>Drop-off cancelled</strong><p>This item was never dropped off.</p></div>
-                )}
-                  </div>
-                )}
-              </div>
+              <details>
+                <summary>
+                  <span className="deal-status__icon"><Package aria-hidden="true" /></span>
+                  <strong>Item</strong>
+                  <span className={custodyOff ? 'is-off' : ''}>{CUSTODY_LABELS[t.custodyState] ?? humanize(t.custodyState)}</span>
+                  <ChevronDown aria-hidden="true" />
+                </summary>
+                <div className="deal-status__steps"><Stepper steps={CUSTODY_STEPS} current={custodyIdx} off={custodyOff} /></div>
+              </details>
             )}
           </div>
+        </section>
 
-          <h2 className="section-label">History</h2>
-          <div className="table-wrap">
+        <details className="deal-disclosure">
+          <summary><FileClock aria-hidden="true" /><strong>History</strong><ChevronDown aria-hidden="true" /></summary>
+          <div className="deal-disclosure__body table-wrap">
             <table>
               <tbody>
                 {timeline.map((event) => (
                   <tr key={event.id}>
-                    <td className="muted deal-history__time">
-                      <time dateTime={event.occurredAt.toISOString()}>
-                        <span>{formatHistoryDate(event.occurredAt).date}</span>
-                        <span>{formatHistoryDate(event.occurredAt).time}</span>
-                      </time>
-                    </td>
-                    <td className="deal-history__event">
-                      <span className={`deal-history__track deal-history__track--${event.track}`}>{humanize(event.track)}</span>
-                      <span className="deal-history__transition">{humanize(event.fromState)} → {humanize(event.toState)}</span>
-                    </td>
-                    <td className="deal-history__actor-cell">
-                      <span className={`deal-history__actor deal-history__actor--${event.actorRole}`}>{humanize(event.actorRole)}</span>
-                      {event.reason !== null && <span className="deal-history__reason">{humanize(event.reason)}</span>}
-                    </td>
+                    <td className="muted deal-history__time"><time dateTime={event.occurredAt.toISOString()}><span>{formatHistoryDate(event.occurredAt).date}</span><span>{formatHistoryDate(event.occurredAt).time}</span></time></td>
+                    <td className="deal-history__event"><span className={`deal-history__track deal-history__track--${event.track}`}>{humanize(event.track)}</span><span className="deal-history__transition">{humanize(event.fromState)} → {humanize(event.toState)}</span></td>
+                    <td className="deal-history__actor-cell"><span className={`deal-history__actor deal-history__actor--${event.actorRole}`}>{humanize(event.actorRole)}</span>{event.reason !== null && <span className="deal-history__reason">{humanize(event.reason)}</span>}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </details>
 
-        {/* -------------------------------------------------- action rail */}
-        <aside className="buybox action-grid">
-          <div className="action-grid__heading">
-            <span className="action-grid__eyebrow">Action grid</span>
-            <span className="action-grid__hint">What happens next</span>
+        <details className="deal-disclosure">
+          <summary><Settings2 aria-hidden="true" /><strong>Deal details</strong><ChevronDown aria-hidden="true" /></summary>
+          <div className="deal-disclosure__body deal-details__grid">
+            <div className="deal-detail"><span>Status</span><strong className={`badge ${t.state === 'completed' ? 'badge--live' : t.state === 'open' ? 'badge--claimed' : 'badge--ended'}`}>{STATE_LABELS[t.state]}</strong></div>
+            <div className="deal-detail"><span>{counterpartyRole}</span><strong><UserRound aria-hidden="true" /><Link href={`/members/${counterpartyId}`}>{counterpartyName}</Link></strong></div>
+            <div className="deal-detail"><span>Fulfillment</span><strong>{fulfillmentLabel}</strong></div>
+            <div className="deal-detail"><span>Payment method</span><strong>{settlementLabel}</strong></div>
+            {t.attemptNumber > 1 && <div className="deal-detail"><span>Attempt</span><strong>{t.attemptNumber}</strong></div>}
           </div>
-          {isOpen && hasCustody && custodyPanel?.state === 'awaiting_dropoff' && isSeller && (
-            <div className="action-grid__task">
-              <span>Next move</span>
-              <strong>Drop off the item</strong>
-              <p>{storeLocation}</p>
-            </div>
-          )}
-          {isOpen && hasCustody && custodyPanel?.state === 'awaiting_dropoff' && isBuyer && (
-            <div className="action-grid__task">
-              <span>Next move</span>
-              <strong>Wait for the seller</strong>
-              <p>{counterpartyName} will drop it off at {storeLocation}.</p>
-            </div>
-          )}
-          {isOpen ? (
-            <>
-              {isBuyer && t.paymentState === 'pending' && (
-                <form className="buybox__form" action={markPaidAction}>
-                  <input type="hidden" name="transactionId" value={id} />
-                  <p className="movebox__label">Your move</p>
-                  <p className="movebox__cta">Pay {counterpartyName}, then mark it here</p>
-                  <p className="buybox__note" style={{ marginTop: 0 }}>
-                    Cash, bank transfer, however you agreed
-                    {t.fulfillmentPath === 'cash_meetup' && ' — or meet up and hand over cash'}. They
-                    then confirm it arrived.
-                  </p>
-                  <button type="submit">I&apos;ve paid</button>
-                </form>
-              )}
-
-              {isBuyer && t.paymentState === 'buyer_marked_paid' && (
-                <>
-                  <p className="movebox__label">Waiting on {counterpartyName}</p>
-                  <p className="movebox__cta">They need to confirm they got it</p>
-                  <div className="buybox__state">
-                    Nothing to do right now — the seller confirms the money arrived, then you&apos;re
-                    both done.
-                  </div>
-                </>
-              )}
-
-              {isSeller && t.paymentState === 'pending' && (
-                <>
-                  <p className="movebox__label">Waiting on the buyer</p>
-                  <p className="movebox__cta">They need to pay first</p>
-                  <div className="buybox__state">
-                    If the deadline passes, it&apos;s recorded against them and the item moves to the
-                    next person in the queue automatically.
-                  </div>
-                </>
-              )}
-
-              {isSeller && t.paymentState === 'buyer_marked_paid' && (
-                <>
-                  <p className="movebox__label">Your move</p>
-                  <p className="movebox__cta">Did the money actually arrive?</p>
-                  <p className="buybox__note" style={{ marginTop: 0 }}>
-                    Confirm only if you&apos;ve seen it. Saying no returns the deal to awaiting
-                    payment and does <em>not</em> extend the buyer&apos;s deadline.
-                  </p>
-                  <div className="buybox__form" style={{ display: 'grid', gap: '.6rem' }}>
-                    <form action={confirmPaymentAction}>
-                      <input type="hidden" name="transactionId" value={id} />
-                      <button type="submit" style={{ width: '100%', marginTop: 0 }}>
-                        Yes, I received it
-                      </button>
-                    </form>
-                    <form action={disputePaymentAction}>
-                      <input type="hidden" name="transactionId" value={id} />
-                      <button className="secondary" type="submit" style={{ width: '100%', marginTop: 0 }}>
-                        No, nothing arrived
-                      </button>
-                    </form>
-                  </div>
-                </>
-              )}
-            </>
-          ) : t.state === 'completed' ? (
-            <>
-              <p className="movebox__label">Deal complete</p>
-              <p className="movebox__cta">Transaction completed</p>
-              <div className="buybox__state">
-                This deal is complete. Its verified activity is included in both members&apos;
-                trust snapshots.
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="movebox__label">Closed</p>
-              <p className="movebox__cta">{STATE_LABELS[t.state]}</p>
-              <div className="buybox__state">This deal is no longer active.</div>
-            </>
-          )}
-
-          <hr />
-          <dl style={{ margin: 0 }}>
-            <div className="fact-row" style={{ borderTop: 'none' }}>
-              <dt>{counterpartyRole}</dt>
-              <dd className="fact-row__value">
-                <svg className="fact-row__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.8" />
-                  <path d="M5.5 20c.8-3.2 3-4.8 6.5-4.8s5.7 1.6 6.5 4.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-                <Link href={`/members/${counterpartyId}`}>{counterpartyName}</Link>
-              </dd>
-            </div>
-            {isOpen && t.paymentState === 'pending' && (
-              <div className="fact-row fact-row--warn">
-                <dt>Payment due</dt>
-                <dd className="num">{formatDateTime(t.paymentDeadlineAt)}</dd>
-              </div>
-            )}
-          </dl>
-
-        </aside>
+        </details>
       </div>
-
-      <section className="deal-details" aria-labelledby="deal-details-title">
-        <h2 id="deal-details-title" className="deal-details__label">Deal details</h2>
-        <div className="deal-details__grid">
-          <div className="deal-detail">
-            <span>Status</span>
-            <strong className={`badge ${t.state === 'completed' ? 'badge--live' : t.state === 'open' ? 'badge--claimed' : 'badge--ended'}`}>
-              {STATE_LABELS[t.state]}
-            </strong>
-          </div>
-          <div className="deal-detail">
-            <span>Fulfillment</span>
-            <strong>{PATH_LABELS[t.fulfillmentPath]}</strong>
-          </div>
-          {t.settlementMethod !== null && (
-            <div className="deal-detail">
-              <span>Payment method</span>
-              <strong>{SETTLEMENT_LABELS[t.settlementMethod] ?? t.settlementMethod}</strong>
-            </div>
-          )}
-          {t.attemptNumber > 1 && (
-            <div className="deal-detail">
-              <span>Attempt</span>
-              <strong>{t.attemptNumber}</strong>
-            </div>
-          )}
-        </div>
-      </section>
     </main>
   );
 }

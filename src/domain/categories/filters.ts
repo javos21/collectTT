@@ -26,6 +26,10 @@ export function filtersFor(categoryKey: string): FilterDescriptor[] {
   return descriptorsFrom(getCategory(categoryKey));
 }
 
+export function filtersForDefinition(definition: CategoryDefinition): FilterDescriptor[] {
+  return descriptorsFrom(definition);
+}
+
 export function allFilters(): FilterDescriptor[] {
   return CATEGORY_LIST.flatMap(descriptorsFrom);
 }
@@ -106,6 +110,30 @@ export function coerceFilters(
     if (raw === undefined) continue;
     const value = coerceFilterValue(categoryKey, filter.key, raw);
     if (value !== null) out[filter.key] = value;
+  }
+  return out;
+}
+
+export function coerceFiltersForDefinition(
+  definition: CategoryDefinition,
+  params: Record<string, string | undefined>,
+): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const filter of filtersForDefinition(definition)) {
+    const raw = params[filter.key];
+    if (raw === undefined) continue;
+    const attr = definition.attributes.find((candidate) => candidate.key === filter.key && candidate.filterable === true);
+    if (attr === undefined) continue;
+    if (attr.type === 'enum') {
+      if (attr.options.includes(raw)) out[filter.key] = raw;
+    } else if (attr.type === 'boolean') {
+      if (raw === 'true' || raw === 'false') out[filter.key] = raw === 'true';
+    } else if (attr.type === 'number' || attr.type === 'year') {
+      const number = Number(raw);
+      if (Number.isFinite(number)) out[filter.key] = number;
+    } else if (raw !== '') {
+      out[filter.key] = raw;
+    }
   }
   return out;
 }

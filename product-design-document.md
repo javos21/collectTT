@@ -82,7 +82,7 @@ Chosen on merits for reliability, speed, and low cost at this scale — not on p
 | **Database** | **Render Postgres** | Relational data (transactions ↔ listings ↔ users ↔ custody ↔ reputation) with ACID for the trust-critical multi-step paths. Co-located with app = one vendor, one bill. Portable/open-source (no lock-in). **No Atlas-style scaling cliff.** |
 | **ORM / query** | **Drizzle** (SQL-close, lightweight) | Hot atomic paths (claim, bid) hand-written as `UPDATE … WHERE status='active' RETURNING …` so contention resolves in one round-trip. |
 | **Validation** | **Zod** | Runtime input validation at every boundary. |
-| **Job queue** | **Graphile Worker** (Postgres-backed, `SKIP LOCKED` + `LISTEN/NOTIFY`) | Every "do this later" is a delayed job: payment window expiry → reneged + promote backup; custody clock → overstay flag; notification dispatch. **Killer feature:** enqueue the job in the *same transaction* that changes state — impossible to get "marked reneged but forgot to notify." No Redis. |
+| **Job queue** | **Graphile Worker** (Postgres-backed, `SKIP LOCKED` + `LISTEN/NOTIFY`) | Every "do this later" is a delayed job: payment window expiry → reneged + auction runner-up promotion; custody clock → overstay flag; notification dispatch. **Killer feature:** enqueue the job in the *same transaction* that changes state — impossible to get "marked reneged but forgot to notify." No Redis. |
 | **Real-time** | **Server-Sent Events (SSE)** | Bids are discrete HTTP POSTs; the only push-out is "new bid / countdown extended / outbid" — one-directional, exactly SSE's job, over plain HTTP. No WebSockets, no Pusher/Ably. `LISTEN/NOTIFY` is the fan-out backplane if you ever run multiple web instances. Start with 2–3s polling; SSE is the upgrade. |
 | **Auth** | **Better Auth** (self-hosted, owns data in your Postgres) | **Google is the primary sign-in path**, with verified email/password as the fallback. Multiple methods link to one stable user record so listings, reputation, and deals never split across identities. *(The durable call remains "self-hosted, own-your-data".)* |
 | **Image storage** | **Cloudflare R2 + CDN** | **Zero egress fees** — the biggest cost lever for a gallery-heavy app serving high-fidelity WebP all day (detail-heavy items — foil cards, comic covers, collectibles). Pre-generate 2–3 responsive sizes + one large zoom variant on upload (via `sharp` in the worker). |
@@ -132,7 +132,14 @@ If optimizing purely for real-time-bidding performance-per-dollar, **Elixir/Phoe
 
 **Atomic claims (straight sale).** First-to-claim becomes a single conditional update — `UPDATE listings SET status='claimed', winner=$user WHERE id=$id AND status='active' RETURNING *`. Server receipt order resolves it deterministically; "I said mine first" disputes disappear.
 
-**Backup-claim queue.** A fixed-price claim is a *stack*, not a single winner (cap depth 3–4). When the top claimer's window lapses (`reneged`), the transaction auto-promotes the next person and notifies them ("you're up, X hours to pay"). The ghoster eats the reliability hit; the seller does nothing.
+**Winner-only fixed-price claims.** A fixed-price listing has one atomic winner. If two
+buyers claim at the same time, the database conditional update gives the item to exactly
+one buyer and the other receives a clear conflict. If the deal later fails, the seller's
+relist setting determines whether the item returns to the catalog; no backup queue is
+created.
+
+**Auction runner-ups.** Auctions retain their bid ladder. If an auction winner reneges,
+the next eligible bidder can be promoted at their own bid with a fresh payment window.
 
 **Auctions with anti-snipe (soft close).** Same conditional pattern (`currentBid < newBid AND endsAt > now`). A bid inside the final window (e.g. 2 min) pushes `endsAt` out by that window, extending until bidding goes quiet. Server-authoritative clock. Communicate up front that "closes 8:00" now means "closes 8:00 unless bids keep landing" — a soft close, not a bug.
 
@@ -156,7 +163,7 @@ The Store gates custody release on payment confirmation. Seller drops the item *
 
 **Vouching (with skin in the game).** A vouch carries accountability: vouch for someone who reneges and it dings a separate **vouch-quality score** (not your transaction reputation) that governs how much future vouches are worth. Cap active vouches (~3). The friction is the point.
 
-**Transactional job integrity.** State change + its side-effect job are enqueued in one DB transaction (Graphile Worker), so the system can never half-complete a reneged-and-promote or a release-and-complete.
+**Transactional job integrity.** State change + its side-effect job are enqueued in one DB transaction (Graphile Worker), so the system can never half-complete an auction runner-up promotion or a release-and-complete transition.
 
 **Idempotency.** WhatsApp webhooks (Meta retries) and all job handlers are idempotent.
 
@@ -199,10 +206,10 @@ monthly allowance server-side.
 ### MVP (must-ship)
 - Google-first or verified email/password accounts; profile with "member since / completed deals / paid-on-time %"
 - Create listing: pick **category** (trading card / comic / collectible) → category-specific attribute fields (JSONB); straight-sale or auction; required fields for **accepted settlement methods** and **fulfillment path**, shown before anyone claims/bids
-- Straight-sale claim (atomic) + **backup-claim queue**
+- Straight-sale claim (atomic, winner-only)
 - Auction: starting bid, buyout, deadline, **anti-snipe soft close**, live bid feed (polling → SSE)
 - Transaction lifecycle + **mark-paid / confirm-received handshake**
-- **Payment window** with auto-`reneged` + backup promotion
+- **Payment window** with auto-`reneged` + auction runner-up promotion
 - Objective reputation counters + automatic low-rep restrictions (prepay/meetup-only)
 - **Blind mutual ratings** on completed deals
 - Store custody track + **Store audit/control log** (release / picked-up / overstay)
@@ -308,7 +315,11 @@ Any *one* of the core revenue streams (subscription, raffle overage, delivery ra
 Postgres schema for Users, Listings (with `category` + JSONB `attributes`), Bids, Transactions, Custody, RelayStores, ReputationEvents, Vouches, Notifications, Subscriptions — plus the per-category attribute-declaration config. Next.js + Drizzle + Zod scaffold. Better Auth with **Google-first sign-in, verified email/password, secure same-email account linking, email verification, and password recovery**. Brevo provides production authentication and transactional email through the shared adapter; console delivery remains available locally. Graphile Worker wired. Image upload → R2 pipeline. *Deliverable: accounts, profiles, multi-category listing CRUD.*
 
 **Phase 1 — Core trading loop (MVP heart)**
-Straight-sale atomic claim + backup queue. Auctions + anti-snipe soft close. Transaction lifecycle + mark-paid/confirm handshake. Payment window → reneged → promote. Objective reputation counters + restrictions. Blind mutual ratings. Live feed via polling. *Deliverable: a full deal runs end-to-end, P2P.*
+Winner-only straight-sale claims with atomic conflict handling. Auctions + anti-snipe soft
+close with runner-up promotion. Transaction lifecycle + mark-paid/confirm handshake.
+Payment window → reneged → fixed-price relist or auction runner-up. Objective reputation
+counters + restrictions. Blind mutual ratings. Live feed via polling. *Deliverable: a
+full deal runs end-to-end, P2P.*
 
 **Phase 2 — Custody & store tooling**
 Two-track (payment + custody) model. Store drop-off flow. **Store audit/control log** (release / picked-up / overstay). Shared Store profile with invited staff access. Time-bounded custody, size gate, unpaid-item return path. In-app + email notifications hardened. *Deliverable: Store custody works; Stores get their control tool.*

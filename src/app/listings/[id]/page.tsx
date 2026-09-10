@@ -1,48 +1,64 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Pencil } from 'lucide-react';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { getListing, getListingActivity } from '@/services/listings';
 import { candidateStoresFor } from '@/services/relay-stores';
-import { getCategory } from '@/domain/categories/definitions';
+import { categoryDefinitionWithCatalogValues } from '@/services/catalog';
 import { formatMoney, minimumNextBid } from '@/domain/money';
-import { SETTLEMENT_METHOD_LABELS } from '@/domain/policy/settlement';
 import { imageVariants } from '@/services/images';
 import { currentUser } from '@/lib/session';
 import { db } from '@/db/client';
 import { bids, claims } from '@/db/schema/listings';
 import { profiles } from '@/db/schema/profiles';
+import { transactions } from '@/db/schema/transactions';
 import { acceptOfferAction, bidAction, cancelOfferAndClaimAction, claimAction, rejectOfferAction, submitOfferAction } from './actions';
 import { AuctionLive } from './bid-panel';
 import { latestOfferForBuyer, pendingOffersForSeller } from '@/services/offers';
+import { trustSnapshotsForMembers, type TrustSnapshot } from '@/services/reputation';
 import { SignInRequiredModal } from '@/components/sign-in-required-modal';
-import { QueueJoinedModal } from './queue-joined-modal';
+import { ClaimConfirmedModal } from './claim-confirmed-modal';
 import { SettlementFields } from './settlement-fields';
+import { BuyerSnapshotLink, type BuyerSnapshotData } from '../../deals/buyer-snapshot-link';
 
 export const dynamic = 'force-dynamic';
 
-const DELIVERY_LABELS: Record<string, string> = {
-  cash_meetup: 'Meet in person',
-  remote_ship: 'Seller ships to you',
-  relay: 'Pick up at a store',
-  full_service: 'CollectTT delivery',
-};
+function serializeTrustSnapshot(snapshot: TrustSnapshot): BuyerSnapshotData {
+  return {
+    userId: snapshot.userId,
+    displayName: snapshot.displayName,
+    handle: snapshot.handle,
+    area: snapshot.area,
+    memberSince: snapshot.memberSince.toISOString(),
+    counters: snapshot.counters,
+    events: snapshot.events.map((event) => ({
+      id: event.id,
+      type: event.type,
+      title: event.title,
+      occurredAt: event.occurredAt.toISOString(),
+    })),
+  };
+}
 
 export default async function ListingPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; queued?: string; bid?: string; offer?: string; auth?: string }>;
+  searchParams: Promise<{ error?: string; claimed?: string; bid?: string; offer?: string; auth?: string }>;
 }) {
   const { id } = await params;
   const flash = await searchParams;
   const result = await getListing(id);
   if (result === null) notFound();
 
-  const { listing, sellerName, sellerSince, images, fulfillmentTerms } = result;
-  const category = getCategory(listing.category);
+  const { listing, sellerName, sellerSince, images, deliveryOptions, paymentOptions } = result;
+  const [category, sellerSnapshots] = await Promise.all([
+    categoryDefinitionWithCatalogValues(listing.category),
+    trustSnapshotsForMembers(db, [listing.sellerId]),
+  ]);
+  const sellerSnapshot = sellerSnapshots.get(listing.sellerId) ?? null;
   const attributes = listing.attributes as Record<string, unknown>;
   const viewer = await currentUser();
   const showSignInModal = viewer === null && flash.auth === 'buy';
@@ -57,20 +73,6 @@ export default async function ListingPage({
 
   const isAuction = listing.saleType === 'auction';
   const isOpen = listing.status === 'active';
-  const sellerQueue = isSeller && !isAuction
-    ? await db
-        .select({
-          position: claims.position,
-          status: claims.status,
-          claimantName: profiles.displayName,
-          claimedAt: claims.claimedAt,
-        })
-        .from(claims)
-        .innerJoin(profiles, eq(profiles.userId, claims.claimantId))
-        .where(and(eq(claims.listingId, id), inArray(claims.status, ['active', 'queued', 'promoted'])))
-        .orderBy(asc(claims.position))
-    : [];
-
   // Recent bids, for the live feed.
   const recentBids = isAuction
     ? await db
@@ -87,40 +89,51 @@ export default async function ListingPage({
         .limit(8)
     : [];
 
-  // Where the viewer stands in the claim stack, if anywhere.
+  // The viewer's active claim, if any. Historical terminal claims are not shown as
+  // an active deal and do not block a later relist.
   const myClaim =
     viewer !== null && !isAuction
       ? (
           await db
             .select()
             .from(claims)
-            .where(and(eq(claims.listingId, id), eq(claims.claimantId, viewer.userId)))
+            .where(and(eq(claims.listingId, id), eq(claims.claimantId, viewer.userId), eq(claims.status, 'active')))
             .limit(1)
         )[0]
       : undefined;
 
-  const stackDepth = !isAuction
-    ? (await db
-        .select({ id: claims.id })
-        .from(claims)
-        .where(and(eq(claims.listingId, id), inArray(claims.status, ['active', 'queued', 'promoted'])))).length
-    : 0;
+  // Never trust `?claimed=1` by itself. The transaction must belong to this viewer
+  // and this listing before the success modal is rendered.
+  const claimedTransactionId =
+    flash.claimed === '1' && viewer !== null && !isSeller && myClaim?.transactionId !== undefined && myClaim.transactionId !== null
+      ? (
+          await db
+            .select({ id: transactions.id })
+            .from(transactions)
+            .where(
+              and(
+                eq(transactions.id, myClaim.transactionId),
+                eq(transactions.listingId, id),
+                eq(transactions.buyerId, viewer.userId),
+                inArray(transactions.state, ['open', 'completed']),
+              ),
+            )
+            .limit(1)
+        )[0]?.id ?? null
+      : null;
 
   const minBid = minimumNextBid(listing.currentBidCents, listing.startBidCents ?? 0);
 
   // Candidate stores for the picker — UX filtering only; claimListing re-runs
   // the real gate server-side.
-  const relayCandidates = listing.fulfillmentPaths.includes('relay')
-    ? await candidateStoresFor(db, id, listing.sizeClass)
+  const relayCandidates = deliveryOptions.some((option) => option.requiresStore)
+    ? await candidateStoresFor(db, id)
     : [];
 
-  // ★ Never offer a path the member cannot actually complete. A listing can declare
-  //   `relay` while every store the seller nominated has since been deactivated or
-  //   stopped accepting this size — `candidateStoresFor` then returns nothing, no
-  //   picker renders, and choosing "Pick up at a store" is refused only AFTER the
-  //   form is submitted. Both the bid form and the claim form read this list.
-  const choosablePaths = listing.fulfillmentPaths.filter(
-    (path) => path !== 'relay' || relayCandidates.length > 0,
+  // Never offer a path the member cannot actually complete. A listing can declare
+  // `relay` while every store the seller nominated has since been deactivated.
+  const choosableDeliveryOptions = deliveryOptions.filter(
+    (option) => !option.requiresStore || relayCandidates.length > 0,
   );
   const paymentWindowDays = Math.ceil(listing.paymentWindowHours / 24);
   const canMakeOffer = !isAuction && viewer !== null && !isSeller && listing.status === 'active' && listing.acceptsOffers;
@@ -129,10 +142,8 @@ export default async function ListingPage({
     <SettlementFields
       idPrefix={idPrefix}
       fieldPrefix={fieldPrefix}
-      paths={choosablePaths}
-      pathLabels={DELIVERY_LABELS}
-      paymentMethods={listing.settlementMethods}
-      paymentLabels={SETTLEMENT_METHOD_LABELS}
+      deliveryOptions={choosableDeliveryOptions}
+      paymentOptions={paymentOptions}
       relayCandidates={relayCandidates}
     />
   );
@@ -175,8 +186,8 @@ export default async function ListingPage({
           <span>{flash.error}</span>
         </div>
       )}
-      {flash.queued !== undefined && flash.queued !== '' && (
-        <QueueJoinedModal position={flash.queued} listingId={id} />
+      {claimedTransactionId !== null && (
+        <ClaimConfirmedModal transactionId={claimedTransactionId} listingId={id} />
       )}
       {flash.bid === 'ok' && <div className="alert alert--info">Bid placed.</div>}
       {flash.bid === 'extended' && (
@@ -242,20 +253,69 @@ export default async function ListingPage({
               </section>
             )}
 
+            {sellerSnapshot !== null && (
+              <section className="listing-detail-card listing-seller-summary" aria-labelledby="seller-snapshot-heading">
+                <BuyerSnapshotLink
+                  snapshot={serializeTrustSnapshot(sellerSnapshot)}
+                  subjectLabel="Seller"
+                  triggerClassName="listing-seller-summary__trigger"
+                  showTriggerIcon={false}
+                  triggerContent={
+                    <>
+                      <span className="listing-seller-summary__header">
+                        <h2 id="seller-snapshot-heading" className="listing-detail-title">Seller</h2>
+                        <span className="listing-seller-summary__hint">Click to view trust snapshot</span>
+                      </span>
+                      <span className="listing-seller-summary__body">
+                        <span className="listing-seller-summary__identity">
+                          <span className="listing-seller-summary__avatar" aria-hidden="true">
+                            {sellerName.trim().charAt(0).toUpperCase()}
+                          </span>
+                          <span className="listing-seller-summary__identity-copy">
+                            <strong className="listing-seller-summary__name">{sellerName}</strong>
+                            <span className="listing-seller-summary__meta">
+                              Member since {sellerSince.toLocaleDateString('en-TT')}
+                            </span>
+                          </span>
+                        </span>
+                        <span className="listing-seller-summary__metric">
+                          <strong>{sellerSnapshot.counters.sellCompleted}</strong>
+                          <span>Completed sales</span>
+                        </span>
+                      </span>
+                    </>
+                  }
+                />
+              </section>
+            )}
+
             <section className="listing-detail-card listing-settlement-card" aria-label="Settlement options">
               <div className="listing-settlement-panel">
                 <h2 id="delivery-heading" className="listing-detail-title">Delivery options</h2>
-                {choosablePaths.length > 0 ? (
+                {choosableDeliveryOptions.length > 0 ? (
                   <ul className="settle-list">
-                    {choosablePaths.map((path) => {
-                      const term = fulfillmentTerms.find((item) => item.fulfillmentPath === path);
+                    {choosableDeliveryOptions.map((option) => {
                       return (
-                        <li key={path}>
+                        <li key={option.id}>
                           <span className="settle-list__copy">
-                            <strong>{DELIVERY_LABELS[path] ?? path}</strong>
-                            {term !== undefined && (
-                              <span className="settle-list__meta">
-                                Expected within {term.expectedDeliveryDays} day{term.expectedDeliveryDays === 1 ? '' : 's'}
+                            <span className="settle-list__summary">
+                              <strong>{option.label}</strong>
+                              {option.expectedDeliveryDays !== undefined && (
+                                <span className="settle-list__meta">
+                                  Expected within {option.expectedDeliveryDays} day{option.expectedDeliveryDays === 1 ? '' : 's'}
+                                </span>
+                              )}
+                            </span>
+                            {option.requiresStore && relayCandidates.length > 0 && (
+                              <span className="settle-list__locations" aria-label="Pickup Locations">
+                                <span className="settle-list__locations-label">Pickup Locations</span>
+                                <span className="settle-list__locations-list">
+                                  {relayCandidates.map((store) => (
+                                    <span className="settle-list__location" key={store.id}>
+                                      {store.name} <span className="settle-list__location-area">({store.area})</span>
+                                    </span>
+                                  ))}
+                                </span>
                               </span>
                             )}
                           </span>
@@ -270,13 +330,12 @@ export default async function ListingPage({
               <div className="listing-settlement-panel">
                 <h2 id="payment-heading" className="listing-detail-title">Payment options</h2>
                 <ul className="payment-options-list" aria-label="Accepted payment methods">
-                  {listing.settlementMethods.map((method) => (
-                    <li key={method}>{SETTLEMENT_METHOD_LABELS[method as keyof typeof SETTLEMENT_METHOD_LABELS] ?? method}</li>
+                  {paymentOptions.map((option) => (
+                    <li key={option.key}>{option.label}</li>
                   ))}
                 </ul>
                 <div className="listing-settlement-panel__notes">
                   <p>
-                    <strong>Payment is made directly between buyer and seller.</strong>
                     <strong>
                       Payment is expected within {paymentWindowDays} day{paymentWindowDays === 1 ? '' : 's'} after a deal opens.
                     </strong>
@@ -407,24 +466,18 @@ export default async function ListingPage({
                 <p className="buybox__note">
                   Cancel the offer if you want to buy this item at the asking price.
                 </p>
-                {(listing.status === 'active' || (listing.status === 'claimed' && stackDepth < 3)) && (
+                {listing.status === 'active' && (
                   <form className="buybox__form" action={cancelOfferAndClaimAction}>
                     <input type="hidden" name="listingId" value={id} />
                     <input type="hidden" name="offerId" value={myOffer.id} />
-                    <button type="submit">
-                      {listing.status === 'active'
-                        ? 'Cancel offer and claim at full price'
-                        : 'Cancel offer and join the backup queue'}
-                    </button>
+                    <button type="submit">Cancel offer and claim at full price</button>
                   </form>
                 )}
               </div>
             </div>
           ) : myClaim !== undefined ? (
             <div className="buybox__state">
-              {myClaim.status === 'active'
-                ? 'You have claimed this item.'
-                : `You are #${myClaim.position} in the backup queue.`}
+              You have claimed this item.
               {myClaim.transactionId !== null && (
                 <>
                   {' '}
@@ -432,21 +485,11 @@ export default async function ListingPage({
                 </>
               )}
             </div>
-          ) : listing.status === 'active' || (listing.status === 'claimed' && stackDepth < 3) ? (
+          ) : listing.status === 'active' ? (
             <form className="buybox__form" action={claimAction}>
               <input type="hidden" name="listingId" value={id} />
               {settleForm('')}
-              <button type="submit">
-                {listing.status === 'active'
-                  ? 'Claim it'
-                  : `Join the backup queue (#${stackDepth + 1})`}
-              </button>
-              {listing.status === 'claimed' && (
-                <p className="buybox__note">
-                  Someone claimed this already. Joining the queue means it comes to you
-                  automatically if they don&apos;t pay in time.
-                </p>
-              )}
+              <button type="submit">Claim it</button>
               {canMakeOffer && (
                 <div className="buybox__offer-wrap">
                   <hr />
@@ -493,24 +536,6 @@ export default async function ListingPage({
             </span>
           </div>
 
-          <div className="buybox__details">
-            <section className="buybox__section" aria-labelledby="seller-heading">
-              <h2 id="seller-heading" className="buybox__section-title">Seller</h2>
-              <div className="seller-card">
-                <span className="seller-card__avatar" aria-hidden="true">
-                  {sellerName.trim().charAt(0).toUpperCase()}
-                </span>
-                <span>
-                  <Link className="seller-card__name" href={`/members/${listing.sellerId}`}>
-                    {sellerName}
-                  </Link>
-                  <span className="seller-card__meta">
-                    Member since {sellerSince.toLocaleDateString('en-TT')}
-                  </span>
-                </span>
-              </div>
-            </section>
-          </div>
         </aside>
       </div>
 
@@ -534,8 +559,8 @@ export default async function ListingPage({
                   <tr key={offer.id}>
                     <td>{offer.buyerName}</td>
                     <td className="num"><strong>{formatMoney(offer.amountCents)}</strong></td>
-                    <td>{DELIVERY_LABELS[offer.fulfillmentPath] ?? offer.fulfillmentPath}</td>
-                    <td>{offer.settlementMethod === null ? 'Legacy offer' : SETTLEMENT_METHOD_LABELS[offer.settlementMethod as keyof typeof SETTLEMENT_METHOD_LABELS] ?? offer.settlementMethod}</td>
+                    <td>{deliveryOptions.find((option) => option.id === offer.deliveryOptionId)?.label ?? offer.fulfillmentPath}</td>
+                    <td>{offer.settlementMethod === null ? 'Legacy offer' : paymentOptions.find((option) => option.key === offer.settlementMethod)?.label ?? offer.settlementMethod}</td>
                     <td className="muted">{offer.createdAt.toLocaleString('en-TT')}</td>
                     <td>
                       <div className="offer-actions">
@@ -551,27 +576,6 @@ export default async function ListingPage({
                         </form>
                       </div>
                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      {isSeller && !isAuction && sellerQueue.length > 0 && (
-        <section className="offers-section" aria-labelledby="claim-queue-heading">
-          <h2 id="claim-queue-heading" className="section-label">Claim queue</h2>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Priority</th><th>Buyer</th><th>Status</th><th>Claimed</th></tr></thead>
-              <tbody>
-                {sellerQueue.map((claim) => (
-                  <tr key={`${claim.position}-${claim.claimedAt.toISOString()}`}>
-                    <td><strong>#{claim.position}</strong></td>
-                    <td>{claim.claimantName}</td>
-                    <td>{claim.status === 'active' ? 'First claim in progress' : 'Backup queue'}</td>
-                    <td className="muted">{claim.claimedAt.toLocaleString('en-TT')}</td>
                   </tr>
                 ))}
               </tbody>

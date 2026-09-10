@@ -23,6 +23,7 @@ import { listings, claims } from '../src/db/schema/listings';
 import { transactions } from '../src/db/schema/transactions';
 import { claimListing } from '../src/db/atomic/claim-listing';
 import { placeBid } from '../src/db/atomic/place-bid';
+import { ConflictError } from '../src/services/transactions';
 import { formatMoney } from '../src/domain/money';
 
 const S = randomUUID().slice(0, 6);
@@ -155,8 +156,8 @@ async function main(): Promise<void> {
   if (facts.length !== 1) throw new Error(`expected 1 reputation fact, got ${facts.length}`);
   console.log(`   recorded "${facts[0]!.type}" against buyerB exactly once`);
 
-  // ─────────────────────────────────────────────── 3. straight-sale backup stack
-  console.log('3. straight sale: claim + backup, then let the window lapse…');
+  // ─────────────────────────────────────────────── 3. straight-sale winner-only claim
+  console.log('3. straight sale: first claim wins and a simultaneous loser is rejected…');
   const saleRows = await db
     .insert(listings)
     .values({
@@ -180,42 +181,27 @@ async function main(): Promise<void> {
     claimantId: buyerA,
     fulfillmentPath: 'cash_meetup',
   });
-  const backup = await claimListing({
-    listingId: saleId,
-    claimantId: buyerB,
-    fulfillmentPath: 'cash_meetup',
-  });
-  console.log(`   buyerA ${first.outcome}, buyerB ${backup.outcome} (#${backup.position})`);
-
-  await db
-    .update(transactions)
-    .set({ paymentDeadlineAt: sql`now() - interval '1 hour'` })
-    .where(eq(transactions.id, first.transactionId!));
-  await scheduleNow(
-    'transaction:payment_window',
-    { transactionId: first.transactionId! },
-    `payment_window:${first.transactionId!}`,
-  );
-
-  const promotedClaim = await waitFor('the backup claimer to be promoted', async () => {
-    const rows = await db
+  let rejected = false;
+  try {
+    await claimListing({
+      listingId: saleId,
+      claimantId: buyerB,
+      fulfillmentPath: 'cash_meetup',
+    });
+  } catch (error) {
+    if (!(error instanceof ConflictError)) throw error;
+    rejected = true;
+  }
+  if (!rejected) throw new Error('expected the second fixed-price claim to be rejected');
+  const saleTx = (
+    await db
       .select()
       .from(transactions)
-      .where(
-        and(
-          eq(transactions.listingId, saleId),
-          eq(transactions.state, 'open'),
-          eq(transactions.source, 'claim_promotion'),
-        ),
-      )
-      .limit(1);
-    return rows[0];
-  });
-
-  if (promotedClaim.buyerId !== buyerB) throw new Error('wrong claimer promoted');
-  if (promotedClaim.amountCents !== 25_000) throw new Error('promoted at the wrong price');
-  if (promotedClaim.attemptNumber !== 2) throw new Error('attempt number did not advance');
-  console.log(`   worker promoted buyerB at ${formatMoney(promotedClaim.amountCents)} (attempt 2)`);
+      .where(and(eq(transactions.listingId, saleId), eq(transactions.state, 'open')))
+      .limit(1)
+  )[0];
+  if (saleTx?.buyerId !== buyerA) throw new Error('wrong fixed-price winner');
+  console.log(`   buyerA ${first.outcome}, buyerB rejected — no backup transaction created`);
 
   // ─────────────────────────────────────────────── 4. notifications actually delivered
   console.log('4. checking the notification dispatcher ran…');

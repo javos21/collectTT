@@ -9,6 +9,7 @@ import { listStoreApplications } from '@/services/store-applications';
 import { AdminDenied } from '../admin-access';
 import { AdminFrame } from '../admin-frame';
 import { confirmStoreApplicationAction, declineStoreApplicationAction } from './actions';
+import { DeleteStoreButton } from './delete-store-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +44,6 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
       <main className="admin-main">
         <div className="admin-heading">
           <div><h1>Stores</h1><p>Review storefront applications before locations can receive inventory.</p></div>
-          <span className="admin-environment">Admin only</span>
         </div>
 
         {params.notice ? <p className="admin-toast" role="status">{params.notice}</p> : null}
@@ -67,8 +67,8 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                   <span className={`admin-status admin-status--${application.status}`}>{application.status === 'pending' ? <Clock3 size={12} aria-hidden="true" /> : application.status === 'confirmed' ? <CheckCircle2 size={12} aria-hidden="true" /> : <XCircle size={12} aria-hidden="true" />}{displayStatus(application.status)}</span>
                 </div>
                 <div className="store-application-card__facts"><span><MapPin size={14} aria-hidden="true" />{application.area}, {application.city}</span><span>{application.phoneE164}</span><span>Submitted {application.createdAt.toLocaleDateString('en-TT')}</span></div>
-                <details className="store-application-card__details"><summary>View application details</summary><div className="store-application-card__detail-grid"><div><strong>Address</strong><p>{[application.addressLine1, application.addressLine2, application.city, application.country].filter(Boolean).join(', ')}</p></div><div><strong>Accepted sizes</strong><p>{application.acceptsSizeClasses.map(displayStatus).join(', ')}</p></div><div><strong>Verification links</strong>{links.length === 0 ? <p>None supplied</p> : <ul>{links.map(([label, url]) => <li key={label}><a href={url} target="_blank" rel="noreferrer">{label} <ExternalLink size={12} aria-hidden="true" /></a></li>)}</ul>}</div><div><strong>Terms acceptance</strong><p>Version {application.termsVersion}, accepted {application.termsAcceptedAt.toLocaleDateString('en-TT')}</p></div></div></details>
-                {isPending ? <div className="store-application-card__actions"><form action={confirmStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><button className="admin-button admin-button--success" type="submit">Confirm Store</button></form><form className="store-decline-form" action={declineStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><input name="adminNote" aria-label={`Optional note for ${application.storeName}`} placeholder="Optional note for applicant" /><button className="admin-button admin-button--danger" type="submit">Decline</button></form></div> : application.adminNote ? <p className="store-application-card__note"><strong>Admin note:</strong> {application.adminNote}</p> : null}
+                <details className="store-application-card__details"><summary>View application details</summary><div className="store-application-card__detail-grid"><div><strong>Address</strong><p>{[application.addressLine1, application.addressLine2, application.city, application.country].filter(Boolean).join(', ')}</p></div><div><strong>Verification links</strong>{links.length === 0 ? <p>None supplied</p> : <ul>{links.map(([label, url]) => <li key={label}><a href={url} target="_blank" rel="noreferrer">{label} <ExternalLink size={12} aria-hidden="true" /></a></li>)}</ul>}</div><div><strong>Terms acceptance</strong><p>Version {application.termsVersion}, accepted {application.termsAcceptedAt.toLocaleDateString('en-TT')}</p></div></div></details>
+                {isPending ? <div className="store-application-card__actions"><form action={confirmStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><button className="admin-button admin-button--success" type="submit">Confirm Store</button></form><form className="store-decline-form" action={declineStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><input name="adminNote" aria-label={`Optional note for ${application.storeName}`} placeholder="Optional note for applicant" /><button className="admin-button admin-button--danger" type="submit">Decline</button></form></div> : <>{application.adminNote ? <p className="store-application-card__note"><strong>Admin note:</strong> {application.adminNote}</p> : null}{application.status === 'confirmed' && application.storeId !== null ? <div className="store-application-card__actions store-application-card__actions--delete"><DeleteStoreButton storeId={application.storeId} storeName={application.storeName} /></div> : null}</>}
               </article>;
             })}
           </div>}

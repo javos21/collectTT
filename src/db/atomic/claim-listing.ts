@@ -8,10 +8,10 @@
  *      WHERE id=$1 AND status='active'
  *     RETURNING *
  *
- * Exactly one concurrent caller gets a row back. Everyone else gets zero rows and joins
- * the backup stack instead — which is a feature, not a consolation prize: when the top
- * claimer's window lapses, the next person is promoted automatically and the seller
- * does nothing.
+ * Exactly one concurrent caller gets a row back. Everyone else gets zero rows and is
+ * told that the item was claimed by another collector. There is deliberately no
+ * fixed-price backup queue: a claim is a single winner, and a later relist starts a
+ * fresh claim attempt.
  *
  * Written as literal SQL rather than ORM calls because this is one of the four places
  * where correctness depends on contention behaviour, and it should be readable as SQL.
@@ -26,22 +26,21 @@ import { openTransaction, ConflictError, ForbiddenError } from '../../services/t
 import { activeRestrictions } from '../../services/reputation';
 import { assertFulfillmentEligible } from '../../services/fulfillment-eligibility';
 import { notify } from '../../notifications/dispatch';
-import { WINDOWS } from '../../domain/policy/windows';
 import type { FulfillmentPath } from '../../domain/states/transaction';
 import type { SettlementMethod } from '../../domain/policy/settlement';
+import { getListingDeliveryOption } from '../../services/platform-settings';
 
 export interface ClaimResult {
-  outcome: 'claimed' | 'queued';
-  /** Present when outcome === 'claimed'. */
-  transactionId?: string;
-  /** Present when outcome === 'queued'. */
-  position?: number;
+  outcome: 'claimed';
+  transactionId: string;
 }
 
 export async function claimListing(opts: {
   listingId: string;
   claimantId: string;
   fulfillmentPath?: FulfillmentPath;
+  /** Exact admin-managed delivery choice selected by the buyer. */
+  deliveryOptionId?: string;
   /** Which payment method the buyer will use. Required by the web action. */
   settlementMethod?: SettlementMethod;
   /** Which relay store the buyer will use. Required when path === 'relay'. */
@@ -60,6 +59,7 @@ export async function claimListing(opts: {
     }
 
     let fulfillmentPath = opts.fulfillmentPath;
+    let deliveryOptionId = opts.deliveryOptionId;
     let settlementMethod = opts.settlementMethod;
     let relayStoreId = opts.relayStoreId;
     let offerToCancel: {
@@ -67,11 +67,12 @@ export async function claimListing(opts: {
       fulfillmentPath: FulfillmentPath;
       settlementMethod: SettlementMethod | null;
       relayStoreId: string | null;
+      deliveryOptionId: string | null;
     } | null = null;
 
     if (opts.cancelPendingOfferId !== undefined) {
       const pendingOfferRows = await tx.execute(sql`
-        select id, fulfillment_path, settlement_method, relay_store_id
+        select id, fulfillment_path, delivery_option_id, settlement_method, relay_store_id
           from offers
          where id = ${opts.cancelPendingOfferId}
            and listing_id = ${opts.listingId}
@@ -82,6 +83,7 @@ export async function claimListing(opts: {
       const pendingOffer = pendingOfferRows.rows[0] as {
         id: string;
         fulfillment_path: FulfillmentPath;
+        delivery_option_id: string | null;
         settlement_method: SettlementMethod | null;
         relay_store_id: string | null;
       } | undefined;
@@ -89,6 +91,7 @@ export async function claimListing(opts: {
         throw new ConflictError('This offer is no longer pending');
       }
       fulfillmentPath = pendingOffer.fulfillment_path;
+      deliveryOptionId = pendingOffer.delivery_option_id ?? undefined;
       if (settlementMethod === undefined) settlementMethod = pendingOffer.settlement_method ?? undefined;
       if (relayStoreId === undefined) relayStoreId = pendingOffer.relay_store_id;
       offerToCancel = {
@@ -96,6 +99,7 @@ export async function claimListing(opts: {
         fulfillmentPath: pendingOffer.fulfillment_path,
         settlementMethod: pendingOffer.settlement_method,
         relayStoreId: pendingOffer.relay_store_id,
+        deliveryOptionId: pendingOffer.delivery_option_id,
       };
     } else {
       const pendingOfferRows = await tx.execute(sql`
@@ -108,6 +112,17 @@ export async function claimListing(opts: {
       `);
       if (pendingOfferRows.rows.length > 0) {
         throw new ConflictError('Cancel your pending offer before claiming this item');
+      }
+    }
+
+    if (deliveryOptionId !== undefined) {
+      const option = await getListingDeliveryOption(tx, opts.listingId, deliveryOptionId);
+      if (option === null || option.fulfillmentPath === null) {
+        throw new ConflictError('Choose a delivery option offered by the seller');
+      }
+      fulfillmentPath = option.fulfillmentPath as FulfillmentPath;
+      if (option.requiresStore && (relayStoreId === undefined || relayStoreId === null)) {
+        throw new ConflictError('Choose which pickup store you want to collect from');
       }
     }
 
@@ -132,9 +147,10 @@ export async function claimListing(opts: {
     // ★ The shared gate — the same one `placeBid` runs, so a claimer and a bidder are
     //   refused for the same reasons in the same words.
     await assertFulfillmentEligible(tx, {
+      listingId: opts.listingId,
       path: fulfillmentPath,
+      requireListedStore: deliveryOptionId !== undefined,
       relayStoreId,
-      sizeClass: listing.sizeClass,
       buyerRestrictions: restrictions,
     });
 
@@ -156,17 +172,25 @@ export async function claimListing(opts: {
       });
     }
 
-    // Already in the stack? Idempotent — return their existing position.
+    // A duplicate submission by the same buyer is idempotent while their deal is open.
+    // Terminal historical claims do not block a later relist from being claimed again.
     const existing = await tx
       .select()
       .from(claims)
-      .where(and(eq(claims.listingId, opts.listingId), eq(claims.claimantId, opts.claimantId)))
+      .where(
+        and(
+          eq(claims.listingId, opts.listingId),
+          eq(claims.claimantId, opts.claimantId),
+          eq(claims.status, 'active'),
+        ),
+      )
       .limit(1);
     if (existing[0] !== undefined) {
       const row = existing[0];
-      return row.status === 'active' && row.transactionId !== null
-        ? { outcome: 'claimed' as const, transactionId: row.transactionId }
-        : { outcome: 'queued' as const, position: row.position };
+      if (row.transactionId !== null) {
+        return { outcome: 'claimed' as const, transactionId: row.transactionId };
+      }
+      throw new ConflictError('Your claim is still being processed — please refresh.');
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -195,6 +219,7 @@ export async function claimListing(opts: {
           position: 1,
           status: 'active',
           fulfillmentPath,
+          deliveryOptionId: deliveryOptionId ?? null,
           settlementMethod,
           relayStoreId: relayStoreId ?? null,
         })
@@ -210,6 +235,7 @@ export async function claimListing(opts: {
         buyerId: opts.claimantId,
         amountCents: price,
         fulfillmentPath,
+        deliveryOptionId: deliveryOptionId ?? null,
         source: 'claim',
         claimId: claim.id,
         listingTitle: listing.title,
@@ -243,58 +269,10 @@ export async function claimListing(opts: {
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // Lost the race (or the listing was already claimed) -> join the backup stack.
-    //
-    // Zero rows from the UPDATE means no row lock was taken, so two simultaneous
-    // backups could compute the same position. SELECT ... FOR UPDATE serialises them.
-    // Contention here is low, so a row lock costs nothing.
+    // Lost the race (or the listing was already claimed). No claim record or transaction
+    // is created for the loser; the conditional UPDATE above is the source of truth.
     // ────────────────────────────────────────────────────────────────────────
-    const locked = await tx.execute(sql`
-      select status from listings where id = ${opts.listingId} for update
-    `);
-    const status = (locked.rows[0] as { status: string } | undefined)?.status;
-
-    if (status !== 'claimed') {
-      throw new ConflictError('This listing is no longer available');
-    }
-
-    const depth = await tx.execute(sql`
-      select
-        count(*) filter (where status in ('active', 'queued', 'promoted'))::int as live,
-        coalesce(max(position) filter (where status in ('active', 'queued', 'promoted')), 0) + 1 as next
-      from claims
-      where listing_id = ${opts.listingId}
-    `);
-    const depthRow = depth.rows[0] as { live: number | string; next: number | string };
-    const live = Number(depthRow.live);
-    const position = Number(depthRow.next);
-
-    if (live >= WINDOWS.maxClaimStackDepth || position > WINDOWS.maxClaimStackDepth) {
-      throw new ConflictError(
-        `The backup queue for this listing is full (${WINDOWS.maxClaimStackDepth} deep).`,
-      );
-    }
-
-    await tx.insert(claims).values({
-      listingId: opts.listingId,
-      claimantId: opts.claimantId,
-      position,
-      status: 'queued',
-      fulfillmentPath,
-      settlementMethod,
-      relayStoreId: relayStoreId ?? null,
-    });
-
-    await notify({
-      tx,
-      userId: opts.claimantId,
-      event: 'claim_queued_buyer',
-      data: { listingTitle: listing.title, position: String(position) },
-      linkUrl: `/listings/${opts.listingId}`,
-      idempotencyKey: `queued:${opts.listingId}:${opts.claimantId}`,
-    });
-
-    return { outcome: 'queued' as const, position };
+    throw new ConflictError('This item was just claimed by another collector.');
   });
 }
 

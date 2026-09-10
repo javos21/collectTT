@@ -10,7 +10,7 @@ import {
 
 import { relayStores } from './custody';
 import { profiles } from './profiles';
-import { sizeClassEnum, storeApplicationStatusEnum } from './enums';
+import { storeApplicationStatusEnum } from './enums';
 
 /** A versioned record of a user's request to operate a physical Store. */
 export const storeApplications = pgTable(
@@ -31,7 +31,6 @@ export const storeApplications = pgTable(
     instagramUrl: text('instagram_url'),
     facebookUrl: text('facebook_url'),
     tiktokUrl: text('tiktok_url'),
-    acceptsSizeClasses: sizeClassEnum('accepts_size_classes').array().notNull(),
     termsVersion: text('terms_version').notNull(),
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }).notNull().defaultNow(),
     status: storeApplicationStatusEnum('status').notNull().default('pending'),

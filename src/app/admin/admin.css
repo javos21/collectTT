@@ -69,14 +69,11 @@ a { color: inherit; }
 .admin-stat--amber .admin-stat__icon { color: var(--admin-amber); background: var(--admin-amber-wash); }
 .admin-stat--amber strong { color: var(--admin-amber); }
 .admin-stat--amber span { color: var(--admin-amber); }
-.admin-content-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .85fr); gap: 1.1rem; }
-.admin-content-grid--single { grid-template-columns: 1fr; }
 .admin-panel { min-width: 0; padding: 1.15rem; border: 1px solid var(--admin-line); border-radius: 14px; background: var(--admin-surface); box-shadow: 0 1px 2px rgba(16,24,40,.04); }
 .admin-panel__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .admin-panel__heading h2 { margin: 0; color: var(--admin-primary-strong); font-size: 1.05rem; letter-spacing: -.035em; }
 .admin-panel__heading > span { padding: .25rem .45rem; border-radius: 999px; color: var(--admin-primary-strong); background: var(--admin-primary-wash); font-size: .68rem; font-weight: 700; }
 .admin-panel__heading > svg { color: var(--admin-primary); }
-.admin-table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .73rem; }
 th { padding: .55rem .4rem; border-bottom: 1px solid var(--admin-primary-line); color: var(--admin-primary); font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
 td { padding: .7rem .4rem; border-bottom: 1px solid #f4f4f5; color: #52525b; white-space: nowrap; }
@@ -101,7 +98,6 @@ td small { margin-top: .18rem; color: #a1a1aa; font-size: .62rem; }
 .admin-checklist strong { display: block; font-size: .75rem; }
 .admin-checklist p { margin: .15rem 0 0; color: var(--admin-muted); font-size: .68rem; line-height: 1.4; }
 .admin-panel__note { margin: 1rem 0 0; padding: .7rem .85rem; border-left: 3px solid var(--admin-primary); border-radius: 0 8px 8px 0; color: var(--admin-primary-strong); background: var(--admin-primary-wash); font-size: .66rem; line-height: 1.5; }
-.admin-empty { margin: 2rem 0; color: var(--admin-muted); font-size: .78rem; }
 .admin-denied { position: relative; display: grid; place-items: center; min-height: 100vh; padding: 1.5rem; }
 .admin-modal__backdrop { position: fixed; inset: 0; background: rgba(24, 24, 27, .48); backdrop-filter: blur(5px); }
 .admin-modal { position: relative; width: min(100%, 440px); padding: 1.35rem; border: 1px solid rgba(255,255,255,.82); border-radius: 18px; background: #fff; box-shadow: 0 24px 70px rgba(24,24,27,.22), 0 4px 14px rgba(24,24,27,.08); }
@@ -212,10 +208,33 @@ td small { margin-top: .18rem; color: #a1a1aa; font-size: .62rem; }
 .admin-settings-success, .admin-settings-error { margin: .8rem 0 0; padding: .6rem .75rem; border-radius: 8px; font-size: .75rem; font-weight: 700; }
 .admin-settings-success { border: 1px solid var(--admin-green-line); color: var(--admin-green-strong); background: var(--admin-green-wash); }
 .admin-settings-error { border: 1px solid var(--admin-danger-line); color: var(--admin-danger); background: var(--admin-danger-wash); }
+.admin-option-manager { margin-top: 1rem; }
+.admin-option-section { margin-top: 1.35rem; }
+.admin-option-section + .admin-option-section { padding-top: 1.35rem; border-top: 1px solid var(--admin-line); }
+.admin-option-section__heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .7rem; }
+.admin-option-section__heading h3 { margin: 0; color: var(--admin-ink); font-size: .86rem; }
+.admin-option-section__heading p { margin: .18rem 0 0; color: var(--admin-muted); font-size: .68rem; }
+.admin-option-list { display: grid; gap: .55rem; }
+.admin-option-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 66px; padding: .75rem .85rem; border: 1px solid var(--admin-line); border-radius: 10px; background: #fff; }
+.admin-option-row.is-removed { opacity: .58; background: #fafafa; }
+.admin-option-row__copy { min-width: 0; }
+.admin-option-row__copy > div { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; }
+.admin-option-row__copy strong { color: var(--admin-ink); font-size: .76rem; }
+.admin-option-row__copy span { padding: .18rem .4rem; border-radius: 999px; color: var(--admin-primary-strong); background: var(--admin-primary-wash); font-size: .6rem; font-weight: 750; }
+.admin-option-row__copy p { margin: .22rem 0 0; color: var(--admin-muted); font-size: .67rem; line-height: 1.4; }
+.admin-option-row__actions { display: flex; flex: none; align-items: center; gap: .25rem; }
+.admin-option-row__actions form { display: flex; margin: 0; }
+.admin-option-row__actions button { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 8px; color: var(--admin-muted); background: transparent; cursor: pointer; }
+.admin-option-row__actions button:hover { color: var(--admin-primary-strong); background: var(--admin-primary-wash); }
+.admin-option-row__actions form button:hover { color: var(--admin-danger); background: var(--admin-danger-wash); }
+.admin-option-store-toggle { display: flex !important; align-items: flex-start; grid-template-columns: none !important; gap: .65rem !important; padding: .75rem; border: 1px solid var(--admin-line); border-radius: 9px; }
+.admin-option-store-toggle input { flex: none; width: 18px; height: 18px; min-height: 18px; margin-top: .08rem; accent-color: var(--admin-primary); }
+.admin-option-store-toggle span { color: var(--admin-ink) !important; }
+.admin-option-store-toggle strong, .admin-option-store-toggle small { display: block; }
+.admin-option-store-toggle small { margin-top: .2rem; color: var(--admin-muted); font-size: .66rem; font-weight: 500; line-height: 1.4; }
 
 @media (max-width: 900px) {
   .admin-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .admin-content-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
@@ -242,4 +261,7 @@ td small { margin-top: .18rem; color: #a1a1aa; font-size: .62rem; }
   .store-application-card__actions .admin-button, .store-decline-form { width: 100%; }
   .store-decline-form input { width: 100%; }
   .store-application-card__detail-grid { grid-template-columns: 1fr; }
+  .admin-option-section__heading, .admin-option-row { align-items: stretch; flex-direction: column; }
+  .admin-option-section__heading .admin-button { width: 100%; }
+  .admin-option-row__actions { justify-content: flex-end; }
 }

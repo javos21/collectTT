@@ -23,7 +23,7 @@ export default async function EditListingPage({
 
   const result = await getListing(id);
   if (result === null) notFound();
-  const { listing, images, fulfillmentTerms } = result;
+  const { listing, images, deliveryOptions } = result;
   if (listing.sellerId !== user.userId) redirect(`/listings/${id}`);
   if (listing.status !== 'active' && listing.status !== 'draft') redirect(`/listings/${id}`);
   const [activity, auditEvents] = await Promise.all([
@@ -84,8 +84,7 @@ export default async function EditListingPage({
         saleType={listing.saleType}
         acceptsOffers={listing.acceptsOffers}
         paymentWindowHours={listing.paymentWindowHours}
-        fulfillmentPaths={listing.fulfillmentPaths}
-        fulfillmentTerms={fulfillmentTerms}
+        deliveryOptions={deliveryOptions}
         locked={activity.locked}
         error={error}
       />

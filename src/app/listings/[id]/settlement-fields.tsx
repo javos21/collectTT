@@ -7,23 +7,19 @@ type RelayStore = { id: string; name: string; area: string };
 export function SettlementFields({
   idPrefix,
   fieldPrefix = '',
-  paths,
-  pathLabels,
-  paymentMethods,
-  paymentLabels,
+  deliveryOptions,
+  paymentOptions,
   relayCandidates,
 }: {
   idPrefix: string;
   fieldPrefix?: string;
-  paths: readonly string[];
-  pathLabels: Record<string, string>;
-  paymentMethods: readonly string[];
-  paymentLabels: Record<string, string>;
+  deliveryOptions: readonly { id: string; label: string; requiresStore: boolean }[];
+  paymentOptions: readonly { key: string; label: string }[];
   relayCandidates: readonly RelayStore[];
 }) {
-  const [selectedPath, setSelectedPath] = useState('');
+  const [selectedDeliveryOptionId, setSelectedDeliveryOptionId] = useState('');
 
-  if (paths.length === 0) {
+  if (deliveryOptions.length === 0) {
     return (
       <p className="buybox__note">
         No delivery option is available right now — the seller&apos;s store pickup
@@ -33,7 +29,7 @@ export function SettlementFields({
   }
 
   const helpId = `${idPrefix}settlement-help`;
-  const deliveryId = `${idPrefix}fulfillmentPath`;
+  const deliveryId = `${idPrefix}deliveryOptionId`;
   const paymentId = `${idPrefix}settlementMethod`;
   const storeId = `${idPrefix}relayStoreId`;
 
@@ -54,21 +50,21 @@ export function SettlementFields({
       </label>
       <select
         id={deliveryId}
-        name={`${fieldPrefix}fulfillmentPath`}
-        value={selectedPath}
-        onChange={(event) => setSelectedPath(event.target.value)}
+        name={`${fieldPrefix}deliveryOptionId`}
+        value={selectedDeliveryOptionId}
+        onChange={(event) => setSelectedDeliveryOptionId(event.target.value)}
         aria-describedby={helpId}
         required
       >
         <option value="" disabled>Select a delivery option</option>
-        {paths.map((path) => (
-          <option key={path} value={path}>
-            {pathLabels[path] ?? path}
+        {deliveryOptions.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
           </option>
         ))}
       </select>
 
-      {selectedPath === 'relay' && (
+      {deliveryOptions.find((option) => option.id === selectedDeliveryOptionId)?.requiresStore === true && (
         <>
           <label htmlFor={storeId}>
             Pickup store <span className="required-mark" aria-hidden="true">*</span>
@@ -100,9 +96,9 @@ export function SettlementFields({
         required
       >
         <option value="" disabled>Select a payment method</option>
-        {paymentMethods.map((method) => (
-          <option key={method} value={method}>
-            {paymentLabels[method] ?? method}
+        {paymentOptions.map((option) => (
+          <option key={option.key} value={option.key}>
+            {option.label}
           </option>
         ))}
       </select>

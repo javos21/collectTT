@@ -4,20 +4,12 @@ import Link from 'next/link';
 import { AlertCircle, CheckCircle2, MapPin, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState, useTransition } from 'react';
 
-import { SIZE_CLASSES } from '@/domain/states/listing';
 import {
   STORE_APPLICATION_LEGAL_COPY,
   STORE_APPLICATION_RESPONSIBILITIES,
   STORE_APPLICATION_TERMS_VERSION,
 } from '@/domain/stores/application';
 import { applyForStoreAction } from './actions';
-
-const sizeLabels: Record<(typeof SIZE_CLASSES)[number], string> = {
-  small: 'Small',
-  medium: 'Medium',
-  large: 'Large',
-  oversize: 'Oversize',
-};
 
 type StoreApplicationFormProps = {
   displayName: string;
@@ -38,7 +30,6 @@ type FormValues = {
   instagramUrl: string;
   facebookUrl: string;
   tiktokUrl: string;
-  acceptsSizeClasses: string[];
   acceptTerms: boolean;
 };
 
@@ -54,7 +45,6 @@ const emptyValues: FormValues = {
   instagramUrl: '',
   facebookUrl: '',
   tiktokUrl: '',
-  acceptsSizeClasses: [],
   acceptTerms: false,
 };
 
@@ -70,15 +60,6 @@ export function StoreApplicationForm({ displayName, email, initialError, decline
 
   function update(field: keyof FormValues, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
-  }
-
-  function toggleSize(size: string) {
-    setValues((current) => ({
-      ...current,
-      acceptsSizeClasses: current.acceptsSizeClasses.includes(size)
-        ? current.acceptsSizeClasses.filter((item) => item !== size)
-        : [...current.acceptsSizeClasses, size],
-    }));
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -126,14 +107,6 @@ export function StoreApplicationForm({ displayName, email, initialError, decline
           <div className="form-field"><label htmlFor="instagramUrl">Instagram</label><input id="instagramUrl" name="instagramUrl" type="url" value={values.instagramUrl} onChange={(event) => update('instagramUrl', event.target.value)} placeholder="https://instagram.com/..." /></div>
           <div className="form-field"><label htmlFor="facebookUrl">Facebook</label><input id="facebookUrl" name="facebookUrl" type="url" value={values.facebookUrl} onChange={(event) => update('facebookUrl', event.target.value)} placeholder="https://facebook.com/..." /></div>
           <div className="form-field"><label htmlFor="tiktokUrl">TikTok</label><input id="tiktokUrl" name="tiktokUrl" type="url" value={values.tiktokUrl} onChange={(event) => update('tiktokUrl', event.target.value)} placeholder="https://tiktok.com/@..." /></div>
-        </div>
-      </fieldset>
-
-      <fieldset className="store-application-section">
-        <legend>Inventory capacity</legend>
-        <p className="store-application-section__intro">Select the item sizes your team can safely receive and hold.</p>
-        <div className="choice-grid choice-grid--stores">
-          {SIZE_CLASSES.map((size) => <label className="choice-card" key={size}><input type="checkbox" name="acceptsSizeClasses" value={size} checked={values.acceptsSizeClasses.includes(size)} onChange={() => toggleSize(size)} /><span><strong>{sizeLabels[size]}</strong><small>We can accept this size at the Store.</small></span></label>)}
         </div>
       </fieldset>
 

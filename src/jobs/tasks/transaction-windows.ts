@@ -97,8 +97,8 @@ export async function dropoffWindowExpired(payload: TxPayload, helpers: Helpers)
       transactionId: payload.transactionId,
       reason: 'seller_no_dropoff',
       actorRole: 'system',
-      // The seller failed, not the buyer — do not hand the item to a backup claimer
-      // when there is no item on the shelf.
+      // The seller failed, not the buyer — do not promote an auction runner-up when
+      // there is no item on the shelf.
       promoteNext: false,
     });
 

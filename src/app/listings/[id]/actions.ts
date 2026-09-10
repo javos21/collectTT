@@ -7,8 +7,6 @@ import { currentUser } from '@/lib/session';
 import { claimListing } from '@/db/atomic/claim-listing';
 import { placeBid } from '@/db/atomic/place-bid';
 import { parseMoneyInput } from '@/domain/money';
-import type { SettlementMethod } from '@/domain/policy/settlement';
-import type { FulfillmentPath } from '@/domain/states/transaction';
 import { acceptOffer, rejectOffer, submitOffer } from '@/services/offers';
 
 function message(error: unknown): string {
@@ -20,24 +18,23 @@ export async function claimAction(formData: FormData): Promise<void> {
   if (user === null) redirect('/sign-in');
 
   const listingId = String(formData.get('listingId') ?? '');
-  const path = String(formData.get('fulfillmentPath') ?? '') as FulfillmentPath | '';
-  const settlementMethod = String(formData.get('settlementMethod') ?? '') as SettlementMethod | '';
+  const deliveryOptionId = String(formData.get('deliveryOptionId') ?? '');
+  const settlementMethod = String(formData.get('settlementMethod') ?? '');
   const storeIdRaw = String(formData.get('relayStoreId') ?? '');
   const relayStoreId = storeIdRaw === '' ? null : storeIdRaw;
 
-  if (path === '') {
+  if (deliveryOptionId === '') {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a delivery option')}`);
   }
   if (settlementMethod === '') {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a payment method')}`);
   }
 
-  let result;
   try {
-    result = await claimListing({
+    await claimListing({
       listingId,
       claimantId: user.userId,
-      fulfillmentPath: path,
+      deliveryOptionId,
       settlementMethod,
       relayStoreId,
     });
@@ -46,11 +43,7 @@ export async function claimAction(formData: FormData): Promise<void> {
   }
 
   revalidatePath(`/listings/${listingId}`);
-
-  if (result.outcome === 'claimed' && result.transactionId !== undefined) {
-    redirect(`/deals/${result.transactionId}`);
-  }
-  redirect(`/listings/${listingId}?queued=${result.position ?? ''}`);
+  redirect(`/listings/${listingId}?claimed=1`);
 }
 
 export async function cancelOfferAndClaimAction(formData: FormData): Promise<void> {
@@ -63,9 +56,8 @@ export async function cancelOfferAndClaimAction(formData: FormData): Promise<voi
     redirect(`/listings/${listingId}?error=${encodeURIComponent('This offer could not be cancelled')}`);
   }
 
-  let result;
   try {
-    result = await claimListing({
+    await claimListing({
       listingId,
       claimantId: user.userId,
       cancelPendingOfferId: offerId,
@@ -75,11 +67,7 @@ export async function cancelOfferAndClaimAction(formData: FormData): Promise<voi
   }
 
   revalidatePath(`/listings/${listingId}`);
-
-  if (result.outcome === 'claimed' && result.transactionId !== undefined) {
-    redirect(`/deals/${result.transactionId}`);
-  }
-  redirect(`/listings/${listingId}?queued=${result.position ?? ''}`);
+  redirect(`/listings/${listingId}?claimed=1`);
 }
 
 export async function bidAction(formData: FormData): Promise<void> {
@@ -93,11 +81,11 @@ export async function bidAction(formData: FormData): Promise<void> {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Enter a valid amount')}`);
   }
 
-  const path = String(formData.get('fulfillmentPath') ?? '') as FulfillmentPath | '';
-  const settlementMethod = String(formData.get('settlementMethod') ?? '') as SettlementMethod | '';
+  const deliveryOptionId = String(formData.get('deliveryOptionId') ?? '');
+  const settlementMethod = String(formData.get('settlementMethod') ?? '');
   const storeIdRaw = String(formData.get('relayStoreId') ?? '');
 
-  if (path === '') {
+  if (deliveryOptionId === '') {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a delivery option')}`);
   }
   if (settlementMethod === '') {
@@ -110,7 +98,7 @@ export async function bidAction(formData: FormData): Promise<void> {
       listingId,
       bidderId: user.userId,
       amountCents,
-      fulfillmentPath: path,
+      deliveryOptionId,
       settlementMethod,
       relayStoreId: storeIdRaw === '' ? null : storeIdRaw,
     });
@@ -132,14 +120,14 @@ export async function submitOfferAction(formData: FormData): Promise<void> {
 
   const listingId = String(formData.get('listingId') ?? '');
   const amountCents = parseMoneyInput(String(formData.get('offerAmount') ?? ''));
-  const path = String(formData.get('offerFulfillmentPath') ?? formData.get('fulfillmentPath') ?? '') as FulfillmentPath | '';
-  const settlementMethod = String(formData.get('offerSettlementMethod') ?? formData.get('settlementMethod') ?? '') as SettlementMethod | '';
+  const deliveryOptionId = String(formData.get('offerDeliveryOptionId') ?? formData.get('deliveryOptionId') ?? '');
+  const settlementMethod = String(formData.get('offerSettlementMethod') ?? formData.get('settlementMethod') ?? '');
   const storeIdRaw = String(formData.get('offerRelayStoreId') ?? formData.get('relayStoreId') ?? '');
 
   if (amountCents === null || amountCents <= 0) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Enter a valid offer amount')}`);
   }
-  if (path === '') {
+  if (deliveryOptionId === '') {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Choose a delivery option')}`);
   }
   if (settlementMethod === '') {
@@ -151,7 +139,7 @@ export async function submitOfferAction(formData: FormData): Promise<void> {
       listingId,
       buyerId: user.userId,
       amountCents,
-      fulfillmentPath: path,
+      deliveryOptionId,
       settlementMethod,
       relayStoreId: storeIdRaw === '' ? null : storeIdRaw,
     });

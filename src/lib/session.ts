@@ -6,6 +6,7 @@
  * (see src/db/schema/profiles.ts) and this is the seam that joins them.
  */
 
+import { cache } from 'react';
 import { headers } from 'next/headers';
 import { eq } from 'drizzle-orm';
 
@@ -21,10 +22,16 @@ export interface CurrentUser {
   handle: string;
 }
 
-export async function currentUser(): Promise<CurrentUser | null> {
+/**
+ * The root layout and individual pages commonly need the viewer in the same render.
+ * React's request-scoped cache prevents each caller from issuing another session and
+ * profile lookup while keeping the result isolated between users and requests.
+ */
+export const currentUser = cache(async (): Promise<CurrentUser | null> => {
+  const requestHeaders = await headers();
   let session;
   try {
-    session = await auth.api.getSession({ headers: await headers() });
+    session = await getSessionWithRetry(requestHeaders);
   } catch (error) {
     // A browser can retain a session cookie after its database row has expired or
     // been removed. Better Auth surfaces that as an API error; render the request as
@@ -42,6 +49,59 @@ export async function currentUser(): Promise<CurrentUser | null> {
     displayName: profile.displayName,
     handle: profile.handle,
   };
+});
+
+/**
+ * A dropped pooled connection is usually recoverable on the next checkout. Retry
+ * exactly once for connection-level failures; application and authentication errors
+ * still surface immediately. The retry is deliberately short so a real outage is not
+ * hidden behind a long request.
+ */
+async function getSessionWithRetry(
+  requestHeaders: Awaited<ReturnType<typeof headers>>,
+) {
+  try {
+    return await auth.api.getSession({ headers: requestHeaders });
+  } catch (error) {
+    if (!isTransientDatabaseError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return auth.api.getSession({ headers: requestHeaders });
+  }
+}
+
+const transientDatabaseCodes = new Set([
+  '08000',
+  '08001',
+  '08003',
+  '08006',
+  '53300',
+  '57P01',
+  '57P02',
+  '57P03',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+]);
+
+function isTransientDatabaseError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth += 1) {
+    const candidate = current as { code?: unknown; message?: unknown; cause?: unknown };
+    if (typeof candidate.code === 'string' && transientDatabaseCodes.has(candidate.code)) {
+      return true;
+    }
+    if (
+      typeof candidate.message === 'string' &&
+      /connection (?:terminated|reset|refused)|socket hang up|network timeout|timed out/i.test(
+        candidate.message,
+      )
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
 }
 
 /**

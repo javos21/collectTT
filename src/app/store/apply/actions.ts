@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-import { SIZE_CLASSES, type SizeClass } from '@/domain/states/listing';
 import {
   STORE_APPLICATION_TERMS_VERSION,
 } from '@/domain/stores/application';
@@ -28,7 +27,6 @@ const applicationSchema = z.object({
   instagramUrl: optionalUrl,
   facebookUrl: optionalUrl,
   tiktokUrl: optionalUrl,
-  acceptsSizeClasses: z.array(z.enum(SIZE_CLASSES)).min(1),
   acceptTerms: z.literal(true),
 });
 
@@ -40,10 +38,6 @@ export async function applyForStoreAction(formData: FormData): Promise<string | 
   const viewer = await currentUser();
   if (viewer === null) redirect('/sign-in?returnTo=/store/apply');
 
-  const rawSizes = formData
-    .getAll('acceptsSizeClasses')
-    .map(String)
-    .filter((candidate): candidate is SizeClass => (SIZE_CLASSES as readonly string[]).includes(candidate));
   const parsed = applicationSchema.safeParse({
     storeName: value(formData, 'storeName'),
     addressLine1: value(formData, 'addressLine1'),
@@ -56,12 +50,11 @@ export async function applyForStoreAction(formData: FormData): Promise<string | 
     instagramUrl: value(formData, 'instagramUrl'),
     facebookUrl: value(formData, 'facebookUrl'),
     tiktokUrl: value(formData, 'tiktokUrl'),
-    acceptsSizeClasses: rawSizes,
     acceptTerms: formData.get('acceptTerms') === 'on',
   });
 
   if (!parsed.success) {
-    return 'Check the required fields, choose at least one size, and accept the Store responsibilities.';
+    return 'Check the required fields and accept the Store responsibilities.';
   }
 
   const hasPublicLink = Boolean(
@@ -79,7 +72,6 @@ export async function applyForStoreAction(formData: FormData): Promise<string | 
   try {
     await createStoreApplication(viewer.userId, {
       ...parsed.data,
-      acceptsSizeClasses: parsed.data.acceptsSizeClasses,
       termsVersion: STORE_APPLICATION_TERMS_VERSION,
     });
   } catch {
