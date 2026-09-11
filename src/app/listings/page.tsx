@@ -254,18 +254,16 @@ export default async function BrowsePage({
         {/* -------------------------------------------------- results */}
         <div className="catalog-results">
           <nav className="browse-type-tabs" aria-label="Browse by sale type">
-            <Link className={saleType === undefined ? 'is-active' : ''} href={browseHref({ saleType: null, page: 1 })}>All Listings</Link>
             <Link className={saleType === 'straight_sale' ? 'is-active' : ''} href={browseHref({ saleType: 'straight_sale', page: 1 })}>Straight Sales</Link>
             <Link className={saleType === 'auction' ? 'is-active' : ''} href={browseHref({ saleType: 'auction', page: 1 })}>Auctions</Link>
           </nav>
           <div className="results-toolbar">
             <div className="results-head">
-              <strong className="num">{total}</strong>
+              <strong className="num">{total}</strong>{' '}
               <span className="muted">
-                Listing{total === 1 ? '' : 's'}
+                {total === 1 ? 'Listing' : 'Listings'}
                 {query !== '' && ` matching “${query}”`}
                 {selectedCategories.length > 0 && ` in ${selectedCategories.map((value) => value.replace('_', ' ')).join(', ')}`}
-                {saleType !== undefined && ` · ${saleType === 'auction' ? 'Auctions' : 'Straight Sale'}`}
               </span>
             </div>
             <form method="get" className="sort-form" aria-label="Sort listings">
@@ -310,7 +308,7 @@ export default async function BrowsePage({
                   return (
                   <article className="catalog-card" key={row.id}>
                     <Link className="catalog-card__image" href={`/listings/${row.id}`} aria-label={`View ${row.title}`}>
-                      {row.primaryImageId ? <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" /> : <span aria-hidden="true">Collectible preview</span>}
+                      {row.primaryImageId ? <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" loading="lazy" decoding="async" /> : <span aria-hidden="true">Collectible preview</span>}
                     </Link>
                     <div className="catalog-card__body">
                       <div className="catalog-card__heading">
@@ -346,7 +344,7 @@ export default async function BrowsePage({
                             </span>
                           )}
                         </div>
-                        <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid now' : 'View listing'}</Link>
+                        <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid' : 'Claim'}</Link>
                       </div>
                     </div>
                   </article>

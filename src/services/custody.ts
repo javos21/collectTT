@@ -505,6 +505,7 @@ export interface StoreBoardRow {
   holdingId: string;
   listingId: string;
   listingTitle: string;
+  primaryImageId: string | null;
   state: CustodyState;
   sellerName: string;
   buyerName: string | null;
@@ -533,6 +534,14 @@ export async function storeBoard(tx: DbOrTx, storeId: string): Promise<StoreBoar
     .select({
       h: custodyHoldings,
       listingTitle: listings.title,
+      primaryImageId: sql<string | null>`(
+        select i.id
+        from listing_images li
+        inner join images i on i.id = li.image_id
+        where li.listing_id = ${listings.id}
+        order by li.position asc
+        limit 1
+      )`,
       sellerName: profiles.displayName,
       sellerPhone: profiles.phoneE164,
       sellerEmail: users.email,
@@ -570,6 +579,7 @@ export async function storeBoard(tx: DbOrTx, storeId: string): Promise<StoreBoar
     holdingId: r.h.id,
     listingId: r.h.listingId,
     listingTitle: r.listingTitle,
+    primaryImageId: r.primaryImageId,
     state: r.h.state,
     sellerName: r.sellerName,
     buyerName: r.buyerId === null ? null : (buyerNames.get(r.buyerId) ?? null),

@@ -3,12 +3,17 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ChevronRight,
   Clock3,
+  History,
   Inbox,
+  List,
   LogOut,
+  MapPin,
   Package,
   ScanLine,
-  Store as StoreIcon,
+  ShieldCheck,
+  UserRound,
 } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
@@ -19,20 +24,45 @@ import { auth } from '@/lib/auth';
 import { requireStoreStaff, NotStoreStaffError } from '@/lib/store-session';
 import { storeBoard, type StoreBoardRow } from '@/services/custody';
 import {
+  lookupByCodeAction,
   receiveByCodeAction,
-  markPickedUpAction,
+  releaseItemAction,
   returnToSellerAction,
 } from './actions';
 
 export const dynamic = 'force-dynamic';
 
 const SETTLED_LABELS: Record<string, string> = {
-  picked_up: 'Collected by buyer',
+  picked_up: 'Released to buyer',
   returned_to_seller: 'Returned to seller',
-  voided: 'Never arrived — voided',
+  voided: 'Never arrived — closed',
 };
 
-const SETTLED_WINDOW = 25;
+const COUNTER_MODES = ['receive', 'release'] as const;
+type CounterMode = (typeof COUNTER_MODES)[number];
+
+function isCounterMode(value: string | undefined): value is CounterMode {
+  return value !== undefined && COUNTER_MODES.includes(value as CounterMode);
+}
+
+function when(value: Date | null): string {
+  return value === null ? '—' : value.toLocaleString('en-TT', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function heldFor(row: StoreBoardRow): string {
+  if (row.daysHeld === null) return 'Expected arrival';
+  if (row.daysHeld === 0) return 'Today';
+  return row.daysHeld === 1 ? '1 day held' : `${row.daysHeld} days held`;
+}
+
+function today(): string {
+  return new Date().toLocaleDateString('en-TT', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
 
 async function signOut(): Promise<void> {
   'use server';
@@ -40,29 +70,82 @@ async function signOut(): Promise<void> {
   redirect('/');
 }
 
-function when(value: Date | null): string {
-  return value === null ? '—' : value.toLocaleString('en-TT');
-}
-
-function settledAt(row: StoreBoardRow): Date {
-  return row.pickedUpAt ?? row.returnedAt ?? row.updatedAt;
-}
-
-function heldFor(row: StoreBoardRow): string {
-  if (row.daysHeld === null) return 'Not yet dropped off';
-  if (row.daysHeld === 0) return 'Dropped off today';
-  return row.daysHeld === 1 ? '1 day on the shelf' : `${row.daysHeld} days on the shelf`;
-}
-
 function Refusal({ children }: { children: React.ReactNode }) {
-  return <p className="store-dashboard-alert store-dashboard-alert--error" role="alert"><AlertTriangle size={18} aria-hidden="true" />{children}</p>;
+  return (
+    <p className="store-counter-alert store-counter-alert--error" role="alert">
+      <AlertTriangle size={18} aria-hidden="true" />
+      <span>{children}</span>
+    </p>
+  );
 }
 
-const DASHBOARD_VIEWS = ['overview', 'shelf', 'ready', 'expected', 'settled'] as const;
-type DashboardView = (typeof DASHBOARD_VIEWS)[number];
+function ItemImage({ row }: { row: StoreBoardRow }) {
+  return (
+    <div className="store-counter-result__image">
+      {row.primaryImageId ? (
+        <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" />
+      ) : (
+        <Package size={30} aria-hidden="true" />
+      )}
+    </div>
+  );
+}
 
-function isDashboardView(value: string | undefined): value is DashboardView {
-  return value !== undefined && DASHBOARD_VIEWS.includes(value as DashboardView);
+function PaymentBadge({ paid }: { paid: boolean }) {
+  return (
+    <span className={`store-counter-badge ${paid ? 'store-counter-badge--paid' : 'store-counter-badge--unpaid'}`}>
+      {paid ? <CheckCircle2 size={14} aria-hidden="true" /> : <Clock3 size={14} aria-hidden="true" />}
+      {paid ? 'Payment confirmed' : 'Payment pending'}
+    </span>
+  );
+}
+
+function ResultAction({ row, mode, storeId }: { row: StoreBoardRow; mode: CounterMode; storeId: string }) {
+  if (row.state === 'awaiting_dropoff') {
+    return mode === 'receive' ? (
+      <form action={receiveByCodeAction}>
+        <input type="hidden" name="storeId" value={storeId} />
+        <input type="hidden" name="code" value={row.dropoffCode} />
+        <input type="hidden" name="mode" value="receive" />
+        <button className="store-counter-primary-action" type="submit">Receive item</button>
+      </form>
+    ) : (
+      <p className="store-counter-action-note store-counter-action-note--neutral">
+        This item is waiting for the seller to drop it off. Switch to Receive to accept it.
+      </p>
+    );
+  }
+
+  if (row.state === 'at_relay' || row.state === 'release_authorized') {
+    if (mode !== 'release') {
+      return <p className="store-counter-action-note store-counter-action-note--neutral">Already received. Switch to Release when the buyer arrives.</p>;
+    }
+
+    if (!row.paid) {
+      return (
+        <div className="store-counter-release-block">
+          <p className="store-counter-action-note store-counter-action-note--danger" role="alert">
+            Payment not confirmed — do not release this item.
+          </p>
+          <button className="store-counter-primary-action" type="button" disabled>Release item</button>
+        </div>
+      );
+    }
+
+    return (
+      <form action={releaseItemAction}>
+        <input type="hidden" name="storeId" value={storeId} />
+        <input type="hidden" name="holdingId" value={row.holdingId} />
+        <button className="store-counter-primary-action" type="submit">Release item</button>
+      </form>
+    );
+  }
+
+  if (row.state === 'picked_up') {
+    return <p className="store-counter-action-note store-counter-action-note--success">Already released to the buyer.</p>;
+  }
+
+  return <p className="store-counter-action-note store-counter-action-note--neutral">This item is no longer active at the Store.</p>;
 }
 
 export default async function StoreBoardPage({
@@ -70,11 +153,11 @@ export default async function StoreBoardPage({
   searchParams,
 }: {
   params: Promise<{ storeId: string }>;
-  searchParams: Promise<{ refuse?: string; error?: string; ok?: string; view?: string }>;
+  searchParams: Promise<{ refuse?: string; error?: string; ok?: string; mode?: string; lookup?: string }>;
 }) {
   const { storeId } = await params;
   const flash = await searchParams;
-  const activeView: DashboardView = isDashboardView(flash.view) ? flash.view : 'overview';
+  const mode: CounterMode = isCounterMode(flash.mode) ? flash.mode : 'release';
 
   if ((await currentUser()) === null) redirect('/sign-in');
 
@@ -88,84 +171,143 @@ export default async function StoreBoardPage({
 
   const rows = await storeBoard(db, storeId);
   const expected = rows.filter((row) => row.state === 'awaiting_dropoff');
-  const onShelf = rows.filter((row) => row.state === 'at_relay');
-  const ready = rows.filter((row) => row.state === 'release_authorized');
-  const settledAll = rows.filter((row) => ['picked_up', 'returned_to_seller', 'voided'].includes(row.state));
-  const settled = [...settledAll].sort((a, b) => settledAt(b).getTime() - settledAt(a).getTime()).slice(0, SETTLED_WINDOW);
-  const shelf = [...onShelf].sort((a, b) => {
-    const aFlag = a.overstayFlaggedAt === null ? 1 : 0;
-    const bFlag = b.overstayFlaggedAt === null ? 1 : 0;
-    return aFlag - bFlag;
-  });
+  const onShelf = rows.filter((row) => row.state === 'at_relay' || row.state === 'release_authorized');
+  const settled = rows
+    .filter((row) => ['picked_up', 'returned_to_seller', 'voided'].includes(row.state))
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+    .slice(0, 25);
+  const matched = flash.lookup === undefined ? null : rows.find((row) => row.holdingId === flash.lookup) ?? null;
+
   return (
-    <main className="store-dashboard" data-dashboard-view={activeView}>
-      <Link className="store-dashboard__back" href="/store"><ArrowLeft size={15} aria-hidden="true" /> All stores</Link>
-      <header className="store-dashboard__header">
-        <div className="store-dashboard__header-copy">
+    <main className="store-counter-page" id="top">
+      <Link className="store-counter-back" href="/store"><ArrowLeft size={15} aria-hidden="true" /> All stores</Link>
+
+      <header className="store-counter-header">
+        <div>
+          <p className="store-counter-eyebrow">Store counter</p>
           <h1>{session.store.name}</h1>
-          <p className="lede">Your custody dashboard for receiving, securing, and releasing collector items.</p>
+          <p className="store-counter-lede">Scan or enter a code to receive or release an item.</p>
         </div>
+        <time dateTime={new Date().toISOString()}>{today()}</time>
       </header>
 
       {flash.refuse !== undefined && <Refusal>{flash.refuse}</Refusal>}
       {flash.error !== undefined && <Refusal>{flash.error}</Refusal>}
-      {flash.ok !== undefined && <p className="store-dashboard-alert store-dashboard-alert--success" role="status"><CheckCircle2 size={18} aria-hidden="true" />{flash.ok}</p>}
+      {flash.ok !== undefined && (
+        <p className="store-counter-alert store-counter-alert--success" role="status">
+          <CheckCircle2 size={18} aria-hidden="true" /><span>{flash.ok}</span>
+        </p>
+      )}
 
-      <div className="store-dashboard__workspace">
-      <nav className="store-dashboard-menu" aria-label="Store workspace sections">
-        <p className="store-dashboard-menu__label">Workspace</p>
-        <Link className={activeView === 'overview' ? 'is-active' : ''} href={`/store/${storeId}?view=overview`} aria-current={activeView === 'overview' ? 'page' : undefined}><StoreIcon size={17} aria-hidden="true" /><span>Overview<small>Dashboard</small></span></Link>
-        <Link className={activeView === 'shelf' ? 'is-active' : ''} href={`/store/${storeId}?view=shelf`} aria-current={activeView === 'shelf' ? 'page' : undefined}><Package size={17} aria-hidden="true" /><span>On the shelf<small>{shelf.length} item{shelf.length === 1 ? '' : 's'}</small></span></Link>
-        <Link className={activeView === 'ready' ? 'is-active' : ''} href={`/store/${storeId}?view=ready`} aria-current={activeView === 'ready' ? 'page' : undefined}><CheckCircle2 size={17} aria-hidden="true" /><span>Ready for collection<small>{ready.length} item{ready.length === 1 ? '' : 's'}</small></span></Link>
-        <Link className={activeView === 'expected' ? 'is-active' : ''} href={`/store/${storeId}?view=expected`} aria-current={activeView === 'expected' ? 'page' : undefined}><Inbox size={17} aria-hidden="true" /><span>Expected arrivals<small>{expected.length} item{expected.length === 1 ? '' : 's'}</small></span></Link>
-        <Link className={activeView === 'settled' ? 'is-active' : ''} href={`/store/${storeId}?view=settled`} aria-current={activeView === 'settled' ? 'page' : undefined}><Clock3 size={17} aria-hidden="true" /><span>Settled items<small>{settledAll.length} total</small></span></Link>
-        <form className="store-dashboard-menu__signout" action={signOut}>
-          <button type="submit"><LogOut size={17} aria-hidden="true" /> <span>Log out</span></button>
-        </form>
-      </nav>
+      <div className="store-counter-layout">
+        <div className="store-counter-main">
+          <section className="store-counter-panel store-counter-lookup" aria-label="Find an item to receive or release">
+            <nav className="store-counter-mode" aria-label="Counter action">
+              <Link className={mode === 'receive' ? 'is-active' : ''} href={`/store/${storeId}?mode=receive`} aria-current={mode === 'receive' ? 'page' : undefined}>
+                <Package size={22} aria-hidden="true" /><span><strong>Receive item</strong><small>Item from seller to Store</small></span>
+              </Link>
+              <Link className={mode === 'release' ? 'is-active' : ''} href={`/store/${storeId}?mode=release`} aria-current={mode === 'release' ? 'page' : undefined}>
+                <Inbox size={22} aria-hidden="true" /><span><strong>Release item</strong><small>Item from Store to buyer</small></span>
+              </Link>
+            </nav>
 
-      <div className="store-dashboard__content">
-      <section className="store-dashboard__stats" aria-label="Store activity summary">
-        <article className="store-dashboard-stat store-dashboard-stat--shelf"><div className="store-dashboard-stat__top"><div className="store-dashboard-stat__icon"><Package size={20} aria-hidden="true" /></div><h2 className="store-dashboard-stat__label">On the shelf</h2></div><strong>{onShelf.length}</strong></article>
-        <article className="store-dashboard-stat store-dashboard-stat--ready"><div className="store-dashboard-stat__top"><div className="store-dashboard-stat__icon"><CheckCircle2 size={20} aria-hidden="true" /></div><h2 className="store-dashboard-stat__label">Ready for collection</h2></div><strong>{ready.length}</strong></article>
-        <article className="store-dashboard-stat store-dashboard-stat--expected"><div className="store-dashboard-stat__top"><div className="store-dashboard-stat__icon"><Inbox size={20} aria-hidden="true" /></div><h2 className="store-dashboard-stat__label">Expected arrivals</h2></div><strong>{expected.length}</strong></article>
-        <article className="store-dashboard-stat store-dashboard-stat--settled"><div className="store-dashboard-stat__top"><div className="store-dashboard-stat__icon"><Clock3 size={20} aria-hidden="true" /></div><h2 className="store-dashboard-stat__label">Settled items</h2></div><strong>{settledAll.length}</strong></article>
+            <form className="store-counter-lookup__form" action={lookupByCodeAction}>
+              <input type="hidden" name="storeId" value={storeId} />
+              <input type="hidden" name="mode" value={mode} />
+              <label htmlFor="counter-code">{mode === 'receive' ? 'Drop-off code' : 'Buyer collection code'}</label>
+              <div className="store-counter-code-entry">
+                <ScanLine size={24} aria-hidden="true" />
+                <input id="counter-code" name="code" type="text" autoComplete="off" autoCapitalize="characters" placeholder="e.g. CT-K4M9" autoFocus required />
+                <button type="submit">Find item</button>
+              </div>
+              <p>Scan the code or type it manually.</p>
+            </form>
+          </section>
+
+          <section className="store-counter-result" aria-live="polite" aria-labelledby="matched-item-title">
+            <div className="store-counter-section-kicker">Matched item</div>
+            {matched === null ? (
+              <div className="store-counter-result__empty">
+                <ScanLine size={28} aria-hidden="true" />
+                <div><strong>Enter a code to see the item</strong><p>We&apos;ll show the next safe action here.</p></div>
+              </div>
+            ) : (
+              <>
+                <div className="store-counter-result__body">
+                  <ItemImage row={matched} />
+                  <div className="store-counter-result__title">
+                    <h2 id="matched-item-title">{matched.listingTitle}</h2>
+                    <div className="store-counter-result__badges">
+                      <span className="store-counter-code-pill">Code {matched.dropoffCode}</span>
+                      <PaymentBadge paid={matched.paid} />
+                    </div>
+                  </div>
+                </div>
+                <div className="store-counter-facts">
+                  <div><MapPin size={18} aria-hidden="true" /><span><small>Shelf location</small><strong>{matched.state === 'awaiting_dropoff' ? 'Incoming' : 'On shelf'}</strong></span></div>
+                  <div><UserRound size={18} aria-hidden="true" /><span><small>{matched.state === 'awaiting_dropoff' ? 'Seller' : 'Buyer'}</small><strong>{matched.state === 'awaiting_dropoff' ? matched.sellerName : matched.buyerName ?? 'Not assigned'}</strong></span></div>
+                  <div><ShieldCheck size={18} aria-hidden="true" /><span><small>{matched.state === 'awaiting_dropoff' ? 'Drop-off' : 'Held for'}</small><strong>{matched.state === 'awaiting_dropoff' ? 'Expected here' : heldFor(matched)}</strong></span></div>
+                </div>
+                <div className="store-counter-result__action">
+                  <div>
+                    {matched.state === 'at_relay' || matched.state === 'release_authorized' ? (
+                      <p>Verify the buyer&apos;s name, then hand over the item.</p>
+                    ) : matched.state === 'awaiting_dropoff' ? (
+                      <p>Check the seller&apos;s item against this record before receiving it.</p>
+                    ) : (
+                      <p>{SETTLED_LABELS[matched.state] ?? 'No action needed.'}</p>
+                    )}
+                  </div>
+                  <ResultAction row={matched} mode={mode} storeId={storeId} />
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+
+        <aside className="store-counter-summary" aria-label="Store inventory summary">
+          <p className="store-counter-section-kicker">Store inventory</p>
+          <div className="store-counter-summary__stat"><span className="store-counter-summary__icon store-counter-summary__icon--shelf"><Package size={22} aria-hidden="true" /></span><span><strong>{onShelf.length}</strong><small>on shelf</small></span></div>
+          <div className="store-counter-summary__stat"><span className="store-counter-summary__icon store-counter-summary__icon--expected"><Inbox size={22} aria-hidden="true" /></span><span><strong>{expected.length}</strong><small>expected</small></span></div>
+          <div className="store-counter-summary__links">
+            <a href="#inventory"><List size={19} aria-hidden="true" /> Inventory <ChevronRight size={16} aria-hidden="true" /></a>
+            <a href="#history"><History size={19} aria-hidden="true" /> History <ChevronRight size={16} aria-hidden="true" /></a>
+          </div>
+        </aside>
+      </div>
+
+      <section id="inventory" className="store-counter-list-section" aria-labelledby="inventory-title">
+        <div className="store-counter-list-heading"><div><p className="store-counter-section-kicker">Active custody</p><h2 id="inventory-title">Items on shelf <span>{onShelf.length}</span></h2></div><a href="#top">Back to counter</a></div>
+        {onShelf.length === 0 ? (
+          <div className="store-counter-list-empty"><Package size={22} aria-hidden="true" /><span><strong>Nothing on the shelf</strong><small>Received items will appear here.</small></span></div>
+        ) : (
+          <div className="store-counter-list">
+            {onShelf.map((row) => (
+              <article className="store-counter-list-row" key={row.holdingId}>
+                <ItemImage row={row} />
+                <div className="store-counter-list-row__copy"><h3>{row.listingTitle}</h3><p>{row.buyerName ?? 'Buyer not assigned'} · {heldFor(row)}</p></div>
+                <PaymentBadge paid={row.paid} />
+                <div className="store-counter-list-row__actions">
+                  {row.paid ? <form action={releaseItemAction}><input type="hidden" name="storeId" value={storeId} /><input type="hidden" name="holdingId" value={row.holdingId} /><button type="submit">Release</button></form> : <span className="store-counter-list-row__hold">Keep on shelf</span>}
+                  <form action={returnToSellerAction}><input type="hidden" name="storeId" value={storeId} /><input type="hidden" name="holdingId" value={row.holdingId} /><input type="hidden" name="view" value="overview" /><button className="store-counter-quiet-action" type="submit">Return</button></form>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
-      <div className="store-dashboard__top-grid">
-        <section className="store-dashboard-panel store-dashboard-counter" aria-labelledby="counter-title">
-          <div className="store-dashboard-panel__heading"><div><p className="section-label">Quick action</p><h2 id="counter-title"><ScanLine size={20} aria-hidden="true" /> At the counter</h2></div></div>
-          <p>Enter the drop-off code shown by the seller. The system will only accept an item expected at this Store.</p>
-          <form className="store-dashboard-counter__form" action={receiveByCodeAction}>
-            <input type="hidden" name="storeId" value={storeId} />
-            <input type="hidden" name="view" value={activeView} />
-            <label htmlFor="code">Drop-off code</label>
-            <div><input id="code" name="code" type="text" autoComplete="off" autoFocus={activeView === 'overview'} placeholder="e.g. CT-K4M9" required /><button type="submit">Receive item</button></div>
-          </form>
-          <p className="store-dashboard-panel__note">If it&apos;s not in the log, it doesn&apos;t belong here. Only accept a code the system recognises.</p>
-        </section>
-      </div>
-
-      <div className="store-dashboard__views">
-      <section id="shelf" className="store-dashboard-section" aria-labelledby="shelf-title">
-        <div className="store-dashboard-section__heading"><div><p className="section-label">Active custody</p><h2 id="shelf-title">On the shelf <span>{shelf.length}</span></h2><p>Items move to Ready for collection automatically when payment is confirmed.</p></div></div>
-        {shelf.length === 0 ? <div className="store-dashboard-empty"><Package size={22} aria-hidden="true" /><strong>Nothing on the shelf</strong><span>Received items will appear here until they are collected or returned.</span></div> : <div className="store-dashboard-items">{shelf.map((row) => <article key={row.holdingId} className={`store-dashboard-item${row.overstayFlaggedAt !== null ? ' store-dashboard-item--warning' : ''}`}>
-          <div className="store-dashboard-item__header"><div><h3>{row.listingTitle}</h3><div className="store-dashboard-item__tags"><span className="pill">Code {row.dropoffCode}</span><span className={`pill ${row.paid ? 'store-dashboard-pill--paid' : 'store-dashboard-pill--unpaid'}`}>{row.paid ? 'Payment confirmed' : 'Payment pending'}</span></div></div>{row.overstayFlaggedAt !== null ? <span className="store-dashboard-item__warning"><AlertTriangle size={14} aria-hidden="true" /> Overstay</span> : null}</div>
-          <p className="store-dashboard-item__meta">{heldFor(row)} · seller {row.sellerName} · buyer {row.buyerName ?? 'none right now'} · due out {when(row.custodyExpiresAt)}</p>
-          {row.overstayFlaggedAt !== null ? <p className="store-dashboard-item__notice" role="alert">Past its collection window since {when(row.overstayFlaggedAt)}. Call the owner on <strong>{row.ownerContact}</strong>, then return it to the seller.</p> : null}
-          <div className="store-dashboard-item__actions">{row.paid ? <p className="store-dashboard-item__ready-note">Payment confirmed — readying for collection.</p> : <p>Payment not confirmed — keep this item on the shelf.</p>}<form action={returnToSellerAction}><input type="hidden" name="storeId" value={storeId} /><input type="hidden" name="holdingId" value={row.holdingId} /><input type="hidden" name="view" value={activeView} /><input type="text" name="reason" placeholder="Reason (optional)" maxLength={200} aria-label={`Reason for returning ${row.listingTitle} to the seller`} /><button className="secondary" type="submit">Return to seller</button></form></div>
-        </article>)}</div>}
+      <section className="store-counter-incoming" aria-labelledby="incoming-title">
+        <div className="store-counter-list-heading"><div><p className="store-counter-section-kicker">Incoming</p><h2 id="incoming-title">Expected arrivals <span>{expected.length}</span></h2></div></div>
+        {expected.length === 0 ? <p className="store-counter-muted">No expected arrivals.</p> : <div className="store-counter-incoming__list">{expected.map((row) => <div key={row.holdingId}><strong>{row.dropoffCode}</strong><span>{row.listingTitle}</span><small>{row.sellerName}</small></div>)}</div>}
       </section>
 
-      <div className="store-dashboard__lower-grid">
-        <section id="ready" className="store-dashboard-section" aria-labelledby="ready-title"><div className="store-dashboard-section__heading"><div><p className="section-label">Payment cleared</p><h2 id="ready-title">Ready for collection <span>{ready.length}</span></h2><p>Verify the buyer&apos;s code, hand over the item, and mark it picked up.</p></div></div>{ready.length === 0 ? <div className="store-dashboard-empty"><CheckCircle2 size={22} aria-hidden="true" /><strong>Nothing waiting to be collected</strong><span>Cleared items will appear here.</span></div> : <div className="store-dashboard-items">{ready.map((row) => <article key={row.holdingId} className="store-dashboard-item"><div className="store-dashboard-item__header"><div><h3>{row.listingTitle}</h3><div className="store-dashboard-item__tags"><span className="pill">Buyer code {row.dropoffCode}</span><span className="pill store-dashboard-pill--paid">Payment confirmed</span></div></div></div><p className="store-dashboard-item__meta">buyer {row.buyerName ?? 'unknown'} · seller {row.sellerName} · {heldFor(row)} · due out {when(row.custodyExpiresAt)}</p><div className="store-dashboard-item__actions"><form action={markPickedUpAction}><input type="hidden" name="storeId" value={storeId} /><input type="hidden" name="holdingId" value={row.holdingId} /><input type="hidden" name="view" value={activeView} /><button type="submit">Mark picked up</button></form><form action={returnToSellerAction}><input type="hidden" name="storeId" value={storeId} /><input type="hidden" name="holdingId" value={row.holdingId} /><input type="hidden" name="view" value={activeView} /><input type="text" name="reason" placeholder="Reason (optional)" maxLength={200} aria-label={`Reason for returning ${row.listingTitle} to the seller`} /><button className="secondary" type="submit">Return to seller</button></form></div></article>)}</div>}</section>
-        <section id="expected" className="store-dashboard-section" aria-labelledby="expected-title"><div className="store-dashboard-section__heading"><div><p className="section-label">Incoming</p><h2 id="expected-title">Expected arrivals <span>{expected.length}</span></h2><p>Use the code to verify the item at the counter.</p></div></div>{expected.length === 0 ? <div className="store-dashboard-empty"><Inbox size={22} aria-hidden="true" /><strong>Nothing expected</strong><span>New store pickups will appear here.</span></div> : <div className="store-dashboard-table-wrap"><table className="store-dashboard-table"><thead><tr><th>Code</th><th>Item</th><th>Seller</th></tr></thead><tbody>{expected.map((row) => <tr key={row.holdingId}><td><strong>{row.dropoffCode}</strong></td><td>{row.listingTitle}</td><td>{row.sellerName}</td></tr>)}</tbody></table></div>}</section>
-      </div>
+      <section id="history" className="store-counter-history" aria-labelledby="history-title">
+        <div className="store-counter-list-heading"><div><p className="store-counter-section-kicker">Audit trail</p><h2 id="history-title">History</h2></div><span className="store-counter-muted">Newest first</span></div>
+        {settled.length === 0 ? <p className="store-counter-muted">Completed releases and returns will appear here.</p> : <div className="store-counter-history__table-wrap"><table><thead><tr><th>Item</th><th>Outcome</th><th>When</th></tr></thead><tbody>{settled.map((row) => <tr key={row.holdingId}><td>{row.listingTitle}</td><td>{SETTLED_LABELS[row.state] ?? row.state.replace(/_/g, ' ')}</td><td>{when(row.updatedAt)}</td></tr>)}</tbody></table></div>}
+      </section>
 
-      <section id="settled" className="store-dashboard-section" aria-labelledby="settled-title"><div className="store-dashboard-section__heading"><div><p className="section-label">Audit trail</p><h2 id="settled-title">Recently settled</h2><p>{settledAll.length > settled.length ? `Showing the last ${SETTLED_WINDOW} of ${settledAll.length} settled items — newest first.` : 'Everything this Store has settled — newest first.'}</p></div></div>{settled.length === 0 ? <div className="store-dashboard-empty"><Clock3 size={22} aria-hidden="true" /><strong>Nothing settled yet</strong><span>Completed pickups and returns will appear here.</span></div> : <div className="store-dashboard-table-wrap"><table className="store-dashboard-table"><thead><tr><th>Settled</th><th>Item</th><th>Outcome</th><th>Code</th><th>Seller</th><th>Buyer</th></tr></thead><tbody>{settled.map((row) => <tr key={row.holdingId}><td className="muted">{when(settledAt(row))}</td><td>{row.listingTitle}</td><td>{SETTLED_LABELS[row.state] ?? row.state.replace(/_/g, ' ')}</td><td className="muted">{row.dropoffCode}</td><td className="muted">{row.sellerName}</td><td className="muted">{row.buyerName ?? '—'}</td></tr>)}</tbody></table></div>}</section>
-      </div>
-      </div>
-      </div>
+      <form className="store-counter-signout" action={signOut}><button type="submit"><LogOut size={16} aria-hidden="true" /> Log out</button></form>
     </main>
   );
 }

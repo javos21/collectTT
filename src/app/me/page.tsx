@@ -1,27 +1,20 @@
 import { desc, eq, or } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
 
 import { bids, claims, listings } from '@/db/schema/listings';
+import { signOutAction } from '@/app/auth-actions';
 import { db } from '@/db/client';
 import { offers } from '@/db/schema/offers';
 import { profiles, reputationCounters, reputationEvents } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
 import { formatMoney } from '@/domain/money';
 import { objectiveSummary } from '@/domain/policy/reputation';
-import { auth } from '@/lib/auth';
 import { currentUser } from '@/lib/session';
 import { cancelListing, listingsBySeller } from '@/services/listings';
 import ProfilePage from './profile-page';
 
 export const dynamic = 'force-dynamic';
-
-async function signOut(): Promise<void> {
-  'use server';
-  await auth.api.signOut({ headers: await headers() });
-  redirect('/');
-}
 
 async function deleteListingAction(formData: FormData): Promise<void> {
   'use server';
@@ -43,9 +36,10 @@ function iso(date: Date | null): string | null {
   return date?.toISOString() ?? null;
 }
 
-export default async function MePage() {
+export default async function MePage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const user = await currentUser();
   if (user === null) redirect('/sign-in');
+  const params = await searchParams;
 
   const [profileRows, countersRows, sellerListings, claimRows, bidRows, offerRows, receivedOfferRows, dealRows, reputationEventRows] =
     await Promise.all([
@@ -103,8 +97,9 @@ export default async function MePage() {
   return (
     <main className="profile-page">
       <ProfilePage
-        signOutAction={signOut}
+        signOutAction={signOutAction}
         deleteListingAction={deleteListingAction}
+        initialTab={params.tab}
         profile={{
           displayName: user.displayName,
           handle: user.handle,

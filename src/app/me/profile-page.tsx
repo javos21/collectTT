@@ -1,6 +1,6 @@
 'use client';
 
-import { type FC, type ReactNode, useState } from 'react';
+import { type FC, type ReactNode, useEffect, useState } from 'react';
 import type { Key } from 'react-aria-components';
 import Link from 'next/link';
 import {
@@ -25,16 +25,7 @@ import {
 
 import { Tabs } from '@/components/application/tabs/tabs';
 import { NativeSelect } from '@/components/base/select/select-native';
-
-const tabs = [
-  { id: 'details', label: 'My Details' },
-  { id: 'trust', label: 'Trust & Activity' },
-  { id: 'listings', label: 'My Listings' },
-  { id: 'claims', label: 'Claims' },
-  { id: 'bids-offers', label: 'Bids / Offers' },
-  { id: 'history', label: 'History' },
-  { id: 'settings', label: 'Settings' },
-] as const;
+import { isProfileTabId, profileTabs } from '@/lib/profile-tabs';
 
 type ProfileData = {
   displayName: string;
@@ -81,6 +72,7 @@ type ReputationEventData = { id: string; type: string; title: string | null; occ
 interface ProfilePageProps {
   signOutAction: () => Promise<void>;
   deleteListingAction: (formData: FormData) => Promise<void>;
+  initialTab?: string;
   profile: ProfileData;
   counters: CounterData | null;
   listings: ListingData[];
@@ -381,9 +373,13 @@ const panelByTab: Record<string, FC<ProfilePageProps>> = {
 };
 
 export default function ProfilePage(props: ProfilePageProps) {
-  const [selectedTabIndex, setSelectedTabIndex] = useState<Key>('details');
+  const initialTab = isProfileTabId(props.initialTab) ? props.initialTab : 'details';
+  const [selectedTabIndex, setSelectedTabIndex] = useState<Key>(initialTab);
+  useEffect(() => {
+    setSelectedTabIndex(initialTab);
+  }, [initialTab]);
   const ActivePanel = panelByTab[String(selectedTabIndex)] ?? panelByTab.details!;
-  const selectedTab = tabs.find((tab) => tab.id === String(selectedTabIndex)) ?? tabs[0];
+  const selectedTab = profileTabs.find((tab) => tab.id === String(selectedTabIndex)) ?? profileTabs[0];
 
   return <>
     <div className="profile-page__section-bar">
@@ -395,15 +391,15 @@ export default function ProfilePage(props: ProfilePageProps) {
     </div>
     <div className="profile-workspace">
       <div className="profile-navigation">
-        <NativeSelect size="sm" aria-label="Profile sections" value={String(selectedTabIndex)} onChange={(event) => setSelectedTabIndex(event.target.value)} options={tabs.map((tab) => ({ label: tab.label, value: tab.id }))} className="profile-navigation__mobile" />
+        <NativeSelect size="sm" aria-label="Profile sections" value={String(selectedTabIndex)} onChange={(event) => setSelectedTabIndex(event.target.value)} options={profileTabs.map((tab) => ({ label: tab.label, value: tab.id }))} className="profile-navigation__mobile" />
         <Tabs orientation="vertical" selectedKey={selectedTabIndex} onSelectionChange={setSelectedTabIndex} className="profile-navigation__desktop">
-          <Tabs.List type="button-brand" items={tabs}>{(tab) => <Tabs.Item {...tab} />}</Tabs.List>
+          <Tabs.List type="button-brand" items={profileTabs}>{(tab) => <Tabs.Item {...tab} />}</Tabs.List>
         </Tabs>
         <form className="profile-navigation__signout" action={props.signOutAction}>
           <button type="submit"><LogOut size={17} aria-hidden="true" /> Sign out</button>
         </form>
       </div>
-      <div className="profile-tab-panel" role="tabpanel" aria-label={tabs.find((tab) => tab.id === String(selectedTabIndex))?.label}><ActivePanel {...props} /></div>
+      <div className="profile-tab-panel" role="tabpanel" aria-label={profileTabs.find((tab) => tab.id === String(selectedTabIndex))?.label}><ActivePanel {...props} /></div>
     </div>
   </>;
 }

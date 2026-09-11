@@ -7,6 +7,9 @@ import '@fontsource/space-mono/400.css';
 import './globals.css';
 
 import { MobileNavigation } from '@/components/mobile-navigation';
+import { ProfileMenu } from '@/components/profile-menu';
+import { ScrollToTop } from '@/components/scroll-to-top';
+import { signOutAction } from '@/app/auth-actions';
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
 import { storesForStaff } from '@/services/custody';
@@ -17,17 +20,6 @@ export const metadata: Metadata = {
   title: 'CollectTT — Collect with confidence',
   description: 'A trusted, peer-to-peer home for trading cards, comics and collectibles in Trinidad & Tobago.',
 };
-
-function initials(name: string): string {
-  const letters = name
-    .trim()
-    .split(/\s+/)
-    .map((part) => part[0] ?? '')
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-  return letters || 'C';
-}
 
 async function SiteNavigation() {
   const viewer = await currentUser();
@@ -66,20 +58,14 @@ async function SiteNavigation() {
         {viewer === null ? (
           <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
         ) : (
-          <Link className="user-nav" href="/me" aria-label={`Open ${viewer.displayName} profile`}>
-            {viewer.image === null ? (
-              <span className="user-nav__avatar" aria-hidden="true">{initials(viewer.displayName)}</span>
-            ) : (
-              <img className="user-nav__avatar" src={viewer.image} alt="" />
-            )}
-            <span>{viewer.displayName}</span>
-          </Link>
+          <ProfileMenu displayName={viewer.displayName} image={viewer.image} signOutAction={signOutAction} />
         )}
       </nav>
       <MobileNavigation
         hasStore={stores.length > 0}
         signedIn={viewer !== null}
         dealsAttentionCount={dealsAttentionCount}
+        signOutAction={signOutAction}
       />
     </>
   );
@@ -89,6 +75,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <ScrollToTop />
         <header className="site">
           <Link className="brand" href="/" aria-label="CollectTT home">
             <img className="brand-logo" src="/assets/collecttt_logo.png" alt="CollectTT" />

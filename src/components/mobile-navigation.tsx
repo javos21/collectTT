@@ -3,16 +3,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { Menu, UserRound, X } from 'lucide-react';
+import { LogOut, Menu, UserRound, X } from 'lucide-react';
 import { Building05, CoinsSwap01, Plus, SearchLg, UserCircle } from '@untitledui/icons';
 
 type MobileNavigationProps = {
   hasStore: boolean;
   signedIn: boolean;
   dealsAttentionCount: number;
+  signOutAction: () => Promise<void>;
 };
 
-export function MobileNavigation({ hasStore, signedIn, dealsAttentionCount }: MobileNavigationProps) {
+export function MobileNavigation({ hasStore, signedIn, dealsAttentionCount, signOutAction }: MobileNavigationProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -78,6 +79,14 @@ export function MobileNavigation({ hasStore, signedIn, dealsAttentionCount }: Mo
           <Link href="/listings/new" tabIndex={open ? 0 : -1} onClick={closeMenu}><Plus aria-hidden="true" /><span>Sell</span></Link>
           <Link href="/listings" tabIndex={open ? 0 : -1} onClick={closeMenu}><SearchLg aria-hidden="true" /><span>Browse</span></Link>
         </nav>
+        {signedIn && (
+          <form className="mobile-drawer__signout" action={signOutAction}>
+            <button type="submit" tabIndex={open ? 0 : -1}>
+              <LogOut aria-hidden="true" />
+              <span>Sign out</span>
+            </button>
+          </form>
+        )}
       </aside>
     </div>
   );
