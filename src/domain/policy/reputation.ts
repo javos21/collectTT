@@ -100,7 +100,7 @@ export function isNewMember(completedDeals: number): boolean {
 }
 
 /**
- * The public, objective profile line. Deliberately shows the denominator — "3 of 3"
+ * The public, objective profile line. Deliberately shows the denominator — "3 / 3"
  * reads honestly for a newcomer in a way "100%" does not.
  */
 export function objectiveSummary(c: {
@@ -112,7 +112,7 @@ export function objectiveSummary(c: {
   const lines: string[] = [];
   lines.push(`${c.buyCompleted + c.sellCompleted} completed deals`);
   if (c.buyClaimsTotal > 0) {
-    lines.push(`paid on time ${c.buyPaidOnTime} of ${c.buyClaimsTotal} times`);
+    lines.push(`paid on time ${c.buyPaidOnTime} / ${c.buyClaimsTotal} purchases`);
   }
   return lines;
 }

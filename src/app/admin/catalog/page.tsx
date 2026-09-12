@@ -3,9 +3,8 @@ import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { catalogValues } from '@/db/schema/catalog';
 import { categories } from '@/db/schema/listings';
-import { profiles } from '@/db/schema/profiles';
 import { CATEGORIES, CATEGORY_LIST } from '@/domain/categories/definitions';
-import { currentUser } from '@/lib/session';
+import { adminAccess } from '@/lib/admin';
 import { AdminDenied } from '../admin-access';
 import { AdminFrame } from '../admin-frame';
 import { CatalogManager } from './catalog-manager';
@@ -25,10 +24,9 @@ function defaultValues() {
 }
 
 export default async function CatalogPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
-  const viewer = await currentUser();
+  const { viewer, isAdmin } = await adminAccess();
   if (viewer === null) return <AdminDenied signedIn={false} />;
-  const viewerProfile = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.userId, viewer.userId)).limit(1);
-  if (viewerProfile[0]?.role !== 'admin') return <AdminDenied signedIn />;
+  if (!isAdmin) return <AdminDenied signedIn />;
 
   const [categoryRows, valueRows, params] = await Promise.all([
     db.select({ key: categories.key, label: categories.label, sortOrder: categories.sortOrder, active: categories.active }).from(categories).orderBy(asc(categories.sortOrder)),
@@ -43,5 +41,5 @@ export default async function CatalogPage({ searchParams }: { searchParams: Prom
   const mergedValues = defaultValues().map((value) => storedByKey.get(`${value.kind}:${value.key}`) ?? value);
   for (const value of valueRows) if (!mergedValues.some((item) => item.kind === value.kind && item.key === value.key)) mergedValues.push(value);
 
-  return <AdminFrame activeNav="catalog"><main className="admin-main"><div className="admin-heading"><div><h1>Catalog</h1><p>Manage the vocabulary sellers use to describe what they collect.</p></div><span className="admin-environment">Admin only</span></div><CatalogManager categories={mergedCategories} values={mergedValues} notice={params.notice} /></main></AdminFrame>;
+  return <AdminFrame activeNav="catalog"><main className="admin-main" id="admin-main"><div className="admin-heading"><div><h1>Catalog</h1><p>Manage the vocabulary sellers use to describe what they collect.</p></div><span className="admin-environment">Admin only</span></div><CatalogManager categories={mergedCategories} values={mergedValues} notice={params.notice} /></main></AdminFrame>;
 }

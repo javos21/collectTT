@@ -446,11 +446,6 @@ export async function recomputeShelfClock(tx: Tx, holdingId: string): Promise<Da
 /**
  * Payment just settled. Extend the shelf clock and automatically clear a paid item
  * for collection when it is already at a relay store. Called from `confirmPayment`.
- *
- * ★ `custody_ready_for_pickup` is still sent from exactly ONE place — the release
- *   transition in src/db/atomic/authorize-release.ts — but that transition is now
- *   invoked by this service under the system actor. The store no longer has to click
- *   a separate authorization action.
  */
 export async function onPaymentConfirmed(tx: Tx, transactionId: string): Promise<void> {
   const holding = await liveHoldingForTransaction(tx, transactionId);
@@ -818,19 +813,13 @@ export interface HoldingContext {
   droppedOffAt: Date | null;
   paymentDeadlineAt: Date | null;
   custodyExpiresAt: Date | null;
-  /**
-   * The seller's phone, falling back to their auth email, falling back to a literal
-   * placeholder. The store board renders the SAME rule — a clerk must never see a
-   * different contact string on the board than in an eviction notification.
-   */
-  ownerContact: string;
 }
 
-/** ★ ONE wording for "we have no way to reach this owner", shared with the store board. */
+/** ★ ONE wording for "we have no way to reach this owner" on the store board. */
 const NO_CONTACT = 'no contact on file';
 
 /**
- * Everything the notification templates need about a holding. `buyerId` and
+ * Everything the custody flow needs about a holding. `buyerId` and
  * `transactionId` are null while a holding sits on the shelf between attempts —
  * callers that address the buyer must check.
  */
@@ -847,15 +836,11 @@ export async function holdingContext(tx: Tx, holdingId: string): Promise<Holding
       droppedOffAt: custodyHoldings.droppedOffAt,
       paymentDeadlineAt: transactions.paymentDeadlineAt,
       custodyExpiresAt: custodyHoldings.custodyExpiresAt,
-      sellerPhone: profiles.phoneE164,
-      sellerEmail: users.email,
     })
     .from(custodyHoldings)
     .innerJoin(listings, eq(listings.id, custodyHoldings.listingId))
     .leftJoin(transactions, eq(transactions.id, custodyHoldings.currentTransactionId))
     .leftJoin(relayStores, eq(relayStores.id, custodyHoldings.storeId))
-    .leftJoin(profiles, eq(profiles.userId, listings.sellerId))
-    .leftJoin(users, eq(users.id, listings.sellerId))
     .where(eq(custodyHoldings.id, holdingId))
     .limit(1);
 
@@ -873,50 +858,5 @@ export async function holdingContext(tx: Tx, holdingId: string): Promise<Holding
     droppedOffAt: row.droppedOffAt,
     paymentDeadlineAt: row.paymentDeadlineAt,
     custodyExpiresAt: row.custodyExpiresAt,
-    ownerContact: row.sellerPhone ?? row.sellerEmail ?? NO_CONTACT,
-  };
-}
-
-export interface HoldingNotificationContext {
-  listingTitle: string;
-  storeName: string;
-  storeId: string | null;
-  droppedOffAt: Date | null;
-  /** The seller's phone, falling back to their email — for the eviction prompt. */
-  ownerContact: string;
-  storeStaffIds: string[];
-}
-
-/**
- * The public, notification-shaped view of a holding — for job handlers outside this
- * module.
- *
- * ★ It EXTENDS the private `holdingContext` rather than re-joining the same tables.
- *   Two readers of the same rows that can disagree is exactly the drift this module
- *   cannot afford. The only extra query is the one-to-many staff list, which cannot
- *   live in a single-row join.
- */
-export async function holdingNotificationContext(
-  tx: Tx,
-  holdingId: string,
-): Promise<HoldingNotificationContext | null> {
-  const ctx = await holdingContext(tx, holdingId);
-  if (ctx === null) return null;
-
-  const staff =
-    ctx.storeId === null
-      ? []
-      : await tx
-          .select({ userId: relayStoreStaff.userId })
-          .from(relayStoreStaff)
-          .where(eq(relayStoreStaff.storeId, ctx.storeId));
-
-  return {
-    listingTitle: ctx.listingTitle,
-    storeName: ctx.storeName,
-    storeId: ctx.storeId,
-    droppedOffAt: ctx.droppedOffAt,
-    ownerContact: ctx.ownerContact,
-    storeStaffIds: staff.map((s) => s.userId),
   };
 }

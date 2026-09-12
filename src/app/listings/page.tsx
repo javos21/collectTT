@@ -1,12 +1,16 @@
 import Link from 'next/link';
 import { BadgeCheck, Clock3, UserRound } from 'lucide-react';
 
+import { db } from '@/db/client';
 import { browseListings, BROWSE_SORTS, type BrowseSort } from '@/services/listings';
+import { trustSnapshotsForMembers } from '@/services/reputation';
 import { filtersForDefinition, coerceFiltersForDefinition } from '@/domain/categories/filters';
 import { formatMoney } from '@/domain/money';
 import { FilterPanel } from './filter-panel';
 import { listMarketplaceOptions } from '@/services/platform-settings';
 import { activeCategoryDefinitions } from '@/services/catalog';
+import { serializeTrustSnapshot } from '../deals/buyer-snapshot-data';
+import { BuyerSnapshotLink } from '../deals/buyer-snapshot-link';
 
 export const dynamic = 'force-dynamic';
 
@@ -121,6 +125,7 @@ export default async function BrowsePage({
     sort,
     page,
   });
+  const sellerSnapshots = await trustSnapshotsForMembers(db, rows.map((row) => row.sellerId));
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -305,6 +310,7 @@ export default async function BrowsePage({
                   const paymentOptions = row.paymentOptionLabels.length > 0
                     ? row.paymentOptionLabels.join(', ')
                     : labelList(row.settlementMethods, PAYMENT_LABELS);
+                  const sellerSnapshot = sellerSnapshots.get(row.sellerId);
                   return (
                   <article className="catalog-card" key={row.id}>
                     <Link className="catalog-card__image" href={`/listings/${row.id}`} aria-label={`View ${row.title}`}>
@@ -318,7 +324,17 @@ export default async function BrowsePage({
                       <div className="catalog-card__seller">
                         <UserRound aria-hidden="true" />
                         <div>
-                          <Link href={`/members/${row.sellerId}`}>{row.sellerName}</Link>
+                          {sellerSnapshot === undefined ? (
+                            <span className="catalog-card__seller-name">{row.sellerName}</span>
+                          ) : (
+                            <BuyerSnapshotLink
+                              snapshot={serializeTrustSnapshot(sellerSnapshot)}
+                              subjectLabel="Seller"
+                              triggerClassName="catalog-card__seller-link"
+                              triggerLabel={row.sellerName}
+                              showTriggerIcon={false}
+                            />
+                          )}
                           <span className={`catalog-card__seller-trust ${(row.sellerCompletedSales ?? 0) > 0 ? 'catalog-card__seller-trust--completed' : 'catalog-card__seller-trust--new'}`}>
                             {(row.sellerCompletedSales ?? 0) > 0
                               ? `${row.sellerCompletedSales} completed sale${row.sellerCompletedSales === 1 ? '' : 's'}`

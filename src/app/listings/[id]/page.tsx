@@ -16,30 +16,14 @@ import { transactions } from '@/db/schema/transactions';
 import { acceptOfferAction, bidAction, cancelOfferAndClaimAction, claimAction, rejectOfferAction, submitOfferAction } from './actions';
 import { AuctionLive } from './bid-panel';
 import { latestOfferForBuyer, pendingOffersForSeller } from '@/services/offers';
-import { trustSnapshotsForMembers, type TrustSnapshot } from '@/services/reputation';
+import { trustSnapshotsForMembers } from '@/services/reputation';
+import { serializeTrustSnapshot } from '../../deals/buyer-snapshot-data';
 import { SignInRequiredModal } from '@/components/sign-in-required-modal';
 import { ClaimConfirmedModal } from './claim-confirmed-modal';
 import { SettlementFields } from './settlement-fields';
-import { BuyerSnapshotLink, type BuyerSnapshotData } from '../../deals/buyer-snapshot-link';
+import { BuyerSnapshotLink } from '../../deals/buyer-snapshot-link';
 
 export const dynamic = 'force-dynamic';
-
-function serializeTrustSnapshot(snapshot: TrustSnapshot): BuyerSnapshotData {
-  return {
-    userId: snapshot.userId,
-    displayName: snapshot.displayName,
-    handle: snapshot.handle,
-    area: snapshot.area,
-    memberSince: snapshot.memberSince.toISOString(),
-    counters: snapshot.counters,
-    events: snapshot.events.map((event) => ({
-      id: event.id,
-      type: event.type,
-      title: event.title,
-      occurredAt: event.occurredAt.toISOString(),
-    })),
-  };
-}
 
 export default async function ListingPage({
   params,

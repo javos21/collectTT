@@ -1,9 +1,9 @@
 /**
  * The shelf clock ran out.
  *
- * Flags the holding and prompts the store to evict, with the owner's contact. It does
- * NOT record a reputation event: reputation stays about deal-breaking, and a
- * paid-but-uncollected item has already settled on the money track.
+ * Flags the holding for internal custody bookkeeping. It does NOT record a reputation
+ * event: reputation stays about deal-breaking, and a paid-but-uncollected item has
+ * already settled on the money track.
  *
  * ★ IDEMPOTENT, and the guard is load-bearing rather than defensive: the clock can
  *   EXTEND under a job that is already queued, because confirming payment pushes the
@@ -16,8 +16,6 @@ import type { Helpers } from 'graphile-worker';
 
 import { db } from '../../db/client';
 import { custodyHoldings } from '../../db/schema/custody';
-import { notify } from '../../notifications/dispatch';
-import { holdingNotificationContext } from '../../services/custody';
 
 interface Payload {
   holdingId: string;
@@ -48,22 +46,6 @@ export async function custodyOverstay(payload: Payload, helpers: Helpers): Promi
       return;
     }
 
-    const ctx = await holdingNotificationContext(tx, payload.holdingId);
-    if (ctx === null || ctx.storeStaffIds.length === 0) return;
-
-    for (const staffId of ctx.storeStaffIds) {
-      await notify({
-        tx,
-        userId: staffId,
-        event: 'custody_overstay_store',
-        data: {
-          listingTitle: ctx.listingTitle,
-          droppedOffAt: ctx.droppedOffAt?.toLocaleDateString('en-TT') ?? 'an unknown date',
-          ownerContact: ctx.ownerContact,
-        },
-        linkUrl: ctx.storeId === null ? '/store' : `/store/${ctx.storeId}`,
-        idempotencyKey: `custody_overstay:${payload.holdingId}`,
-      });
-    }
+    helpers.logger.info(`holding ${payload.holdingId} flagged as overstayed`);
   });
 }

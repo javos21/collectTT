@@ -92,6 +92,17 @@ export async function dropoffWindowExpired(payload: TxPayload, helpers: Helpers)
       return;
     }
 
+    // The seller's drop-off obligation begins only after payment is authoritative.
+    // A pending or buyer-marked payment must be resolved by the buyer payment window;
+    // expiring the seller clock here would blame the seller for an item they were not
+    // yet required to hand over.
+    if (row.paymentState !== 'confirmed') {
+      helpers.logger.info(
+        `transaction ${payload.transactionId} payment is ${row.paymentState} — seller drop-off not due yet`,
+      );
+      return;
+    }
+
     await terminateTransaction({
       tx,
       transactionId: payload.transactionId,

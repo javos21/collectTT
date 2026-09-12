@@ -97,3 +97,4 @@ export const disputeReasonEnum = pgEnum('dispute_reason', [
   'other',
 ]);
 export const disputeStatusEnum = pgEnum('dispute_status', ['open', 'resolved', 'dismissed']);
+export const adminAuditOutcomeEnum = pgEnum('admin_audit_outcome', ['succeeded', 'failed', 'rejected']);

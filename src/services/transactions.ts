@@ -603,7 +603,33 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
     actorUserId: input.actorUserId ?? null,
     actorRole: input.actorRole,
     reason,
+    metadata: {
+      paymentStateAtTermination: row.paymentState,
+      custodyStateAtTermination: row.custodyState,
+      paymentDeadlineAt: row.paymentDeadlineAt.toISOString(),
+      sellerDropoffDeadlineAt: row.sellerDropoffDeadlineAt?.toISOString() ?? null,
+      sellerDropoffRequired: row.paymentState === 'confirmed',
+    },
   });
+
+  // Keep the payment track visible in the audit trail when a deal ends before payment
+  // is confirmed. The overall renege says who lost the deal; this row says exactly why.
+  if (row.paymentState !== 'confirmed') {
+    await recordTransition(tx, {
+      transactionId,
+      track: 'payment',
+      from: row.paymentState,
+      to: 'failed',
+      actorRole: 'system',
+      reason: reason === 'non_payment' || reason === 'buyer_no_show'
+        ? 'payment deadline expired — no payment was confirmed'
+        : 'deal ended before payment was confirmed',
+      metadata: {
+        paymentDeadlineAt: row.paymentDeadlineAt.toISOString(),
+        terminationReason: reason,
+      },
+    });
+  }
 
   // ---- objective facts
   const factByReason = {
@@ -640,6 +666,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
       userId: row.buyerId,
       event: 'payment_window_lapsed_buyer',
       data: { listingTitle: row.listingTitle },
+      linkUrl: `/deals/${transactionId}`,
       idempotencyKey: `lapsed_buyer:${transactionId}`,
     });
   }
@@ -649,6 +676,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
       userId: row.sellerId,
       event: 'seller_dropoff_lapsed',
       data: { listingTitle: row.listingTitle },
+      linkUrl: `/deals/${transactionId}`,
       idempotencyKey: `lapsed_seller:${transactionId}`,
     });
     // ★ Tell the buyer to STOP, while their own payment window is still open. This is
@@ -658,6 +686,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
       userId: row.buyerId,
       event: 'buyer_told_to_hold_payment',
       data: { listingTitle: row.listingTitle },
+      linkUrl: `/deals/${transactionId}`,
       idempotencyKey: `hold_payment:${transactionId}`,
     });
   }
@@ -978,6 +1007,7 @@ export interface LoadedTransaction {
   settlementMethod: string | null;
   amountCents: number;
   paymentDeadlineAt: Date;
+  sellerDropoffDeadlineAt: Date | null;
   claimId: string | null;
   offerId: string | null;
 }
@@ -1007,6 +1037,7 @@ async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {
     settlementMethod: row.t.settlementMethod,
     amountCents: row.t.amountCents,
     paymentDeadlineAt: row.t.paymentDeadlineAt,
+    sellerDropoffDeadlineAt: row.t.sellerDropoffDeadlineAt,
     claimId: row.t.claimId,
     offerId: row.t.offerId,
   };

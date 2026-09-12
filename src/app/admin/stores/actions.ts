@@ -2,20 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { eq } from 'drizzle-orm';
 
-import { db } from '@/db/client';
-import { profiles } from '@/db/schema/profiles';
-import { currentUser } from '@/lib/session';
+import { requireAdmin } from '@/lib/admin';
 import { confirmStoreApplication, declineStoreApplication, deleteRelayStore } from '@/services/store-applications';
-
-async function requireAdmin() {
-  const viewer = await currentUser();
-  if (viewer === null) redirect('/admin');
-  const profile = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.userId, viewer.userId)).limit(1);
-  if (profile[0]?.role !== 'admin') redirect('/admin');
-  return viewer;
-}
 
 function text(formData: FormData, field: string): string {
   return String(formData.get(field) ?? '').trim();

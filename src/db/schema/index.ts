@@ -18,4 +18,5 @@ export * from './custody';
 export * from './store-applications';
 export * from './transactions';
 export * from './notifications';
+export * from './admin-audit';
 export * from './settings';

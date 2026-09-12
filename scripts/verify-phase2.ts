@@ -31,7 +31,6 @@ import {
   custodyHoldings,
   listingRelayStores,
 } from '../src/db/schema/custody';
-import { notifications } from '../src/db/schema/notifications';
 import { claimListing } from '../src/db/atomic/claim-listing';
 import { markReceived } from '../src/services/custody';
 
@@ -184,23 +183,6 @@ async function main(): Promise<void> {
     return rows[0];
   });
   console.log(`   the worker flagged it at ${flagged.overstayFlaggedAt!.toISOString()}`);
-
-  // ─────────────────────────────────────────────── 5. the store was actually told
-  console.log('5. checking the store got an eviction notice with the owner contact…');
-  const notice = await waitFor('the overstay notification for the store', async () => {
-    const rows = await db
-      .select()
-      .from(notifications)
-      .where(
-        and(eq(notifications.userId, clerk), eq(notifications.eventType, 'custody_overstay_store')),
-      )
-      .limit(1);
-    return rows[0];
-  });
-  if (!notice.body.includes(`${seller}@verify.local`)) {
-    throw new Error(`the eviction notice carries no owner contact: ${notice.body}`);
-  }
-  console.log(`   "${notice.title}" — contact ${seller}@verify.local`);
 
   console.log('\nPASS — Phase 2 custody rail verified against the live worker.');
   await cleanup();

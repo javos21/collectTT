@@ -20,9 +20,9 @@ import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
 import { transactions, transactionEvents } from '@/db/schema/transactions';
 import { listings } from '@/db/schema/listings';
-import { profiles } from '@/db/schema/profiles';
 import { marketplaceOptions } from '@/db/schema/settings';
 import { custodyPanelFor } from '@/services/custody';
+import { trustSnapshotsForMembers } from '@/services/reputation';
 import { formatMoney } from '@/domain/money';
 import { usesCustodyTrack } from '@/domain/states/transaction';
 import {
@@ -30,6 +30,8 @@ import {
   confirmPaymentAction,
   disputePaymentAction,
 } from './actions';
+import { serializeTrustSnapshot } from '../buyer-snapshot-data';
+import { BuyerSnapshotLink } from '../buyer-snapshot-link';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,6 +107,64 @@ function humanize(value: string | null) {
   return value.replace(/_/g, ' ').replace(/^\w/, (letter) => letter.toUpperCase());
 }
 
+function historyReason(value: string | null) {
+  if (value === 'claim') return 'Claim opened';
+  if (value === 'offer_accept') return 'Offer accepted';
+  if (value === 'auction_win') return 'Auction won';
+  if (value === 'auction_runner_up') return 'Auction promotion';
+  if (value === 'non_payment') return 'Buyer payment deadline expired';
+  if (value === 'buyer_no_show') return 'Buyer did not complete the meetup';
+  if (value === 'seller_no_dropoff') return 'Seller drop-off deadline expired';
+  if (value === 'seller_no_show') return 'Seller did not complete the meetup';
+  if (value === 'transaction terminated before drop-off') return 'Holding cancelled before drop-off';
+  return humanize(value);
+}
+
+function historyMetadata(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function historyDescription(
+  event: typeof transactionEvents.$inferSelect,
+  deal: typeof transactions.$inferSelect,
+): string | null {
+  const metadata = historyMetadata(event.metadata);
+
+  if (event.track === 'overall' && event.toState === 'open') {
+    if (event.reason === 'claim') {
+      return `The buyer claimed the listing. Payment was due by ${formatDateTime(deal.paymentDeadlineAt)}${usesCustodyTrack(deal.fulfillmentPath) ? '; seller drop-off was not required until payment was confirmed' : ''}.`;
+    }
+    if (event.reason === 'offer_accept') {
+      return `The seller accepted the offer. Payment was due by ${formatDateTime(deal.paymentDeadlineAt)}.`;
+    }
+    return 'The deal opened and the buyer payment window started.';
+  }
+
+  if (event.track === 'payment' && event.toState === 'failed') {
+    return `Payment was not confirmed by ${formatDateTime(deal.paymentDeadlineAt)}. The buyer non-payment was recorded; seller drop-off was not required.`;
+  }
+
+  if (event.track === 'overall' && event.toState === 'reneged_buyer') {
+    return `The buyer did not pay by ${formatDateTime(deal.paymentDeadlineAt)}. The buyer was penalized, and the seller was not penalized because payment was never confirmed.`;
+  }
+
+  if (event.track === 'overall' && event.toState === 'reneged_seller') {
+    return metadata.sellerDropoffRequired === true || deal.paymentState === 'confirmed'
+      ? 'Payment was confirmed, but the seller did not drop off the item by the seller deadline.'
+      : 'Payment was not confirmed, so seller drop-off was not yet required.';
+  }
+
+  if (event.track === 'custody' && event.toState === 'voided') {
+    return deal.paymentState === 'confirmed'
+      ? 'The custody holding was cancelled because the transaction ended before drop-off.'
+      : 'The item was never dropped off. The holding was cancelled after the buyer failed to pay, with no seller penalty.';
+  }
+
+  return null;
+}
+
 function Stepper({ steps, current, off }: { steps: string[]; current: number; off: boolean }) {
   return (
     <div className="steps" role="list">
@@ -170,15 +230,9 @@ export default async function DealPage({
   ]);
 
   const counterpartyId = isBuyer ? t.sellerId : t.buyerId;
-  const counterparty = (
-    await db
-      .select({ name: profiles.displayName, since: profiles.memberSince })
-      .from(profiles)
-      .where(eq(profiles.userId, counterpartyId))
-      .limit(1)
-  )[0];
-  const counterpartyName = counterparty?.name ?? 'the other member';
-  const counterpartyRole = isBuyer ? 'Seller' : 'Buyer';
+  const counterpartySnapshot = (await trustSnapshotsForMembers(db, [counterpartyId])).get(counterpartyId) ?? null;
+  const counterpartyName = counterpartySnapshot?.displayName ?? 'the other member';
+  const counterpartyRole: 'Seller' | 'Buyer' = isBuyer ? 'Seller' : 'Buyer';
 
   const timeline = await db
     .select()
@@ -263,7 +317,7 @@ export default async function DealPage({
             </>
           )}
 
-          {isOpen && isSeller && t.paymentState !== 'buyer_marked_paid' && custodyPanel?.state === 'awaiting_dropoff' && (
+          {isOpen && isSeller && t.paymentState === 'confirmed' && custodyPanel?.state === 'awaiting_dropoff' && (
             <>
               <p className="deal-action-card__eyebrow">Your next step</p>
               <h2 id="deal-action-title">Drop off the item</h2>
@@ -279,7 +333,7 @@ export default async function DealPage({
             </>
           )}
 
-          {isOpen && isSeller && t.paymentState === 'pending' && custodyPanel?.state !== 'awaiting_dropoff' && (
+          {isOpen && isSeller && t.paymentState === 'pending' && (
             <>
               <p className="deal-action-card__eyebrow">Waiting on the buyer</p>
               <h2 id="deal-action-title">Payment has not been marked as sent</h2>
@@ -314,7 +368,7 @@ export default async function DealPage({
           )}
         </section>
 
-        {isOpen && custodyPanel?.state === 'awaiting_dropoff' && isBuyer && (
+        {isOpen && custodyPanel?.state === 'awaiting_dropoff' && isBuyer && t.paymentState === 'confirmed' && (
           <section className="deal-dependency" aria-labelledby="deal-dependency-title">
             <Clock3 aria-hidden="true" />
             <div>
@@ -367,8 +421,8 @@ export default async function DealPage({
                 {timeline.map((event) => (
                   <tr key={event.id}>
                     <td className="muted deal-history__time"><time dateTime={event.occurredAt.toISOString()}><span>{formatHistoryDate(event.occurredAt).date}</span><span>{formatHistoryDate(event.occurredAt).time}</span></time></td>
-                    <td className="deal-history__event"><span className={`deal-history__track deal-history__track--${event.track}`}>{humanize(event.track)}</span><span className="deal-history__transition">{humanize(event.fromState)} → {humanize(event.toState)}</span></td>
-                    <td className="deal-history__actor-cell"><span className={`deal-history__actor deal-history__actor--${event.actorRole}`}>{humanize(event.actorRole)}</span>{event.reason !== null && <span className="deal-history__reason">{humanize(event.reason)}</span>}</td>
+                    <td className="deal-history__event"><span className={`deal-history__track deal-history__track--${event.track}`}>{humanize(event.track)}</span><span className="deal-history__transition">{humanize(event.fromState)} → {humanize(event.toState)}</span>{historyDescription(event, t) !== null && <span className="deal-history__description">{historyDescription(event, t)}</span>}</td>
+                    <td className="deal-history__actor-cell"><span className={`deal-history__actor deal-history__actor--${event.actorRole}`}>{humanize(event.actorRole)}</span>{event.reason !== null && <span className="deal-history__reason">{historyReason(event.reason)}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -380,7 +434,23 @@ export default async function DealPage({
           <summary><Settings2 aria-hidden="true" /><strong>Deal details</strong><ChevronDown aria-hidden="true" /></summary>
           <div className="deal-disclosure__body deal-details__grid">
             <div className="deal-detail"><span>Status</span><strong className={`badge ${t.state === 'completed' ? 'badge--live' : t.state === 'open' ? 'badge--claimed' : 'badge--ended'}`}>{STATE_LABELS[t.state]}</strong></div>
-            <div className="deal-detail"><span>{counterpartyRole}</span><strong><UserRound aria-hidden="true" /><Link href={`/members/${counterpartyId}`}>{counterpartyName}</Link></strong></div>
+            <div className="deal-detail">
+              <span>{counterpartyRole}</span>
+              <strong>
+                <UserRound aria-hidden="true" />
+                {counterpartySnapshot === null ? (
+                  <span>{counterpartyName}</span>
+                ) : (
+                  <BuyerSnapshotLink
+                    snapshot={serializeTrustSnapshot(counterpartySnapshot)}
+                    subjectLabel={counterpartyRole}
+                    triggerClassName="deal-detail__profile-link"
+                    triggerLabel={counterpartyName}
+                    showTriggerIcon={false}
+                  />
+                )}
+              </strong>
+            </div>
             <div className="deal-detail"><span>Fulfillment</span><strong>{fulfillmentLabel}</strong></div>
             <div className="deal-detail"><span>Payment method</span><strong>{settlementLabel}</strong></div>
             {t.attemptNumber > 1 && <div className="deal-detail"><span>Attempt</span><strong>{t.attemptNumber}</strong></div>}

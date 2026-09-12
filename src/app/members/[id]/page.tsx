@@ -1,17 +1,17 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { CircleAlert, Package } from 'lucide-react';
 
 import { db } from '@/db/client';
 import { profiles, reputationCounters, restrictions } from '@/db/schema/profiles';
 import { listings } from '@/db/schema/listings';
-import { formatMoney } from '@/domain/money';
-import { isNewMember } from '@/domain/policy/reputation';
+import { publicHandle } from '@/lib/profile-display';
+import { HomeListingTile, type HomeListingRow } from '@/app/home-listing-carousel';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * The public trust surface. Deliberately shows denominators — "paid on time 3 of 3"
+ * The public trust surface. Deliberately shows denominators — "paid on time 3 / 3"
  * reads honestly for a newcomer in a way "100%" does not, and cold-start trust is the
  * hardest problem this platform has.
  */
@@ -32,7 +32,24 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
 
   const [theirListings, activeRestrictions] = await Promise.all([
     db
-      .select()
+      .select({
+        id: listings.id,
+        title: listings.title,
+        primaryImageId: sql<string | null>`(
+          select i.id
+          from listing_images li
+          inner join images i on i.id = li.image_id
+          where li.listing_id = ${listings.id}
+          order by li.position asc
+          limit 1
+        )`,
+        saleType: listings.saleType,
+        currentBidCents: listings.currentBidCents,
+        startBidCents: listings.startBidCents,
+        priceCents: listings.priceCents,
+        endsAt: listings.endsAt,
+        acceptsOffers: listings.acceptsOffers,
+      })
       .from(listings)
       .where(and(eq(listings.sellerId, id), eq(listings.status, 'active')))
       .orderBy(desc(listings.publishedAt))
@@ -52,82 +69,110 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
   const completed = (c?.buyCompleted ?? 0) + (c?.sellCompleted ?? 0);
   const claims = c?.buyClaimsTotal ?? 0;
   const paidOnTime = c?.buyPaidOnTime ?? 0;
+  const paidOnTimePurchases = `${paidOnTime} / ${claims}`;
+
+  const initials = p.displayName
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0] ?? '')
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'C';
+  const displayHandle = publicHandle(p.handle);
+  const homeListingRows: HomeListingRow[] = theirListings.map((listing) => ({
+    id: listing.id,
+    title: listing.title,
+    primaryImageId: listing.primaryImageId,
+    saleType: listing.saleType,
+    currentBidCents: listing.currentBidCents,
+    startBidCents: listing.startBidCents,
+    priceCents: listing.priceCents,
+    endsAt: listing.endsAt?.toISOString() ?? null,
+    acceptsOffers: listing.acceptsOffers,
+    liveClaimCount: 0,
+  }));
 
   return (
-    <main>
-      <h1>{p.displayName}</h1>
-      <p className="muted">
-        @{p.handle} · member since {p.memberSince.toLocaleDateString('en-TT')}
-        {p.area !== null && ` · ${p.area}`}
-      </p>
+    <main className="member-page">
+      <section className="member-hero" aria-labelledby="member-name">
+        <div className="member-hero__identity">
+          <div className="member-avatar" aria-hidden="true">{initials}</div>
+          <div>
+            <h1 id="member-name">{p.displayName}</h1>
+            <p className="member-meta">
+              @{displayHandle} <span aria-hidden="true">·</span> member since {p.memberSince.toLocaleDateString('en-TT')}
+              {p.area !== null && <><span aria-hidden="true"> · </span>{p.area}</>}
+            </p>
+          </div>
+        </div>
+      </section>
 
-      <h2>Objective record</h2>
-      <table>
-        <tbody>
-          <tr>
-            <td>Completed deals</td>
-            <td>{completed}</td>
-          </tr>
-          <tr>
-            <td>Paid on time</td>
-            <td>
-              {claims === 0 ? (
-                <span className="muted">no purchases yet</span>
-              ) : (
-                `${paidOnTime} of ${claims}`
-              )}
-            </td>
-          </tr>
-          <tr>
-            <td>Unpaid claims (last 90 days)</td>
-            <td>{c?.buyReneged90d ?? 0}</td>
-          </tr>
-          <tr>
-            <td>Undelivered sales (last 90 days)</td>
-            <td>{c?.sellReneged90d ?? 0}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      {isNewMember(completed) && (
-        <p className="muted">
-          New to CollectTT. Sellers can ask newer buyers to pay up front — a lower-risk
-          on-ramp, not a closed door.
-        </p>
-      )}
+      <section className="member-section member-section--trust" aria-labelledby="trust-heading">
+        <div className="member-section__heading">
+          <div>
+            <h2 id="trust-heading">Trust snapshot</h2>
+          </div>
+          <span className="member-section__count">{completed} completed</span>
+        </div>
+        <div className="member-metrics">
+          <div className="member-metric member-metric--primary">
+            <strong>{completed}</strong>
+            <span>Completed deals</span>
+          </div>
+          <div className="member-metric member-metric--blue">
+            <strong>{c?.buyCompleted ?? 0}</strong>
+            <span>Purchases</span>
+          </div>
+          <div className="member-metric member-metric--purple">
+            <strong>{c?.sellCompleted ?? 0}</strong>
+            <span>Sales</span>
+          </div>
+          <div className="member-metric member-metric--green">
+            <strong>{paidOnTimePurchases}</strong>
+            <span>Paid on time / purchases</span>
+          </div>
+        </div>
+        <div className="member-reliability" aria-label="Recent reliability signals">
+          <div>
+            <span>Unpaid claims</span>
+            <strong>{c?.buyReneged90d ?? 0}</strong>
+            <small>Last 90 days</small>
+          </div>
+          <div>
+            <span>Undelivered sales</span>
+            <strong>{c?.sellReneged90d ?? 0}</strong>
+            <small>Last 90 days</small>
+          </div>
+        </div>
+      </section>
 
       {activeRestrictions.length > 0 && (
-        <>
-          <h2>Current restrictions</h2>
-          <ul>
-            {activeRestrictions.map((r) => (
-              <li key={r.type}>
-                <strong>{r.type.replace(/_/g, ' ')}</strong> — {r.reason}
-              </li>
-            ))}
-          </ul>
-        </>
+        <section className="member-callout member-callout--warning" aria-labelledby="restrictions-heading">
+          <div className="member-callout__icon"><CircleAlert size={17} aria-hidden="true" /></div>
+          <div>
+            <strong id="restrictions-heading">Current account restrictions</strong>
+            <ul>
+              {activeRestrictions.map((r) => <li key={r.type}><b>{r.type.replace(/_/g, ' ')}</b> — {r.reason}</li>)}
+            </ul>
+          </div>
+        </section>
       )}
 
-      <h2>Active listings</h2>
+      <section className="member-section member-section--listings" aria-labelledby="listings-heading">
+        <div className="member-section__heading">
+          <div>
+            <h2 id="listings-heading">Active listings</h2>
+          </div>
+          <span className="member-section__count">{theirListings.length} listed</span>
+        </div>
       {theirListings.length === 0 ? (
-        <p className="muted">Nothing listed right now.</p>
+        <div className="member-empty"><Package size={21} aria-hidden="true" /><span>Nothing listed right now.</span></div>
       ) : (
-        <div className="grid">
-          {theirListings.map((listing) => (
-            <div className="card" key={listing.id}>
-              <Link href={`/listings/${listing.id}`}>{listing.title}</Link>
-              <p style={{ margin: '.25rem 0 0', fontWeight: 600 }}>
-                {formatMoney(
-                  listing.saleType === 'auction'
-                    ? (listing.currentBidCents ?? listing.startBidCents ?? 0)
-                    : (listing.priceCents ?? 0),
-                )}
-              </p>
-            </div>
-          ))}
+        <div className="home-listing-grid member-home-listing-grid">
+          {homeListingRows.map((row) => <HomeListingTile key={row.id} row={row} />)}
         </div>
       )}
+      </section>
     </main>
   );
 }

@@ -9,18 +9,19 @@
  */
 
 import { and, eq, sql } from 'drizzle-orm';
-import type { Helpers } from 'graphile-worker';
+import type { JobHelpers } from 'graphile-worker';
 
 import { db } from '../../db/client';
 import { notificationDeliveries } from '../../db/schema/notifications';
 import { getAdapter, type NotificationChannel, type RenderedMessage } from '../../notifications/dispatch';
 import { registerAdapters } from '../../notifications/adapters/index';
+import { EVENTS } from '../../notifications/events';
 
 interface Payload {
   deliveryId: string;
 }
 
-export async function dispatchNotification(payload: Payload, helpers: Helpers): Promise<void> {
+export async function dispatchNotification(payload: Payload, helpers: JobHelpers): Promise<void> {
   registerAdapters();
 
   const { deliveryId } = payload;
@@ -34,6 +35,17 @@ export async function dispatchNotification(payload: Payload, helpers: Helpers): 
   const delivery = rows[0];
   if (delivery === undefined) {
     helpers.logger.info(`delivery ${deliveryId} is not pending — already handled`);
+    return;
+  }
+
+  // A delivery keeps its rendered payload, so a job queued before an event was
+  // removed from the catalogue must not resurrect that retired notification.
+  if (!Object.prototype.hasOwnProperty.call(EVENTS, delivery.eventType)) {
+    await db
+      .update(notificationDeliveries)
+      .set({ status: 'skipped', lastError: 'event type no longer supported' })
+      .where(eq(notificationDeliveries.id, deliveryId));
+    helpers.logger.info(`delivery ${deliveryId} skipped — event ${delivery.eventType} is retired`);
     return;
   }
 
@@ -74,6 +86,9 @@ export async function dispatchNotification(payload: Payload, helpers: Helpers): 
     await db
       .update(notificationDeliveries)
       .set({
+        // Keep automatic Graphile retries pending. Once the queue has exhausted its
+        // attempts, make the delivery visible to the audited admin retry flow.
+        status: helpers.job.attempts >= helpers.job.max_attempts ? 'failed' : 'pending',
         lastError: message,
         attempts: sql`${notificationDeliveries.attempts} + 1`,
       })

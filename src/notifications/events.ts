@@ -171,18 +171,6 @@ export const EVENTS = {
     title: (d) => `"${str(d, 'listingTitle')}" is at ${str(d, 'storeName')}`,
     body: (d) => `Once your payment is confirmed you can collect it. Pay by ${str(d, 'deadline')}.`,
   },
-  custody_ready_for_pickup: {
-    type: 'custody_ready_for_pickup',
-    channels: ['in_app', 'email', 'whatsapp'],
-    title: (d) => `Ready to collect at ${str(d, 'storeName')}`,
-    body: (d) => `Collect "${str(d, 'listingTitle')}" by ${str(d, 'expiresAt')}.`,
-  },
-  custody_overstay_store: {
-    type: 'custody_overstay_store',
-    channels: ['in_app', 'email'],
-    title: (d) => `Overstayed: "${str(d, 'listingTitle')}"`,
-    body: (d) => `Held since ${str(d, 'droppedOffAt')}. Owner: ${str(d, 'ownerContact')}.`,
-  },
   custody_return_to_seller: {
     type: 'custody_return_to_seller',
     channels: ['in_app', 'email', 'whatsapp'],

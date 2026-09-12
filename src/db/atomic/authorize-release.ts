@@ -24,14 +24,12 @@ import { sql } from 'drizzle-orm';
 
 import {
   loadHolding,
-  holdingContext,
   assertCustodyTransitionForCounter,
   CustodyConflictError,
   CustodyForbiddenError,
 } from '../../services/custody';
 import { relayStoreStaff } from '../schema/custody';
 import { transactions, transactionEvents } from '../schema/transactions';
-import { notify } from '../../notifications/dispatch';
 import { and, eq } from 'drizzle-orm';
 import type { StoreActionInput } from '../../services/custody';
 
@@ -125,25 +123,4 @@ export async function authorizeReleaseAtomic(input: StoreActionInput): Promise<v
     metadata: { holdingId },
   });
 
-  // ★ THE ONE PRODUCER of custody_ready_for_pickup. It reads through the SAME
-  //   `holdingContext` the rest of the custody notifications use, rather than a second
-  //   hand-rolled join, so the store name and the collection deadline in this message
-  //   can never disagree with the ones the board and the deal page show. The template
-  //   reads `storeName` AND `expiresAt`: both must be real values, or the buyer gets
-  //   `Collect "…" by .` and a title that says "at the store".
-  const details = await holdingContext(tx, holdingId);
-  if (details !== null && details.buyerId !== null) {
-    await notify({
-      tx,
-      userId: details.buyerId,
-      event: 'custody_ready_for_pickup',
-      data: {
-        listingTitle: details.listingTitle,
-        storeName: details.storeName,
-        expiresAt: details.custodyExpiresAt?.toLocaleString('en-TT') ?? 'the collection deadline',
-      },
-      linkUrl: `/deals/${transactionId}`,
-      idempotencyKey: `release_authorized:${holdingId}:${transactionId}`,
-    });
-  }
 }

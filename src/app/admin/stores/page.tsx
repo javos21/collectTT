@@ -2,9 +2,8 @@ import { CheckCircle2, Clock3, ExternalLink, MapPin, ShieldCheck, Store as Store
 import { eq } from 'drizzle-orm';
 
 import { db } from '@/db/client';
-import { profiles } from '@/db/schema/profiles';
 import { storeApplications } from '@/db/schema/store-applications';
-import { currentUser } from '@/lib/session';
+import { adminAccess } from '@/lib/admin';
 import { listStoreApplications } from '@/services/store-applications';
 import { AdminDenied } from '../admin-access';
 import { AdminFrame } from '../admin-frame';
@@ -27,10 +26,9 @@ function linksFor(application: Awaited<ReturnType<typeof listStoreApplications>>
 }
 
 export default async function StoresPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
-  const viewer = await currentUser();
+  const { viewer, isAdmin } = await adminAccess();
   if (viewer === null) return <AdminDenied signedIn={false} />;
-  const viewerProfile = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.userId, viewer.userId)).limit(1);
-  if (viewerProfile[0]?.role !== 'admin') return <AdminDenied signedIn />;
+  if (!isAdmin) return <AdminDenied signedIn />;
 
   const [applications, params] = await Promise.all([listStoreApplications(), searchParams]);
   const counts = {
@@ -41,7 +39,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
 
   return (
     <AdminFrame activeNav="stores">
-      <main className="admin-main">
+      <main className="admin-main" id="admin-main">
         <div className="admin-heading">
           <div><h1>Stores</h1><p>Review storefront applications before locations can receive inventory.</p></div>
         </div>

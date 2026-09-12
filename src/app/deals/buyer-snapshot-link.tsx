@@ -4,27 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { BadgeCheck, MapPin, UserRound, X } from 'lucide-react';
 
-export type BuyerSnapshotData = {
-  userId: string;
-  displayName: string;
-  handle: string;
-  area: string | null;
-  memberSince: string;
-  counters: {
-    buyClaimsTotal: number;
-    buyCompleted: number;
-    buyReneged90d: number;
-    buyPaidOnTime: number;
-    sellCompleted: number;
-    sellReneged90d: number;
-  };
-  events: Array<{
-    id: string;
-    type: string;
-    title: string | null;
-    occurredAt: string;
-  }>;
-};
+import { publicHandle } from '@/lib/profile-display';
+import type { BuyerSnapshotData } from './buyer-snapshot-data';
 
 const EVENT_LABELS: Record<string, string> = {
   purchase_completed: 'Purchase completed',
@@ -79,10 +60,9 @@ export function BuyerSnapshotLink({
   const triggerRef = useRef<HTMLAnchorElement>(null);
   const titleId = `buyer-snapshot-title-${snapshot.userId}`;
   const subject = subjectLabel.toLowerCase();
+  const displayHandle = publicHandle(snapshot.handle);
   const completedDeals = snapshot.counters.buyCompleted + snapshot.counters.sellCompleted;
-  const paidOnTime = snapshot.counters.buyClaimsTotal > 0
-    ? `${snapshot.counters.buyPaidOnTime} of ${snapshot.counters.buyClaimsTotal}`
-    : 'No purchase history';
+  const paidOnTime = `${snapshot.counters.buyPaidOnTime} / ${snapshot.counters.buyClaimsTotal}`;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -164,10 +144,10 @@ export function BuyerSnapshotLink({
             <header className="buyer-snapshot-modal__header">
               <div className="buyer-snapshot-modal__avatar" aria-hidden="true">{initials(snapshot.displayName)}</div>
               <div>
-                <p className="buyer-snapshot-modal__eyebrow">{subjectLabel} trust snapshot</p>
+                <p className="buyer-snapshot-modal__eyebrow">Trust snapshot</p>
                 <h2 id={titleId}>{snapshot.displayName}</h2>
                 <p className="buyer-snapshot-modal__meta">
-                  @{snapshot.handle} · member since {date(snapshot.memberSince)}
+                  @{displayHandle} · member since {date(snapshot.memberSince)}
                   {snapshot.area !== null && <><span aria-hidden="true"> · </span>{snapshot.area}</>}
                 </p>
               </div>
@@ -188,7 +168,7 @@ export function BuyerSnapshotLink({
               </div>
               <div className="buyer-snapshot-modal__metric">
                 <strong>{paidOnTime}</strong>
-                <span>Paid on time</span>
+                <span>Paid on time / purchases</span>
               </div>
             </div>
 

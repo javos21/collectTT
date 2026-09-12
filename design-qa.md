@@ -151,14 +151,14 @@ Date: 2026-09-11
 No actionable P0, P1, or P2 findings remain.
 
 - The mobile drawer now ends with a separated, full-width Sign out action using a 52px touch target.
-- The desktop profile control opens a labelled dropdown that mirrors the profile tabs: My Details, Trust & Activity, My Listings, Claims, Bids / Offers, History, and Settings.
+- The desktop profile control opens a labelled dropdown that mirrors the four focused profile destinations: Activity, Bids & Offers, Trust, and Listings.
 - Dropdown section links preserve the existing profile navigation by opening `/me?tab=…` and selecting the matching tab panel.
 - Escape closes the desktop dropdown and the existing mobile drawer focus return remains intact; no horizontal overflow was observed.
 
 ## Verification checklist
 
 - [x] Desktop profile dropdown opens and exposes all profile sections plus Sign out.
-- [x] My Listings dropdown item opens `/me?tab=listings` and selects the My Listings panel.
+- [x] Listings dropdown item opens `/me?tab=listings` and selects the Listings panel.
 - [x] Mobile drawer exposes Sign out only for signed-in users.
 - [x] Mobile Sign out control measures 52px high and spans the drawer content width.
 - [x] Typecheck and whitespace checks passed; browser console error check returned an empty list.
@@ -191,6 +191,32 @@ No actionable P0, P1, or P2 findings remain.
 - [x] Plain listing detail opened at the top on mobile.
 - [x] `#buy-panel` navigation remained anchored to the buy panel.
 - [x] Browser console error check returned an empty list.
+- [x] Typecheck and whitespace checks passed.
+
+---
+
+# Profile area simplification QA
+
+Date: 2026-09-11
+
+## Review outcome
+
+The profile workspace is now organized around four jobs instead of seven competing sections:
+
+- Activity combines claims, bids, offers, and transactions in one newest-first timeline.
+- Bids & Offers shows only actions the user sent, split into auction bids and offers sent.
+- Trust keeps the verified trust snapshot alongside the transactions and outcomes that affect it.
+- Listings keeps the seller’s auction and straight-sale lists, with active listings shown first and inactive listings revealed on demand.
+
+Legacy profile links continue to resolve to the closest new destination, so existing desktop dropdown links and shared URLs do not land on removed sections.
+
+## Verification checklist
+
+- [x] Shared profile navigation exposes four focused destinations on desktop and mobile.
+- [x] `/me` defaults to the Activity timeline rather than the former details panel.
+- [x] Received offers are removed from the buyer-facing Bids & Offers workspace.
+- [x] Activity rows retain status, dates, and deal links where a transaction exists.
+- [x] Existing active/inactive listing toggles and mobile single-column layout remain intact.
 - [x] Typecheck and whitespace checks passed.
 
 final result: passed

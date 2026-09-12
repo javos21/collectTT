@@ -47,6 +47,8 @@ export const auth = betterAuth({
           '',
           'This link expires in one hour. If you did not request it, you can ignore this email.',
         ].join('\n'),
+        actionUrl: url,
+        actionLabel: 'Reset Password',
       });
     },
   },

@@ -54,7 +54,7 @@ function claimedAgo(claimedAt: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function ListingTile({ row }: { row: HomeListingRow }) {
+export function HomeListingTile({ row }: { row: HomeListingRow }) {
   return (
     <Link className="home-listing-tile" href={`/listings/${row.id}`}>
       <div className="home-listing-tile__image">
@@ -125,7 +125,7 @@ export function HomeListingCarousel({ label, rows }: HomeListingCarouselProps) {
   return (
     <div className="home-carousel" aria-label={label} aria-roledescription="carousel">
       <div className="home-listing-grid home-carousel__grid" aria-live="polite">
-        {currentRows.map((row) => <ListingTile key={row.id} row={row} />)}
+        {currentRows.map((row) => <HomeListingTile key={row.id} row={row} />)}
       </div>
       <div className="home-carousel__controls">
         <button

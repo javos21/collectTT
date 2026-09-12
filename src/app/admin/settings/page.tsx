@@ -1,8 +1,7 @@
 import { eq } from 'drizzle-orm';
 
 import { db } from '@/db/client';
-import { profiles } from '@/db/schema/profiles';
-import { currentUser } from '@/lib/session';
+import { adminAccess } from '@/lib/admin';
 import { getFullServiceDeliveryDays, listMarketplaceOptions } from '@/services/platform-settings';
 import { AdminDenied } from '../admin-access';
 import { AdminFrame } from '../admin-frame';
@@ -12,15 +11,9 @@ import { MarketplaceOptionManager } from './marketplace-option-manager';
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ settings?: string; settingsError?: string }> }) {
-  const viewer = await currentUser();
+  const { viewer, isAdmin } = await adminAccess();
   if (viewer === null) return <AdminDenied signedIn={false} />;
-
-  const viewerProfile = await db
-    .select({ role: profiles.role })
-    .from(profiles)
-    .where(eq(profiles.userId, viewer.userId))
-    .limit(1);
-  if (viewerProfile[0]?.role !== 'admin') return <AdminDenied signedIn />;
+  if (!isAdmin) return <AdminDenied signedIn />;
 
   const [fullServiceDeliveryDays, deliveryOptions, paymentOptions, params] = await Promise.all([
     getFullServiceDeliveryDays(),
@@ -31,7 +24,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <AdminFrame activeNav="settings">
-      <main className="admin-main">
+      <main className="admin-main" id="admin-main">
         <div className="admin-heading">
           <div><h1>Settings</h1><p>Manage the defaults that guide marketplace operations.</p></div>
         </div>

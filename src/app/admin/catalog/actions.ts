@@ -7,8 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { catalogValues } from '@/db/schema/catalog';
 import { categories } from '@/db/schema/listings';
-import { profiles } from '@/db/schema/profiles';
-import { currentUser } from '@/lib/session';
+import { requireAdmin } from '@/lib/admin';
 
 function text(formData: FormData, field: string): string {
   return String(formData.get(field) ?? '').trim();
@@ -16,14 +15,6 @@ function text(formData: FormData, field: string): string {
 
 function safeKey(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
-}
-
-async function requireAdmin() {
-  const viewer = await currentUser();
-  if (viewer === null) redirect('/admin');
-  const profile = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.userId, viewer.userId)).limit(1);
-  if (profile[0]?.role !== 'admin') redirect('/admin');
-  return viewer;
 }
 
 function finish(message: string): never {

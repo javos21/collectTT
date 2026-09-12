@@ -45,7 +45,7 @@ const seller = `c_seller_${SUFFIX}`;
 const buyerA = `c_buyerA_${SUFFIX}`;
 const buyerB = `c_buyerB_${SUFFIX}`;
 const clerk = `c_clerk_${SUFFIX}`;
-/** A seller WITH a phone on file — the branch of `ownerContact` the email fallback hides. */
+/** A seller WITH a phone on file — the branch of `ownerContact` used on the store board. */
 const phoneSeller = `c_phoneseller_${SUFFIX}`;
 const everyone = [seller, buyerA, buyerB, clerk, phoneSeller];
 
@@ -494,8 +494,7 @@ describe('custody notification strings', () => {
     expect(received!.body).toMatch(/Pay by \S+/);
   });
 
-  it('renders the collection deadline after payment extends the shelf clock, not the tight unpaid one', async () => {
-    const { notifications } = await import('../../src/db/schema/notifications');
+  it('extends the collection deadline after payment, not the tight unpaid one', async () => {
     const { markReceived, onPaymentConfirmed } = await import('../../src/services/custody');
     const { transactions: transactionsTable } = await import('../../src/db/schema/transactions');
 
@@ -514,7 +513,7 @@ describe('custody notification strings', () => {
 
     // Confirm payment: this extends the shelf clock from the tight unpaid window (3
     // days) to the paid window (7 days), then automatically moves the item into the
-    // ready-for-collection state and sends the buyer notice.
+    // ready-for-collection state.
     await db.transaction(async (tx) => {
       await tx
         .update(transactionsTable)
@@ -530,23 +529,11 @@ describe('custody notification strings', () => {
 
     expect(holdingAfter[0]!.state).toBe('release_authorized');
 
-    const inbox = await db
-      .select()
-      .from(notifications)
-      .where(eq(notifications.userId, buyerB));
-    const ready = inbox.find((n) => n.eventType === 'custody_ready_for_pickup');
-
-    expect(ready).toBeDefined();
-    expect(ready!.body).not.toMatch(/Collect it by \.$/);
-    expect(ready!.body).toMatch(/Collect ".*" by \S+/);
-    // The notified deadline matches the extended (paid) clock actually stored on the
-    // holding, not a value computed before recomputeShelfClock ran.
-    const expiresAtText = holdingAfter[0]!.custodyExpiresAt!.toLocaleString('en-TT');
-    expect(ready!.body).toContain(expiresAtText);
+    expect(holdingAfter[0]!.custodyExpiresAt).not.toBeNull();
+    expect(holdingAfter[0]!.custodyExpiresAt!.getTime()).toBeGreaterThan(Date.now());
   });
 
-  it('sends the released buyer exactly ONE ready-to-collect notice, naming the real store and a real date', async () => {
-    const { notifications } = await import('../../src/db/schema/notifications');
+  it('automatically releases a paid item exactly once', async () => {
     const { markReceived } = await import('../../src/services/custody');
     const { markPaid, confirmPayment } = await import('../../src/services/transactions');
 
@@ -578,27 +565,7 @@ describe('custody notification strings', () => {
 
     expect(holdingAfter[0]!.state).toBe('release_authorized');
 
-    // Scoped to THIS deal: the fixture buyers are reused across tests.
-    const inbox = await db
-      .select()
-      .from(notifications)
-      .where(eq(notifications.userId, buyerA));
-    const ready = inbox.filter(
-      (n) => n.eventType === 'custody_ready_for_pickup' && n.linkUrl === `/deals/${txId}`,
-    );
-
-    // ★ ONE. Payment confirmation is the single producer now, and the automatic
-    //   release transition keeps the notice deduplicated by its durable idempotency key.
-    expect(ready).toHaveLength(1);
-
-    const notice = ready[0]!;
-    // The template reads `storeName` for its TITLE. A missing key rendered the literal
-    // "Ready to collect at ." / "at the store" rather than the shop's name.
-    expect(notice.title).toContain(`Test Relay ${SUFFIX}`);
-    expect(notice.title).not.toContain('the store');
-    // ...and `expiresAt` for its BODY. A missing key rendered `Collect "…" by .`
-    expect(notice.body).not.toMatch(/by \.$/);
-    expect(notice.body).toContain(holdingAfter[0]!.custodyExpiresAt!.toLocaleString('en-TT'));
+    expect(holdingAfter[0]!.custodyExpiresAt).not.toBeNull();
   });
 
   it('flags an overstayed item and no-ops when the clock has moved', async () => {
@@ -629,15 +596,6 @@ describe('custody notification strings', () => {
     await custodyOverstay({ holdingId }, helpers);
     row = await db.select().from(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
     expect(row[0]!.overstayFlaggedAt).not.toBeNull();
-
-    // The store was actually told, with the owner's contact. The seller fixture has no
-    // phone, so the rule falls through to their auth email.
-    const { notifications } = await import('../../src/db/schema/notifications');
-    const clerkInbox = await db.select().from(notifications).where(eq(notifications.userId, clerk));
-    const evictions = clerkInbox.filter((n) => n.eventType === 'custody_overstay_store');
-    expect(evictions.length).toBe(1);
-    expect(evictions[0]!.body).toContain(`${seller}@test.local`);
-    expect(evictions[0]!.body).not.toContain('no contact on file');
 
     // Idempotent: a redelivery must not move the timestamp.
     const firstFlag = row[0]!.overstayFlaggedAt!.getTime();
@@ -715,20 +673,11 @@ describe('custody notification strings', () => {
     await db.delete(relayStores).where(eq(relayStores.id, isolatedStoreId));
   });
 
-  it('shows the seller PHONE, identically, on the board and in the eviction notice', async () => {
+  it('shows the seller PHONE on the store board', async () => {
     const { storeBoard } = await import('../../src/services/custody');
     const { markReceived } = await import('../../src/services/custody');
-    const { custodyOverstay } = await import('../../src/jobs/tasks/custody-overstay');
-    const { notifications } = await import('../../src/db/schema/notifications');
-    const helpers = {
-      logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} },
-    } as never;
 
-    // ★ R3's whole stated risk is that the board's contact string and the eviction
-    //   notification's can drift apart. They are produced by two different queries,
-    //   and until now only the EMAIL fallback branch had ever executed — the phone
-    //   branch, which is the one a clerk actually dials, was never covered on either
-    //   side. This fixture seller has a phone, and both sides are asserted.
+    // The board still exposes the seller's preferred contact for store operations.
     const title = `Phone owner ${SUFFIX}`;
     const listingId = await makeRelayListing({ sellerId: phoneSeller, title });
     await claimListing({
@@ -749,20 +698,6 @@ describe('custody notification strings', () => {
 
     const board = await storeBoard(db, storeId);
     expect(board.find((r) => r.holdingId === holdingId)?.ownerContact).toBe(SELLER_PHONE);
-
-    // The other side of the same fact: the store's eviction prompt.
-    await db
-      .update(custodyHoldings)
-      .set({ custodyExpiresAt: sql`now() - interval '1 hour'` })
-      .where(eq(custodyHoldings.id, holdingId));
-    await custodyOverstay({ holdingId }, helpers);
-
-    const inbox = await db.select().from(notifications).where(eq(notifications.userId, clerk));
-    const evicted = inbox.find(
-      (n) => n.eventType === 'custody_overstay_store' && n.title.includes(title),
-    );
-    expect(evicted).toBeDefined();
-    expect(evicted!.body).toContain(SELLER_PHONE);
   });
 
   it('board resolves buyer names for one buyer and for two buyers on the same board', async () => {
@@ -893,6 +828,96 @@ describe('a deactivated store does not brick the jobs that depend on it', () => 
 });
 
 describe('the full custody loop', () => {
+  it('does not penalize the seller when the buyer never pays before drop-off expires', async () => {
+    const { dropoffWindowExpired, paymentWindowExpired } = await import(
+      '../../src/jobs/tasks/transaction-windows'
+    );
+    const { transactions } = await import('../../src/db/schema/transactions');
+    const { reputationCounters, reputationEvents } = await import(
+      '../../src/db/schema/profiles'
+    );
+    const helpers = {
+      logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} },
+    } as never;
+
+    const listingId = await makeRelayListing();
+    const claim = await claimListing({
+      listingId,
+      claimantId: buyerA,
+      fulfillmentPath: 'relay',
+      relayStoreId: storeId,
+    });
+    const txId = claim.transactionId!;
+
+    const before = await db
+      .select({
+        buyerReneged: reputationCounters.buyRenegedTotal,
+        buyerPaidOnTime: reputationCounters.buyPaidOnTime,
+      })
+      .from(reputationCounters)
+      .where(eq(reputationCounters.userId, buyerA));
+    const beforeSeller = await db
+      .select({ sellerReneged: reputationCounters.sellRenegedTotal })
+      .from(reputationCounters)
+      .where(eq(reputationCounters.userId, seller));
+
+    // The seller deadline passes while payment is still pending. That is not a seller
+    // failure: the seller has no drop-off obligation until payment is confirmed.
+    await db
+      .update(transactions)
+      .set({
+        sellerDropoffDeadlineAt: sql`now() - interval '1 hour'`,
+        paymentDeadlineAt: sql`now() + interval '1 hour'`,
+      })
+      .where(eq(transactions.id, txId));
+    await dropoffWindowExpired({ transactionId: txId }, helpers);
+
+    const stillOpen = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(stillOpen?.state).toBe('open');
+    expect(stillOpen?.paymentState).toBe('pending');
+
+    const sellerFailureBeforePayment = await db
+      .select()
+      .from(reputationEvents)
+      .where(eq(reputationEvents.transactionId, txId));
+    expect(sellerFailureBeforePayment).toHaveLength(0);
+
+    // The buyer's payment window is the authoritative failure path and records the
+    // buyer renege without creating a paid-on-time event.
+    await db
+      .update(transactions)
+      .set({ paymentDeadlineAt: sql`now() - interval '1 hour'` })
+      .where(eq(transactions.id, txId));
+    await paymentWindowExpired({ transactionId: txId }, helpers);
+
+    const failed = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(failed?.state).toBe('reneged_buyer');
+    expect(failed?.terminatedReason).toBe('non_payment');
+
+    const afterBuyer = await db
+      .select({
+        buyerReneged: reputationCounters.buyRenegedTotal,
+        buyerPaidOnTime: reputationCounters.buyPaidOnTime,
+      })
+      .from(reputationCounters)
+      .where(eq(reputationCounters.userId, buyerA));
+    const afterSeller = await db
+      .select({ sellerReneged: reputationCounters.sellRenegedTotal })
+      .from(reputationCounters)
+      .where(eq(reputationCounters.userId, seller));
+
+    expect(afterBuyer[0]?.buyerReneged).toBe((before[0]?.buyerReneged ?? 0) + 1);
+    expect(afterBuyer[0]?.buyerPaidOnTime).toBe(before[0]?.buyerPaidOnTime ?? 0);
+    expect(afterSeller[0]?.sellerReneged).toBe(beforeSeller[0]?.sellerReneged ?? 0);
+
+    const facts = await db
+      .select({ type: reputationEvents.type, userId: reputationEvents.userId })
+      .from(reputationEvents)
+      .where(eq(reputationEvents.transactionId, txId));
+    expect(facts).toContainEqual({ type: 'buyer_reneged_nonpayment', userId: buyerA });
+    expect(facts.some((fact) => fact.type === 'seller_reneged_no_dropoff')).toBe(false);
+  });
+
   it('runs the full loop: drop-off -> pay -> release -> collect -> complete', async () => {
     const { markReceived, authorizeRelease, markPickedUp } = await import(
       '../../src/services/custody'

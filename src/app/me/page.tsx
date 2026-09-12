@@ -6,10 +6,9 @@ import { bids, claims, listings } from '@/db/schema/listings';
 import { signOutAction } from '@/app/auth-actions';
 import { db } from '@/db/client';
 import { offers } from '@/db/schema/offers';
-import { profiles, reputationCounters, reputationEvents } from '@/db/schema/profiles';
+import { reputationCounters, reputationEvents } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
 import { formatMoney } from '@/domain/money';
-import { objectiveSummary } from '@/domain/policy/reputation';
 import { currentUser } from '@/lib/session';
 import { cancelListing, listingsBySeller } from '@/services/listings';
 import ProfilePage from './profile-page';
@@ -41,9 +40,8 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
   if (user === null) redirect('/sign-in');
   const params = await searchParams;
 
-  const [profileRows, countersRows, sellerListings, claimRows, bidRows, offerRows, receivedOfferRows, dealRows, reputationEventRows] =
+  const [countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows, reputationEventRows] =
     await Promise.all([
-      db.select().from(profiles).where(eq(profiles.userId, user.userId)).limit(1),
       db.select().from(reputationCounters).where(eq(reputationCounters.userId, user.userId)).limit(1),
       listingsBySeller(user.userId),
       db
@@ -68,14 +66,6 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         .orderBy(desc(offers.createdAt))
         .limit(30),
       db
-        .select({ offer: offers, title: listings.title, buyerName: profiles.displayName })
-        .from(offers)
-        .innerJoin(listings, eq(listings.id, offers.listingId))
-        .innerJoin(profiles, eq(profiles.userId, offers.buyerId))
-        .where(eq(listings.sellerId, user.userId))
-        .orderBy(desc(offers.createdAt))
-        .limit(30),
-      db
         .select({ transaction: transactions, title: listings.title })
         .from(transactions)
         .innerJoin(listings, eq(listings.id, transactions.listingId))
@@ -83,7 +73,13 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         .orderBy(desc(transactions.createdAt))
         .limit(50),
       db
-        .select({ event: reputationEvents, title: listings.title })
+        .select({
+          event: reputationEvents,
+          title: listings.title,
+          transactionAmountCents: transactions.amountCents,
+          transactionBuyerId: transactions.buyerId,
+          transactionSellerId: transactions.sellerId,
+        })
         .from(reputationEvents)
         .leftJoin(transactions, eq(transactions.id, reputationEvents.transactionId))
         .leftJoin(listings, eq(listings.id, transactions.listingId))
@@ -92,7 +88,6 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         .limit(30),
     ]);
 
-  const profile = profileRows[0];
   const counters = countersRows[0];
   return (
     <main className="profile-page">
@@ -100,20 +95,6 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         signOutAction={signOutAction}
         deleteListingAction={deleteListingAction}
         initialTab={params.tab}
-        profile={{
-          displayName: user.displayName,
-          handle: user.handle,
-          email: user.email,
-          image: user.image,
-          phoneE164: profile?.phoneE164 ?? null,
-          bio: profile?.bio ?? null,
-          area: profile?.area ?? null,
-          deliveryAddressLine1: profile?.deliveryAddressLine1 ?? null,
-          deliveryAddressLine2: profile?.deliveryAddressLine2 ?? null,
-          deliveryCity: profile?.deliveryCity ?? null,
-          deliveryCountry: profile?.deliveryCountry ?? 'Trinidad and Tobago',
-          memberSince: profile?.memberSince.toISOString() ?? new Date().toISOString(),
-        }}
         counters={counters === undefined ? null : {
           buyClaimsTotal: counters.buyClaimsTotal,
           buyCompleted: counters.buyCompleted,
@@ -157,19 +138,14 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
           status: offer.status,
           createdAt: offer.createdAt.toISOString(),
         }))}
-        receivedOffers={receivedOfferRows.map(({ offer, title, buyerName }) => ({
-          id: offer.id,
-          title,
-          buyerName,
-          amount: formatMoney(offer.amountCents),
-          status: offer.status,
-          createdAt: offer.createdAt.toISOString(),
-        }))}
-        reputationEvents={reputationEventRows.map(({ event, title }) => ({
+        reputationEvents={reputationEventRows.map(({ event, title, transactionAmountCents, transactionBuyerId, transactionSellerId }) => ({
           id: event.id,
           type: event.type,
           title,
           occurredAt: event.occurredAt.toISOString(),
+          transactionId: event.transactionId,
+          amount: event.transactionId === null || transactionAmountCents === null ? null : formatMoney(transactionAmountCents),
+          role: event.transactionId === null ? null : (transactionBuyerId === user.userId ? 'Buyer' : transactionSellerId === user.userId ? 'Seller' : null),
         }))}
         deals={dealRows.map(({ transaction, title }) => ({
           id: transaction.id,
@@ -181,12 +157,6 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
           createdAt: transaction.createdAt.toISOString(),
           completedAt: iso(transaction.completedAt),
         }))}
-        objectiveLines={counters === undefined ? [] : objectiveSummary({
-          buyCompleted: counters.buyCompleted,
-          buyClaimsTotal: counters.buyClaimsTotal,
-          buyPaidOnTime: counters.buyPaidOnTime,
-          sellCompleted: counters.sellCompleted,
-        })}
       />
     </main>
   );

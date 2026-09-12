@@ -5,10 +5,8 @@ import type { Key } from 'react-aria-components';
 import Link from 'next/link';
 import {
   BadgeCheck,
-  Bell,
   ChevronLeft,
   ChevronRight,
-  CircleHelp,
   Eye,
   Gavel,
   HandCoins,
@@ -16,8 +14,6 @@ import {
   ListTodo,
   LogOut,
   Pencil,
-  Settings2,
-  ShieldCheck,
   ShoppingBag,
   Trash2,
   WalletCards,
@@ -25,22 +21,7 @@ import {
 
 import { Tabs } from '@/components/application/tabs/tabs';
 import { NativeSelect } from '@/components/base/select/select-native';
-import { isProfileTabId, profileTabs } from '@/lib/profile-tabs';
-
-type ProfileData = {
-  displayName: string;
-  handle: string;
-  email: string;
-  image: string | null;
-  phoneE164: string | null;
-  bio: string | null;
-  area: string | null;
-  deliveryAddressLine1: string | null;
-  deliveryAddressLine2: string | null;
-  deliveryCity: string | null;
-  deliveryCountry: string;
-  memberSince: string;
-};
+import { normalizeProfileTab, profileTabs } from '@/lib/profile-tabs';
 
 type CounterData = {
   buyClaimsTotal: number;
@@ -65,24 +46,20 @@ type ListingData = {
 type ClaimData = { id: string; title: string; status: string; transactionId: string | null; fulfillmentPath: string; claimedAt: string };
 type BidData = { id: string; title: string; amount: string; status: string; placedAt: string };
 type OfferData = { id: string; title: string; amount: string; status: string; createdAt: string };
-type ReceivedOfferData = OfferData & { buyerName: string };
 type DealData = { id: string; title: string; role: string; amount: string; state: string; fulfillmentPath: string; createdAt: string; completedAt: string | null };
-type ReputationEventData = { id: string; type: string; title: string | null; occurredAt: string };
+type ReputationEventData = { id: string; type: string; title: string | null; occurredAt: string; transactionId: string | null; amount: string | null; role: string | null };
 
 interface ProfilePageProps {
   signOutAction: () => Promise<void>;
   deleteListingAction: (formData: FormData) => Promise<void>;
   initialTab?: string;
-  profile: ProfileData;
   counters: CounterData | null;
   listings: ListingData[];
   claims: ClaimData[];
   bids: BidData[];
   offers: OfferData[];
-  receivedOffers: ReceivedOfferData[];
   deals: DealData[];
   reputationEvents: ReputationEventData[];
-  objectiveLines: string[];
 }
 
 const date = (value: string) => new Date(value).toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -102,13 +79,6 @@ const reputationEventLabel = (value: string) => ({
   admin_adjustment: 'Account adjustment',
 })[value] ?? titleCase(value);
 
-const DetailRow: FC<{ label: string; value: ReactNode }> = ({ label, value }) => (
-  <div className="profile-detail-row">
-    <span>{label}</span>
-    <strong>{value}</strong>
-  </div>
-);
-
 const EmptyState: FC<{ icon: ReactNode; title: string; children: ReactNode }> = ({ icon, title, children }) => (
   <div className="profile-empty">
     <div className="profile-empty__icon" aria-hidden="true">{icon}</div>
@@ -121,36 +91,9 @@ const StatusPill: FC<{ value: string }> = ({ value }) => (
   <span className={`profile-status profile-status--${value}`}>{titleCase(value)}</span>
 );
 
-function DetailsPanel({ profile }: Pick<ProfilePageProps, 'profile'>) {
-  return (
-    <div className="profile-content-stack">
-      <section className="profile-panel profile-panel--details">
-        <div className="profile-contact-grid">
-          <DetailRow label="Display name" value={profile.displayName} />
-          <DetailRow label="Email address" value={profile.email} />
-          <DetailRow label="Phone number" value={profile.phoneE164 ?? 'Add your phone number'} />
-          <DetailRow label="Member since" value={new Date(profile.memberSince).toLocaleDateString('en-TT', { month: 'long', year: 'numeric' })} />
-        </div>
-        <div className="profile-address-block">
-          <div className="profile-address-block__title"><strong>Delivery address</strong><span>Used for deliveries and collections.</span></div>
-          <div className="profile-address-fields">
-            <DetailRow label="Address line 1" value={profile.deliveryAddressLine1 ?? 'Add address line 1'} />
-            <DetailRow label="Address line 2" value={profile.deliveryAddressLine2 ?? 'Add address line 2'} />
-            <DetailRow label="City" value={profile.deliveryCity ?? 'Add your city'} />
-            <DetailRow label="Country" value={profile.deliveryCountry} />
-          </div>
-          <p className="profile-address-block__note">This app is only for use within Trinidad and Tobago and does not apply elsewhere.</p>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'counters' | 'reputationEvents'>) {
   const completedDeals = (counters?.buyCompleted ?? 0) + (counters?.sellCompleted ?? 0);
-  const paidOnTime = counters?.buyClaimsTotal
-    ? `${counters.buyPaidOnTime} of ${counters.buyClaimsTotal}`
-    : 'No purchase history';
+  const paidOnTime = `${counters?.buyPaidOnTime ?? 0} / ${counters?.buyClaimsTotal ?? 0}`;
 
   return (
     <div className="profile-content-stack">
@@ -160,7 +103,7 @@ function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'coun
           <div className="trust-summary__primary"><strong>{completedDeals}</strong><span>Completed deals</span></div>
           <div className="trust-summary__metric trust-summary__metric--blue"><strong>{counters?.buyCompleted ?? 0}</strong><span>Purchases</span></div>
           <div className="trust-summary__metric trust-summary__metric--purple"><strong>{counters?.sellCompleted ?? 0}</strong><span>Sales</span></div>
-          <div className="trust-summary__metric trust-summary__metric--green"><strong>{paidOnTime}</strong><span>Paid on time</span></div>
+          <div className="trust-summary__metric trust-summary__metric--green"><strong>{paidOnTime}</strong><span>Paid on time / purchases</span></div>
         </div>
         <p className="profile-panel__note">Built from verified transaction outcomes and used for account protections.</p>
       </section>
@@ -178,7 +121,12 @@ function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'coun
                 <div className="profile-trust-activity__icon" aria-hidden="true"><BadgeCheck size={18} /></div>
                 <div className="profile-trust-activity__main">
                   <strong>{reputationEventLabel(event.type)}</strong>
-                  <span>{event.title ?? 'CollectTT transaction'} · {date(event.occurredAt)}</span>
+                  <span>
+                    {event.transactionId !== null ? <Link href={`/deals/${event.transactionId}`}>{event.title ?? 'CollectTT transaction'}</Link> : (event.title ?? 'CollectTT transaction')}
+                    {event.role !== null && ` · ${event.role}`}
+                    {event.amount !== null && ` · ${event.amount}`}
+                    {` · ${date(event.occurredAt)}`}
+                  </span>
                 </div>
                 <span className="profile-trust-activity__type">Verified</span>
               </article>
@@ -190,8 +138,99 @@ function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'coun
   );
 }
 
-function ClaimsPanel({ claims }: Pick<ProfilePageProps, 'claims'>) {
-  return <div className="profile-content-stack">{claims.length === 0 ? <EmptyState icon={<ShoppingBag size={22} />} title="No claims yet">Your fixed-price claims and deal history will appear here.</EmptyState> : <div className="profile-list">{claims.map((claim) => <article className="profile-list-row" key={claim.id}><div className="profile-list-row__icon profile-list-row__icon--purple"><ShoppingBag size={18} aria-hidden="true" /></div><div className="profile-list-row__main"><h3>{claim.title}</h3><p>Claimed {date(claim.claimedAt)} · {fulfillmentLabel(claim.fulfillmentPath)}</p></div><div className="profile-list-row__aside"><StatusPill value={claim.status} />{claim.transactionId !== null && <Link href={`/deals/${claim.transactionId}`}>Open deal →</Link>}</div></article>)}</div>}</div>;
+type ActivityItem = {
+  id: string;
+  kind: 'claim' | 'bid' | 'offer' | 'deal';
+  title: string;
+  detail: string;
+  occurredAt: string;
+  status: string;
+  href?: string;
+};
+
+function ActivityIcon({ kind }: { kind: ActivityItem['kind'] }) {
+  if (kind === 'claim') return <ShoppingBag size={18} aria-hidden="true" />;
+  if (kind === 'bid') return <Gavel size={18} aria-hidden="true" />;
+  if (kind === 'offer') return <HandCoins size={18} aria-hidden="true" />;
+  return <HeartHandshake size={18} aria-hidden="true" />;
+}
+
+function ActivityPanel({ claims, bids, offers, deals }: Pick<ProfilePageProps, 'claims' | 'bids' | 'offers' | 'deals'>) {
+  const activity = [
+    ...claims.map<ActivityItem>((claim) => ({
+      id: `claim-${claim.id}`,
+      kind: 'claim',
+      title: claim.title,
+      detail: `${fulfillmentLabel(claim.fulfillmentPath)} · Claimed ${date(claim.claimedAt)}`,
+      occurredAt: claim.claimedAt,
+      status: claim.status,
+      href: claim.transactionId === null ? undefined : `/deals/${claim.transactionId}`,
+    })),
+    ...bids.map<ActivityItem>((bid) => ({
+      id: `bid-${bid.id}`,
+      kind: 'bid',
+      title: bid.title,
+      detail: `Bid ${bid.amount} · Placed ${date(bid.placedAt)}`,
+      occurredAt: bid.placedAt,
+      status: bid.status,
+    })),
+    ...offers.map<ActivityItem>((offer) => ({
+      id: `offer-${offer.id}`,
+      kind: 'offer',
+      title: offer.title,
+      detail: `Offer ${offer.amount} · Sent ${date(offer.createdAt)}`,
+      occurredAt: offer.createdAt,
+      status: offer.status,
+    })),
+    ...deals.map<ActivityItem>((deal) => ({
+      id: `deal-${deal.id}`,
+      kind: 'deal',
+      title: deal.title,
+      detail: `${deal.role} · ${fulfillmentLabel(deal.fulfillmentPath)} · Started ${date(deal.createdAt)}`,
+      occurredAt: deal.createdAt,
+      status: deal.state,
+      href: `/deals/${deal.id}`,
+    })),
+  ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+
+  return (
+    <div className="profile-content-stack">
+      <section className="profile-panel profile-panel--activity-overview">
+        <div className="profile-section-heading profile-section-heading--tight">
+          <div>
+            <h3 className="profile-section-heading__title">Your activity</h3>
+            <p className="profile-section-heading__description">A single timeline for claims, bids, offers, and transactions.</p>
+          </div>
+          <span className="profile-section-heading__hint">{activity.length} recorded</span>
+        </div>
+      </section>
+      <section className="profile-history-list profile-activity-list" aria-labelledby="profile-activity-title">
+        <div className="profile-section-heading profile-section-heading--tight">
+          <h3 id="profile-activity-title">Recent activity</h3>
+          {activity.length > 0 && <span className="profile-section-heading__hint">Newest first</span>}
+        </div>
+        {activity.length === 0 ? (
+          <EmptyState icon={<WalletCards size={22} />} title="No activity yet">Your claims, bids, offers, and completed transactions will appear here.</EmptyState>
+        ) : (
+          <div className="profile-activity-feed">
+            {activity.slice(0, 30).map((item) => (
+              <article className="profile-activity-row" key={item.id}>
+                <div className={`profile-activity-row__icon profile-activity-row__icon--${item.kind}`} aria-hidden="true"><ActivityIcon kind={item.kind} /></div>
+                <div className="profile-activity-row__main">
+                  <strong>{item.title}</strong>
+                  <span>{item.detail}</span>
+                </div>
+                <div className="profile-activity-row__aside">
+                  <StatusPill value={item.status} />
+                  {item.href !== undefined && <Link href={item.href}>Open deal →</Link>}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
 }
 
 function listingActionLockReason(listing: ListingData): string | null {
@@ -339,46 +378,46 @@ function ListingsPanel({ listings, deleteListingAction }: Pick<ProfilePageProps,
   );
 }
 
-function BidsOffersPanel({ bids, offers, receivedOffers }: Pick<ProfilePageProps, 'bids' | 'offers' | 'receivedOffers'>) {
-  return <div className="profile-content-stack"><div className="profile-two-column"><section className="profile-panel"><div className="profile-panel__title"><Gavel size={19} aria-hidden="true" /><h3>Auction bids <span>{bids.length}</span></h3></div>{bids.length === 0 ? <p className="profile-panel__empty-copy">Your auction bids will show up here.</p> : <div className="profile-mini-list">{bids.slice(0, 8).map((bid) => <div className="profile-mini-row" key={bid.id}><div><strong>{bid.title}</strong><small>{date(bid.placedAt)}</small></div><div><strong>{bid.amount}</strong><StatusPill value={bid.status} /></div></div>)}</div>}</section><section className="profile-panel"><div className="profile-panel__title"><HandCoins size={19} aria-hidden="true" /><h3>Offers sent <span>{offers.length}</span></h3></div>{offers.length === 0 ? <p className="profile-panel__empty-copy">Offers you make on fixed-price listings will show up here.</p> : <div className="profile-mini-list">{offers.slice(0, 8).map((offer) => <div className="profile-mini-row" key={offer.id}><div><strong>{offer.title}</strong><small>{date(offer.createdAt)}</small></div><div><strong>{offer.amount}</strong><StatusPill value={offer.status} /></div></div>)}</div>}</section><section className="profile-panel"><div className="profile-panel__title"><HandCoins size={19} aria-hidden="true" /><h3>Offers received <span>{receivedOffers.length}</span></h3></div>{receivedOffers.length === 0 ? <p className="profile-panel__empty-copy">Offers buyers make on your listings will show up here.</p> : <div className="profile-mini-list">{receivedOffers.slice(0, 8).map((offer) => <div className="profile-mini-row" key={offer.id}><div><strong>{offer.title}</strong><small>{offer.buyerName} · {date(offer.createdAt)}</small></div><div><strong>{offer.amount}</strong><StatusPill value={offer.status} /></div></div>)}</div>}</section></div></div>;
-}
-
-function HistoryPanel({ deals }: Pick<ProfilePageProps, 'deals'>) {
+function BidsOffersPanel({ bids, offers }: Pick<ProfilePageProps, 'bids' | 'offers'>) {
   return (
     <div className="profile-content-stack">
-      <section className="profile-panel profile-panel--history">
-        <div className="profile-panel__title"><HeartHandshake size={19} aria-hidden="true" /><h3>Transaction history</h3></div>
-        <p>Review the claims, bids, and offers that became deals. Verified outcomes are summarized in Trust &amp; Activity.</p>
+      <section className="profile-panel profile-panel--bids-offers-intro">
+        <div className="profile-section-heading profile-section-heading--tight">
+          <div>
+            <h3 className="profile-section-heading__title">Bids &amp; offers</h3>
+            <p className="profile-section-heading__description">Keep every action you sent in one place. Seller responses and deal updates live in My Deals.</p>
+          </div>
+          <span className="profile-section-heading__hint">{bids.length + offers.length} sent</span>
+        </div>
       </section>
-      <div className="profile-history-list">
-        <h3>Recent transactions</h3>
-        {deals.length === 0 ? <EmptyState icon={<WalletCards size={22} />} title="No transaction history yet">Once a claim, bid, or offer becomes a deal, its full trail will be kept here.</EmptyState> : deals.slice(0, 12).map((deal) => <article className="profile-history-row" key={deal.id}><div><strong>{deal.title}</strong><span>{deal.role} · {date(deal.createdAt)}</span></div><div><strong>{deal.amount}</strong><StatusPill value={deal.state} /></div></article>)}
+      <div className="profile-two-column">
+        <section className="profile-panel">
+          <div className="profile-panel__title"><Gavel size={19} aria-hidden="true" /><h3>Auction bids <span>{bids.length}</span></h3></div>
+          {bids.length === 0 ? <p className="profile-panel__empty-copy">Your auction bids will show up here.</p> : <div className="profile-mini-list">{bids.slice(0, 30).map((bid) => <div className="profile-mini-row" key={bid.id}><div><strong>{bid.title}</strong><small>Placed {date(bid.placedAt)}</small></div><div><strong>{bid.amount}</strong><StatusPill value={bid.status} /></div></div>)}</div>}
+        </section>
+        <section className="profile-panel">
+          <div className="profile-panel__title"><HandCoins size={19} aria-hidden="true" /><h3>Offers sent <span>{offers.length}</span></h3></div>
+          {offers.length === 0 ? <p className="profile-panel__empty-copy">Offers you make on fixed-price listings will show up here.</p> : <div className="profile-mini-list">{offers.slice(0, 30).map((offer) => <div className="profile-mini-row" key={offer.id}><div><strong>{offer.title}</strong><small>Sent {date(offer.createdAt)}</small></div><div><strong>{offer.amount}</strong><StatusPill value={offer.status} /></div></div>)}</div>}
+        </section>
       </div>
     </div>
   );
 }
 
-function SettingsPanel() {
-  return <div className="profile-content-stack"><div className="profile-two-column"><section className="profile-panel"><div className="profile-panel__title"><Bell size={19} aria-hidden="true" /><h3>Notifications</h3></div><div className="profile-toggle-list"><label><span><strong>Deal reminders</strong><small>Get a nudge before payment or collection windows close.</small></span><input type="checkbox" defaultChecked /></label><label><span><strong>Bid and offer updates</strong><small>Know when you are outbid or an offer changes.</small></span><input type="checkbox" defaultChecked /></label></div></section><section className="profile-panel"><div className="profile-panel__title"><ShieldCheck size={19} aria-hidden="true" /><h3>Account security</h3></div><div className="profile-security-item"><div><strong>Email verified</strong><small>Your email is used for account recovery and verification codes.</small></div><span className="status-pill"><span aria-hidden="true" />Protected</span></div><button className="secondary profile-password-button" type="button">Change password</button></section></div><div className="profile-help-callout"><CircleHelp size={19} aria-hidden="true" /><div><strong>Need a hand?</strong><p>Read how claims, custody, and payments work in CollectTT.</p></div><ChevronRight size={18} aria-hidden="true" /></div></div>;
-}
-
 const panelByTab: Record<string, FC<ProfilePageProps>> = {
-  details: ({ profile }) => <DetailsPanel profile={profile} />,
+  activity: ({ claims, bids, offers, deals }) => <ActivityPanel claims={claims} bids={bids} offers={offers} deals={deals} />,
   trust: ({ counters, reputationEvents }) => <TrustPanel counters={counters} reputationEvents={reputationEvents} />,
   listings: ({ listings, deleteListingAction }) => <ListingsPanel listings={listings} deleteListingAction={deleteListingAction} />,
-  claims: ({ claims }) => <ClaimsPanel claims={claims} />,
-  'bids-offers': ({ bids, offers, receivedOffers }) => <BidsOffersPanel bids={bids} offers={offers} receivedOffers={receivedOffers} />,
-  history: ({ deals }) => <HistoryPanel deals={deals} />,
-  settings: () => <SettingsPanel />,
+  'bids-offers': ({ bids, offers }) => <BidsOffersPanel bids={bids} offers={offers} />,
 };
 
 export default function ProfilePage(props: ProfilePageProps) {
-  const initialTab = isProfileTabId(props.initialTab) ? props.initialTab : 'details';
+  const initialTab = normalizeProfileTab(props.initialTab);
   const [selectedTabIndex, setSelectedTabIndex] = useState<Key>(initialTab);
   useEffect(() => {
     setSelectedTabIndex(initialTab);
   }, [initialTab]);
-  const ActivePanel = panelByTab[String(selectedTabIndex)] ?? panelByTab.details!;
+  const ActivePanel = panelByTab[String(selectedTabIndex)] ?? panelByTab.activity!;
   const selectedTab = profileTabs.find((tab) => tab.id === String(selectedTabIndex)) ?? profileTabs[0];
 
   return <>
@@ -386,7 +425,6 @@ export default function ProfilePage(props: ProfilePageProps) {
       <Link className="profile-page__back" href="/listings">← Back to browse</Link>
       <div className="profile-section-heading">
         <h2>{selectedTab.label}</h2>
-        {selectedTab.id === 'details' && <button className="secondary profile-edit-button" type="button"><Settings2 size={16} aria-hidden="true" /> Edit details</button>}
       </div>
     </div>
     <div className="profile-workspace">

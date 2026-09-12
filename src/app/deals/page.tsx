@@ -9,8 +9,9 @@ import { SETTLEMENT_METHOD_LABELS } from '@/domain/policy/settlement';
 import { activeDealsForUser, type ActiveDealSummary } from '@/services/deals';
 import { pendingOffersReceivedBySeller } from '@/services/offers';
 import { acceptReceivedOfferAction, rejectReceivedOfferAction } from './actions';
-import { trustSnapshotsForMembers, type TrustSnapshot } from '@/services/reputation';
-import { BuyerSnapshotLink, type BuyerSnapshotData } from './buyer-snapshot-link';
+import { trustSnapshotsForMembers } from '@/services/reputation';
+import { serializeTrustSnapshot } from './buyer-snapshot-data';
+import { BuyerSnapshotLink } from './buyer-snapshot-link';
 import { ActiveDealsList, type ActiveDealFilter, type PhysicalDealFilter } from './active-deals-list';
 import { listMarketplaceOptions } from '@/services/platform-settings';
 
@@ -22,23 +23,6 @@ const DELIVERY_LABELS: Record<string, string> = {
   relay: 'Store pickup',
   full_service: 'CollectTT delivery',
 };
-
-function serializeTrustSnapshot(snapshot: TrustSnapshot): BuyerSnapshotData {
-  return {
-    userId: snapshot.userId,
-    displayName: snapshot.displayName,
-    handle: snapshot.handle,
-    area: snapshot.area,
-    memberSince: snapshot.memberSince.toISOString(),
-    counters: snapshot.counters,
-    events: snapshot.events.map((event) => ({
-      id: event.id,
-      type: event.type,
-      title: event.title,
-      occurredAt: event.occurredAt.toISOString(),
-    })),
-  };
-}
 
 function formatReceivedAt(value: Date): { date: string; time: string } {
   return {

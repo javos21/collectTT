@@ -4,22 +4,15 @@ import { count, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { users } from '@/db/schema/auth';
 import { claims, listings } from '@/db/schema/listings';
-import { profiles } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
-import { currentUser } from '@/lib/session';
+import { adminAccess } from '@/lib/admin';
 import { AdminDenied } from './admin-access';
 import { AdminFrame } from './admin-frame';
 
 export default async function AdminPage() {
-  const viewer = await currentUser();
+  const { viewer, isAdmin } = await adminAccess();
   if (viewer === null) return <AdminDenied signedIn={false} />;
-
-  const viewerProfile = await db
-    .select({ role: profiles.role })
-    .from(profiles)
-    .where(eq(profiles.userId, viewer.userId))
-    .limit(1);
-  if (viewerProfile[0]?.role !== 'admin') return <AdminDenied signedIn />;
+  if (!isAdmin) return <AdminDenied signedIn />;
 
   const [userCount, activeListingCount, openTransactionCount, activeClaimCount] = await Promise.all([
     db.select({ value: count() }).from(users),
@@ -37,7 +30,7 @@ export default async function AdminPage() {
 
   return (
     <AdminFrame activeNav="overview">
-        <main className="admin-main">
+        <main className="admin-main" id="admin-main">
           <div className="admin-heading">
             <div><h1>Admin overview</h1></div>
           </div>
