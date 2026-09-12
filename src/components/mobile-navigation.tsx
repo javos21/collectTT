@@ -3,17 +3,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { LogOut, Menu, UserRound, X } from 'lucide-react';
+import { LogOut, Menu, ShieldCheck, UserRound, X } from 'lucide-react';
 import { Building05, CoinsSwap01, Plus, SearchLg, UserCircle } from '@untitledui/icons';
 
 type MobileNavigationProps = {
   hasStore: boolean;
+  isAdmin: boolean;
   signedIn: boolean;
   dealsAttentionCount: number;
   signOutAction: () => Promise<void>;
 };
 
-export function MobileNavigation({ hasStore, signedIn, dealsAttentionCount, signOutAction }: MobileNavigationProps) {
+export function MobileNavigation({ hasStore, isAdmin, signedIn, dealsAttentionCount, signOutAction }: MobileNavigationProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -67,6 +68,7 @@ export function MobileNavigation({ hasStore, signedIn, dealsAttentionCount, sign
             <Link href="/sign-in" tabIndex={open ? 0 : -1} onClick={closeMenu}><UserRound aria-hidden="true" /><span>Sign in</span></Link>
           )}
           {hasStore && <Link href="/store" tabIndex={open ? 0 : -1} onClick={closeMenu}><Building05 aria-hidden="true" /><span>Store</span></Link>}
+          {isAdmin && <Link href="/admin" tabIndex={open ? 0 : -1} onClick={closeMenu}><ShieldCheck aria-hidden="true" /><span>Admin</span></Link>}
           <Link href="/deals" aria-label={dealsLabel} tabIndex={open ? 0 : -1} onClick={closeMenu}>
             <CoinsSwap01 aria-hidden="true" />
             <span>My Deals</span>

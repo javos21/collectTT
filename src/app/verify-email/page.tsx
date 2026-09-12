@@ -1,4 +1,5 @@
 import { VerificationResult } from './verification-result';
+import { AuthShell } from '@/components/auth-shell';
 
 export default async function VerifyEmailPage({
   searchParams,
@@ -10,7 +11,7 @@ export default async function VerifyEmailPage({
   const error = typeof params.error === 'string' ? params.error : null;
 
   return (
-    <main className="auth-single verification-page">
+    <AuthShell>
       <section className="auth-panel" aria-labelledby="verification-title">
         <div className="auth-panel__head">
           <span className="verification-mark" aria-hidden="true">C</span>
@@ -19,6 +20,6 @@ export default async function VerifyEmailPage({
         </div>
         <VerificationResult token={token} initialError={error} />
       </section>
-    </main>
+    </AuthShell>
   );
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { UserRound } from 'lucide-react';
+import { ShieldCheck, UserRound } from 'lucide-react';
 import { Building05, CoinsSwap01, Plus, SearchLg } from '@untitledui/icons';
 import '@fontsource-variable/inter';
 import '@fontsource/space-mono/400.css';
@@ -11,7 +11,7 @@ import { ProfileMenu } from '@/components/profile-menu';
 import { ScrollToTop } from '@/components/scroll-to-top';
 import { signOutAction } from '@/app/auth-actions';
 import { db } from '@/db/client';
-import { currentUser } from '@/lib/session';
+import { adminAccess } from '@/lib/admin';
 import { storesForStaff } from '@/services/custody';
 import { countDealsNeedingAttention } from '@/services/deals';
 import { countPendingOffersReceivedBySeller } from '@/services/offers';
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 };
 
 async function SiteNavigation() {
-  const viewer = await currentUser();
+  const { viewer, isAdmin } = await adminAccess();
   const [stores, dealActionCount, offerActionCount] = viewer === null
     ? [[], 0, 0] as const
     : await Promise.all([
@@ -55,6 +55,7 @@ async function SiteNavigation() {
           )}
         </Link>
         {stores.length > 0 && <Link href="/store"><Building05 className="nav-icon" aria-hidden="true" />Store</Link>}
+        {isAdmin && <Link href="/admin"><ShieldCheck className="nav-icon" aria-hidden="true" />Admin</Link>}
         {viewer === null ? (
           <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
         ) : (
@@ -63,6 +64,7 @@ async function SiteNavigation() {
       </nav>
       <MobileNavigation
         hasStore={stores.length > 0}
+        isAdmin={isAdmin}
         signedIn={viewer !== null}
         dealsAttentionCount={dealsAttentionCount}
         signOutAction={signOutAction}

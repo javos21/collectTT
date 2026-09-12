@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { AuthShell } from '@/components/auth-shell';
 import { safeAuthReturnTo } from '@/lib/auth-redirect';
 import { ForgotPasswordForm } from './reset-request-form';
 
@@ -15,7 +16,7 @@ export default async function ForgotPasswordPage({
     : `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
 
   return (
-    <main className="auth-single">
+    <AuthShell>
       <section className="auth-panel" aria-labelledby="forgot-title">
         <div className="auth-panel__head">
           <h1 id="forgot-title">Reset your password</h1>
@@ -24,6 +25,6 @@ export default async function ForgotPasswordPage({
         <ForgotPasswordForm returnTo={returnTo} />
         <Link className="auth-back" href={signInHref}>Back to sign in</Link>
       </section>
-    </main>
+    </AuthShell>
   );
 }

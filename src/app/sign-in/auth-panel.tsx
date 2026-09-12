@@ -317,7 +317,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
     <section className="auth-panel" aria-labelledby="auth-form-title">
       <div className="auth-panel__head">
         <span className="auth-panel__icon" aria-hidden="true"><UserRound /></span>
-        <h2 id="auth-form-title">{mode === 'sign-in' ? 'Welcome back' : 'Create your account'}</h2>
+        <h1 id="auth-form-title">{mode === 'sign-in' ? 'Welcome back' : 'Create your account'}</h1>
       </div>
 
       {error !== '' && <AuthFeedback tone="error">{error}</AuthFeedback>}
