@@ -18,6 +18,42 @@ in the repository.
 - Alert when failed notification deliveries remain non-zero across two checks, when
   the worker stops reporting ready, or when the database connection pool is exhausted.
 
+## Database migrations
+
+Staging runs on Supabase. Migrations are applied by Drizzle from the committed
+`drizzle/` journal, followed by `drizzle/post/circular-fks.sql`, which adds the circular
+foreign keys the schema cannot declare.
+
+**On deploy.** `npm run start` and `npm run start:worker` both run `prestart`, which is
+`npm run db:migrate` against `DATABASE_URL`. When the web and worker services point at
+the staging database, a deploy applies pending migrations before serving traffic. Both
+services take the same Postgres advisory lock, so they cannot race each other.
+
+**By hand.** Use the guarded entry point. It reads a separate `STAGING_DATABASE_URL`, so
+a local `npm run db:migrate` can never reach staging:
+
+```bash
+STAGING_DATABASE_URL="postgresql://…@aws-0-….pooler.supabase.com:5432/postgres" \
+  CONFIRM_STAGING_MIGRATE=migrate-staging \
+  npm run db:migrate:staging
+```
+
+It refuses to run without the confirmation phrase, against a local address, against a
+non-Supabase host, or against the transaction pooler. Both entry points print a
+sanitized `host:port/database` target and never log credentials — check that line before
+letting a run proceed. Re-running is safe: the script reports
+`N of M migrations applied, K pending` before touching anything, Drizzle skips
+migrations already recorded in `drizzle.__drizzle_migrations`, and every statement in
+the circular-FK file is guarded.
+
+Use the **session pooler (port 5432)** or the direct connection
+(`db.<ref>.supabase.co:5432`). Migrations hold a session-scoped advisory lock that the
+transaction pooler on port 6543 cannot keep.
+
+Migrations and data setup are separate steps. A fresh database also needs
+`npm run seed:categories`, and the worker creates its own `graphile_worker` schema on
+first start; neither is part of the migration run.
+
 ## Analytics contract
 
 The `analytics_events` table is first-party and event-based. Every row has a stable

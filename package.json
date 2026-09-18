@@ -16,6 +16,7 @@
     "start:worker": "tsx src/jobs/worker.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --import tsx scripts/migrate.ts",
+    "db:migrate:staging": "node --import tsx scripts/migrate-staging.ts",
     "db:studio": "drizzle-kit studio",
     "storage:cors": "tsx scripts/configure-storage-cors.ts",
     "admin:grant": "tsx scripts/grant-admin.ts",

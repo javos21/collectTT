@@ -83,6 +83,10 @@ COLLECTTT_LAUNCH_SCOPE=legacy npm run verify:phase2  # historical custody check 
 web/worker startup migrations with a Postgres advisory lock. Render's `prestart` hook
 runs this command automatically before the web process starts.
 
+The Supabase staging database has its own guarded entry point, `npm run db:migrate:staging`,
+which reads `STAGING_DATABASE_URL` instead so a local migration can never reach staging.
+See the [operations runbook](docs/operations/v1-operations-runbook.md#database-migrations).
+
 The verification scripts require Postgres, object storage, and (for phase 1/2) the
 worker. Stop the worker before running flow tests that invoke handlers directly.
 Provider delivery, migrations, backups, monitoring, and production smoke tests still
