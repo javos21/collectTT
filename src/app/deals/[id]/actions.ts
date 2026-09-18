@@ -6,7 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
 import { enforceUserAndIpRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
-import { markPaid, confirmCustodyCollection, markItemHandedOver, confirmItemReceived } from '@/services/transactions';
+import { markPaid, completeCashMeetup, confirmCustodyCollection, markItemHandedOver, confirmItemReceived } from '@/services/transactions';
 import { isDisputeReason, submitDispute, validDisputeDetail, type DisputeReason } from '@/services/disputes';
 
 function fail(id: string, error: unknown): never {
@@ -27,6 +27,21 @@ export async function markPaidAction(formData: FormData): Promise<void> {
   }
   revalidatePath(`/deals/${id}`);
   redirect(`/deals/${id}?done=marked`);
+}
+
+export async function completeCashMeetupAction(formData: FormData): Promise<void> {
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+  const id = String(formData.get('transactionId') ?? '');
+
+  try {
+    await enforceUserAndIpRateLimit('deal:mutation', user.userId, RATE_LIMITS.transaction);
+    await db.transaction(async (tx) => completeCashMeetup(tx, id, user.userId));
+  } catch (error) {
+    fail(id, error);
+  }
+  revalidatePath(`/deals/${id}`);
+  redirect(`/deals/${id}?done=meetup-complete`);
 }
 
 export async function confirmCollectionAction(formData: FormData): Promise<void> {

@@ -20,8 +20,8 @@ export function dealNeedsAttentionForUser(deal: DealAttentionState, userId: stri
     (isBuyer && deal.paymentState === 'pending') ||
     (!isBuyer && deal.paymentState === 'confirmed' && deal.custodyState === 'awaiting_dropoff') ||
     (isBuyer && deal.paymentState === 'confirmed' && (deal.custodyState === 'at_relay' || deal.custodyState === 'release_authorized')) ||
-    (isBuyer && deal.handoffState === 'seller_handed_over') ||
-    (!isBuyer && deal.handoffState === 'awaiting_handoff' && deal.paymentState === 'confirmed')
+    (isBuyer && deal.handoffState === 'awaiting_handoff' && deal.paymentState === 'confirmed') ||
+    (isBuyer && deal.handoffState === 'seller_handed_over')
   );
 }
 
@@ -39,8 +39,8 @@ export async function countDealsNeedingAttention(executor: DbOrTx, userId: strin
           and(eq(transactions.sellerId, userId), eq(transactions.paymentState, 'confirmed'), eq(transactions.custodyState, 'awaiting_dropoff')),
           and(eq(transactions.buyerId, userId), eq(transactions.paymentState, 'confirmed'), eq(transactions.custodyState, 'at_relay')),
           and(eq(transactions.buyerId, userId), eq(transactions.paymentState, 'confirmed'), eq(transactions.custodyState, 'release_authorized')),
+          and(eq(transactions.buyerId, userId), eq(transactions.handoffState, 'awaiting_handoff'), eq(transactions.paymentState, 'confirmed')),
           and(eq(transactions.buyerId, userId), eq(transactions.handoffState, 'seller_handed_over')),
-          and(eq(transactions.sellerId, userId), eq(transactions.handoffState, 'awaiting_handoff'), eq(transactions.paymentState, 'confirmed')),
         ),
       ),
     );
@@ -139,7 +139,9 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
 
   if (paymentState === 'pending') {
     currentState = 'Offer accepted';
-    nextStep = isBuyer ? 'Pay the seller' : 'Waiting for buyer payment';
+    nextStep = isBuyer
+      ? (deal.fulfillmentPath === 'cash_meetup' ? 'Pay and collect the item' : 'Pay the seller')
+      : 'Waiting for buyer payment';
   } else if (paymentState === 'buyer_marked_paid') {
     currentState = 'Payment marked';
     nextStep = isBuyer ? 'Continue deal' : 'No action needed';
@@ -159,7 +161,7 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
     } else if (!hasCustody) {
       if (handoffState === 'awaiting_handoff') {
         currentState = 'Payment confirmed';
-        nextStep = isBuyer ? 'Meet seller for hand-off' : 'Mark item handed over';
+        nextStep = isBuyer ? 'Pay and collect the item' : 'Waiting for buyer confirmation';
       } else if (handoffState === 'seller_handed_over') {
         currentState = 'Item handed over';
         nextStep = isBuyer ? 'Confirm item received' : 'Waiting for buyer receipt';

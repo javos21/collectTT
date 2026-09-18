@@ -11,7 +11,6 @@ import {
   CreditCard,
   FileClock,
   AlertTriangle,
-  Package,
   Phone,
   Settings2,
   Store,
@@ -32,9 +31,9 @@ import { formatMoney } from '@/domain/money';
 import { usesCustodyTrack } from '@/domain/states/transaction';
 import {
   markPaidAction,
+  completeCashMeetupAction,
   confirmCollectionAction,
   submitDisputeAction,
-  markItemHandedOverAction,
   confirmItemReceivedAction,
 } from './actions';
 import { serializeTrustSnapshot } from '../buyer-snapshot-data';
@@ -55,13 +54,6 @@ const PATH_LABELS: Record<string, string> = {
   full_service: 'CollectTT delivery',
 };
 
-const PAYMENT_LABELS: Record<string, string> = {
-  pending: 'Awaiting payment',
-  buyer_marked_paid: 'Buyer says they paid',
-  confirmed: 'Payment confirmed',
-  failed: 'Payment failed',
-};
-
 const SETTLEMENT_LABELS: Record<string, string> = {
   cash: 'Cash',
   bank_transfer: 'Bank transfer',
@@ -76,26 +68,6 @@ const STATE_LABELS: Record<string, string> = {
   reneged_seller: 'Cancelled — seller did not deliver',
   cancelled: 'Cancelled',
   expired: 'Expired',
-};
-
-const PAYMENT_STEPS = ['Awaiting payment', 'Payment recorded'];
-const PAYMENT_INDEX: Record<string, number> = { pending: 0, buyer_marked_paid: 1, confirmed: 1 };
-
-const CUSTODY_STEPS = ['Awaiting drop-off', 'On the shelf', 'Collected'];
-const CUSTODY_INDEX: Record<string, number> = {
-  awaiting_dropoff: 0,
-  at_relay: 1,
-  release_authorized: 1,
-  picked_up: 2,
-};
-
-const CUSTODY_LABELS: Record<string, string> = {
-  awaiting_dropoff: 'Awaiting drop-off',
-  at_relay: 'On the shelf',
-  release_authorized: 'Ready for pickup',
-  picked_up: 'Collected',
-  returned_to_seller: 'Returned to seller',
-  voided: 'Drop-off cancelled',
 };
 
 function formatDateTime(value: Date) {
@@ -277,10 +249,30 @@ export default async function DealPage({
   const hasCustody = usesCustodyTrack(t.fulfillmentPath);
   const custodyPanel = hasCustody ? await custodyPanelFor(db, id) : null;
 
-  const paymentIdx = PAYMENT_INDEX[t.paymentState] ?? 0;
-  const paymentFailed = t.paymentState === 'failed';
-  const custodyIdx = CUSTODY_INDEX[t.custodyState] ?? 0;
-  const custodyOff = t.custodyState === 'returned_to_seller' || t.custodyState === 'voided';
+  const progress = (() => {
+    if (hasCustody) {
+      const steps = ['Awaiting payment', 'Awaiting drop-off', 'Dropped off', 'Collected'];
+      let current = 0;
+      if (t.paymentState === 'confirmed') {
+        if (t.custodyState === 'picked_up') current = 3;
+        else if (t.custodyState === 'at_relay' || t.custodyState === 'release_authorized') current = 2;
+        else if (t.custodyState === 'awaiting_dropoff') current = 1;
+      }
+      return { steps, current, off: t.custodyState === 'returned_to_seller' || t.custodyState === 'voided' };
+    }
+    if (t.fulfillmentPath === 'cash_meetup') {
+      return {
+        steps: ['Awaiting payment', 'Paid & collected'],
+        current: t.paymentState === 'confirmed' || t.handoffState === 'buyer_received' ? 1 : 0,
+        off: t.paymentState === 'failed',
+      };
+    }
+    return {
+      steps: ['Awaiting payment', 'Payment recorded'],
+      current: t.paymentState === 'confirmed' ? 1 : 0,
+      off: t.paymentState === 'failed',
+    };
+  })();
 
   const dropoffDue = t.sellerDropoffDeadlineAt;
   const storeLocation = custodyPanel === null
@@ -322,6 +314,7 @@ export default async function DealPage({
       {flash.done === 'collected' && <div className="alert alert--info">Collection confirmed. This deal is complete.</div>}
       {flash.done === 'handed-over' && <div className="alert alert--info">Hand-off recorded. The buyer has been notified to confirm receipt.</div>}
       {flash.done === 'received' && <div className="alert alert--info">Receipt confirmed. This deal is complete.</div>}
+      {flash.done === 'meetup-complete' && <div className="alert alert--info">Meetup confirmed. This deal is complete.</div>}
       {flash.done === 'dispute-submitted' && <div className="alert alert--info" role="status">Your dispute was submitted. CollectTT support will review this deal.</div>}
 
       {contact !== null && (
@@ -334,7 +327,26 @@ export default async function DealPage({
 
       <div className="deal-room">
         <section className="deal-action-card" aria-labelledby="deal-action-title">
-          {isOpen && isBuyer && t.paymentState === 'pending' && (
+          {isOpen && isBuyer && t.fulfillmentPath === 'cash_meetup' && t.handoffState === 'awaiting_handoff' && (
+            <>
+              <p className="deal-action-card__eyebrow">Your next step</p>
+              <h2 id="deal-action-title">Pay and collect the item</h2>
+              <dl className="deal-action-card__facts">
+                <div><CircleDollarSign aria-hidden="true" /><dt>Amount</dt><dd className="num">{formatMoney(t.amountCents)}</dd></div>
+                <div><CreditCard aria-hidden="true" /><dt>Payment method</dt><dd>{settlementLabel}</dd></div>
+                {meetupLocation !== null && <div><CalendarDays aria-hidden="true" /><dt>Meetup location</dt><dd>{meetupLocation.label} — {meetupLocation.area}</dd></div>}
+              </dl>
+              <p className="deal-action-card__help">Hand over the payment and take the item at the agreed meetup, then confirm once it is in your hands.</p>
+              <form action={completeCashMeetupAction}>
+                <input type="hidden" name="transactionId" value={id} />
+                <button type="submit">I paid and collected the item</button>
+              </form>
+              <p className="deal-action-card__notice"><Bell aria-hidden="true" />This completes the deal and records it on both members’ trust activity.</p>
+              {t.settlementMethod === 'bank_transfer' && <EvidenceUpload transactionId={id} />}
+            </>
+          )}
+
+          {isOpen && isBuyer && t.paymentState === 'pending' && (t.fulfillmentPath !== 'cash_meetup' || t.handoffState === 'not_applicable') && (
             <>
               <p className="deal-action-card__eyebrow">Your next step</p>
               <h2 id="deal-action-title">Pay {counterpartyName}</h2>
@@ -344,7 +356,7 @@ export default async function DealPage({
                 <div><CalendarDays aria-hidden="true" /><dt>Payment due</dt><dd><time dateTime={t.paymentDeadlineAt.toISOString()}>{formatDateTime(t.paymentDeadlineAt)}</time></dd></div>
               </dl>
               <p className="deal-action-card__help">
-                Pay using the method you agreed{t.fulfillmentPath === 'cash_meetup' ? ', or hand over cash when you meet' : ''}, then mark it here.
+                Pay using the method you agreed, then mark it here.
               </p>
               <form action={markPaidAction}>
                 <input type="hidden" name="transactionId" value={id} />
@@ -355,7 +367,7 @@ export default async function DealPage({
             </>
           )}
 
-          {isOpen && isBuyer && t.paymentState === 'buyer_marked_paid' && (
+          {isOpen && isBuyer && t.paymentState === 'buyer_marked_paid' && (t.fulfillmentPath !== 'cash_meetup' || t.handoffState === 'not_applicable') && (
             <>
               <p className="deal-action-card__eyebrow">One quick update</p>
               <h2 id="deal-action-title">Payment marked as sent</h2>
@@ -422,20 +434,11 @@ export default async function DealPage({
             </>
           )}
 
-          {isOpen && t.fulfillmentPath === 'cash_meetup' && t.paymentState === 'confirmed' && t.handoffState === 'awaiting_handoff' && isSeller && (
-            <>
-              <p className="deal-action-card__eyebrow">Your next step</p>
-              <h2 id="deal-action-title">Item handed over?</h2>
-              <p className="deal-action-card__help">Meet at the agreed location, exchange the item and payment, then record the hand-off.</p>
-              <form action={markItemHandedOverAction}><input type="hidden" name="transactionId" value={id} /><button type="submit">Item handed over</button></form>
-            </>
-          )}
-
-          {isOpen && t.fulfillmentPath === 'cash_meetup' && t.paymentState === 'confirmed' && t.handoffState === 'awaiting_handoff' && isBuyer && (
+          {isOpen && isSeller && t.fulfillmentPath === 'cash_meetup' && t.paymentState === 'confirmed' && t.handoffState === 'awaiting_handoff' && (
             <>
               <p className="deal-action-card__eyebrow">Waiting on {counterpartyName}</p>
-              <h2 id="deal-action-title">Meetup hand-off</h2>
-              <p className="deal-action-card__help">The seller still needs to hand over the item at the agreed meetup location.</p>
+              <h2 id="deal-action-title">Meetup pending</h2>
+              <p className="deal-action-card__help">The buyer will confirm once they have paid and collected the item at the agreed meetup.</p>
             </>
           )}
 
@@ -495,32 +498,7 @@ export default async function DealPage({
         <section className="deal-status" aria-labelledby="deal-progress-title">
           <h2 id="deal-progress-title" className="deal-room__section-label">Deal progress</h2>
           <div className="deal-status__list">
-            <details>
-              <summary>
-                <span className="deal-status__icon"><CreditCard aria-hidden="true" /></span>
-                <strong>Payment</strong>
-                <span className={paymentFailed ? 'is-off' : ''}>{PAYMENT_LABELS[t.paymentState]}</span>
-                <ChevronDown aria-hidden="true" />
-              </summary>
-              <div className="deal-status__steps"><Stepper steps={PAYMENT_STEPS} current={paymentFailed ? 0 : paymentIdx} off={paymentFailed} /></div>
-            </details>
-            {hasCustody && (
-              <details>
-                <summary>
-                  <span className="deal-status__icon"><Package aria-hidden="true" /></span>
-                  <strong>Item</strong>
-                  <span className={custodyOff ? 'is-off' : ''}>{CUSTODY_LABELS[t.custodyState] ?? humanize(t.custodyState)}</span>
-                  <ChevronDown aria-hidden="true" />
-                </summary>
-                <div className="deal-status__steps"><Stepper steps={CUSTODY_STEPS} current={custodyIdx} off={custodyOff} /></div>
-              </details>
-            )}
-            {t.fulfillmentPath === 'cash_meetup' && (
-              <details>
-                <summary><span className="deal-status__icon"><Package aria-hidden="true" /></span><strong>Meetup hand-off</strong><span>{humanize(t.handoffState)}</span><ChevronDown aria-hidden="true" /></summary>
-                <div className="deal-status__steps"><Stepper steps={['Awaiting hand-off', 'Seller handed over', 'Buyer received']} current={t.handoffState === 'awaiting_handoff' ? 0 : t.handoffState === 'seller_handed_over' ? 1 : t.handoffState === 'buyer_received' ? 2 : 0} off={t.handoffState === 'not_applicable'} /></div>
-              </details>
-            )}
+            <div className="deal-status__steps"><Stepper steps={progress.steps} current={progress.current} off={progress.off} /></div>
           </div>
         </section>
 

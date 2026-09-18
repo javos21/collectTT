@@ -28,7 +28,7 @@ import { transactions, transactionEvents } from '../../src/db/schema/transaction
 import { notificationDeliveries } from '../../src/db/schema/notifications';
 import { claimListing } from '../../src/db/atomic/claim-listing';
 import { placeBid } from '../../src/db/atomic/place-bid';
-import { markPaid, confirmPayment, disputePayment, markItemHandedOver, confirmItemReceived, acceptAuctionFallbackOffer, rescheduleTransactionDeadlineJobs } from '../../src/services/transactions';
+import { markPaid, completeCashMeetup, confirmPayment, disputePayment, markItemHandedOver, confirmItemReceived, acceptAuctionFallbackOffer, rescheduleTransactionDeadlineJobs } from '../../src/services/transactions';
 import { submitDispute } from '../../src/services/disputes';
 import { acceptOffer, rejectOffer, submitOffer } from '../../src/services/offers';
 import { assertMarketplaceEligible } from '../../src/services/marketplace-eligibility';
@@ -502,7 +502,7 @@ describe('★ fixed-price offers (legacy compatibility)', () => {
 // ════════════════════════════════════════════════════════ handshake
 
 describe('★ mark-paid / confirm-received handshake', () => {
-  it('requires seller hand-off and buyer receipt for an acknowledged v1 meetup', async () => {
+  it('supports the legacy seller hand-off and buyer receipt handshake', async () => {
     const listingId = await makeListing();
     const claim = await claimListing({ listingId, claimantId: buyers[4]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
     const txId = claim.transactionId!;
@@ -518,6 +518,21 @@ describe('★ mark-paid / confirm-received handshake', () => {
     await db.transaction(async (tx) => confirmItemReceived(tx, txId, buyers[4]!));
     expect((await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0]).toMatchObject({ state: 'completed', handoff: 'buyer_received' });
     expect((await db.select().from(transactionEvents).where(and(eq(transactionEvents.transactionId, txId), eq(transactionEvents.fromState, 'seller_handed_over'))))).toHaveLength(1);
+  });
+
+  it('completes an acknowledged v1 meetup in a single buyer action', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[4]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+
+    await db.transaction(async (tx) => completeCashMeetup(tx, txId, buyers[4]!));
+
+    const row = (await db.select({ state: transactions.state, paymentState: transactions.paymentState, handoffState: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(row).toMatchObject({ state: 'completed', paymentState: 'confirmed', handoffState: 'buyer_received' });
+
+    // Idempotent: a repeated delivery is a no-op, not a second completion.
+    await db.transaction(async (tx) => completeCashMeetup(tx, txId, buyers[4]!));
+    expect((await db.select({ state: transactions.state }).from(transactions).where(eq(transactions.id, txId)))[0]?.state).toBe('completed');
   });
 
   it('moves a reported problem into the paused dispute track', async () => {

@@ -575,6 +575,87 @@ export async function confirmItemReceived(
   await completeIfBothTracksDone(tx, transactionId);
 }
 
+/**
+ * v1 cash meetup: the buyer's single action settles payment and receipt together.
+ * A cash meetup is one physical moment — cash changes hands and the item is handed
+ * over at once — so the v1 flow has no separate seller hand-off step. This records
+ * "paid" and "received" atomically, then lets the rollup fall out as complete.
+ */
+export async function completeCashMeetup(
+  tx: Tx,
+  transactionId: string,
+  buyerId: string,
+): Promise<void> {
+  const row = await load(tx, transactionId);
+  if (row.buyerId !== buyerId) throw new ForbiddenError('Only the buyer can complete the meetup');
+  if (row.handoffState === 'buyer_received') return;
+  if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
+  if (row.fulfillmentPath !== 'cash_meetup') throw new ConflictError('This deal is not a meetup');
+
+  if (row.paymentState !== 'confirmed') {
+    assertPaymentTransition(row.paymentState, 'confirmed');
+  }
+
+  const updated = await tx
+    .update(transactions)
+    .set({
+      paymentState: 'confirmed',
+      markedPaidAt: sql`coalesce(${transactions.markedPaidAt}, now())`,
+      paymentConfirmedAt: sql`now()`,
+      handoffState: 'buyer_received',
+      receivedAt: sql`now()`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(transactions.id, transactionId),
+        eq(transactions.state, 'open'),
+        eq(transactions.fulfillmentPath, 'cash_meetup'),
+        inArray(transactions.paymentState, ['pending', 'buyer_marked_paid', 'confirmed']),
+        inArray(transactions.handoffState, ['awaiting_handoff', 'seller_handed_over']),
+      ),
+    )
+    .returning({ id: transactions.id });
+
+  if (updated.length === 0) throw new ConflictError('This deal has already moved on');
+
+  if (row.paymentState !== 'confirmed') {
+    await recordTransition(tx, {
+      transactionId,
+      track: 'payment',
+      from: row.paymentState,
+      to: 'confirmed',
+      actorUserId: buyerId,
+      actorRole: 'buyer',
+    });
+  }
+
+  await recordTransition(tx, {
+    transactionId,
+    track: 'overall',
+    from: row.handoffState,
+    to: 'buyer_received',
+    actorUserId: buyerId,
+    actorRole: 'buyer',
+    reason: 'cash meetup completed',
+  });
+
+  // Records buyer_paid_on_time/late, closes competing offers on an accepted-offer
+  // source, and — through completeIfBothTracksDone — finishes the deal now that both
+  // tracks are settled. recordEvent is idempotent, so a legacy row whose payment was
+  // already confirmed does not double-count.
+  await afterPaymentConfirmed(tx, transactionId, row);
+
+  await notify({
+    tx,
+    userId: row.sellerId,
+    event: 'item_received_seller',
+    data: { listingTitle: row.listingTitle },
+    linkUrl: `/deals/${transactionId}`,
+    idempotencyKey: `meetup_complete:${transactionId}`,
+  });
+}
+
 /** Seller says the money never arrived. The deadline is NOT extended. */
 export async function disputePayment(
   tx: Tx,
