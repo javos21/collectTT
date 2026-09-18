@@ -1,7 +1,7 @@
 # CollectTT Design System
 
 **Status:** Current implementation contract
-**Last updated:** 12 September 2026
+**Last updated:** 17 September 2026
 **Scope:** Marketplace, member workspace, Store workspace, and platform-admin surfaces
 
 This document records the visual language already present in CollectTT. It is a guardrail for incremental work, not a request to redesign the product from scratch. New UI should reuse these tokens, proportions, component treatments, and interaction rules before introducing a new pattern.
@@ -23,6 +23,8 @@ Page titles lead every surface. Use a heading followed by concise supporting cop
 Use sentence case for user-facing labels and actions. Prefer concrete verbs such as `Browse`, `Sell`, `Claim`, `Bid`, `Receive item`, `Release item`, `Open listing`, and `View deal`.
 
 Use short status labels when they identify a real state, such as `Live`, `Claimed`, `Ended`, `Pending`, `Failed`, or `Read-only`. Do not use small uppercase labels as decoration or as a substitute for a meaningful heading.
+
+Onboarding must collect every field required to use the marketplace in the initial account form. Explain public/private visibility beside the relevant field, and do not defer required identity or contact fields to a second settings flow. Email verification is the sole contact-verification step; a phone number is required but is not presented as verified.
 
 ## Foundations
 
@@ -209,6 +211,8 @@ Buttons should have a visible pressed state, a disabled state, and loading feedb
 - Keep field help close to its field and place errors next to the problem.
 - Preserve entered values after validation failure.
 - Group related controls with fieldsets where that improves comprehension.
+- In grid-based settings panels, supporting notes and introductory copy span the full available grid width; do not leave explanatory text constrained to one option column.
+- When a settings group has several peer toggles or choices, use two equal columns at comfortable widths and collapse to one column on narrow screens. Keep each control and its label aligned on the same row with at least a 44px touch target.
 - On mobile, fields and primary actions should use the available width and remain easy to tap.
 
 ### Status pills and badges
@@ -230,6 +234,8 @@ Admin tables may be denser, but identifiers and error details must wrap safely. 
 ### Dialogs and confirmations
 
 Use dialogs for focused confirmations or short forms, not primary navigation. Destructive or irreversible actions must state the target, the consequence, and the recovery path. Keep the close action obvious, trap focus while open, support Escape, and return focus to the invoking control.
+
+Contextual reports should use a compact in-context trigger and move the longer form into a modal. Keep the privacy explanation with the form, preserve the listing context behind the dialog, and provide keyboard focus trapping, Escape-to-close, and focus return.
 
 ## Marketplace, member, Store, and admin emphasis
 

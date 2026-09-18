@@ -4,9 +4,32 @@ import { db, type DbOrTx } from '@/db/client';
 import { marketplaceOptions, platformSettings } from '@/db/schema/settings';
 import { listingDeliveryOptions } from '@/db/schema/listings';
 import type { FulfillmentPath } from '@/domain/states/transaction';
+import { assertLegacyFeatureAllowed, isV1Launch } from '@/lib/launch-scope';
 
 export const FULL_SERVICE_DELIVERY_DAYS_KEY = 'full_service_delivery_days';
 export const DEFAULT_FULL_SERVICE_DELIVERY_DAYS = 14;
+export const LISTING_EXPIRY_DAYS_KEY = 'listing_expiry_days';
+export const DEFAULT_LISTING_EXPIRY_DAYS = 30;
+export const RESTRICTION_LOOKBACK_DAYS_KEY = 'restriction_lookback_days';
+export const RESTRICTION_DURATION_HOURS_KEY = 'restriction_duration_hours';
+export const BUYER_BID_BLOCKED_AT_KEY = 'buyer_bid_blocked_at';
+export const BUYER_PREPAY_REQUIRED_AT_KEY = 'buyer_prepay_required_at';
+export const BUYER_RESERVE_BLOCKED_AT_KEY = 'buyer_reserve_blocked_at';
+export const SELLER_PUBLISH_BLOCKED_AT_KEY = 'seller_publish_blocked_at';
+
+export const DEFAULT_RESTRICTION_LOOKBACK_DAYS = 90;
+export const DEFAULT_RESTRICTION_DURATION_HOURS = 168;
+export const DEFAULT_BUYER_BID_BLOCKED_AT = 2;
+export const DEFAULT_BUYER_PREPAY_REQUIRED_AT = 2;
+export const DEFAULT_BUYER_RESERVE_BLOCKED_AT = 4;
+export const DEFAULT_SELLER_PUBLISH_BLOCKED_AT = 4;
+
+export interface RestrictionPolicy {
+  lookbackDays: number;
+  durationHours: number;
+  buyer: { prepayRequiredAt: number; bidBlockedAt: number; reserveBlockedAt: number };
+  seller: { meetupOnlyAt: number; publishBlockedAt: number };
+}
 export type MarketplaceOptionKind = 'delivery' | 'payment';
 export type MarketplaceOption = typeof marketplaceOptions.$inferSelect;
 
@@ -23,6 +46,92 @@ export async function setFullServiceDeliveryDays(days: number, adminUserId: stri
   await db
     .insert(platformSettings)
     .values({ key: FULL_SERVICE_DELIVERY_DAYS_KEY, integerValue: days, updatedBy: adminUserId })
+    .onConflictDoUpdate({
+      target: platformSettings.key,
+      set: { integerValue: days, updatedBy: adminUserId, updatedAt: new Date() },
+    });
+}
+
+/** Platform-configured fixed-price lifetime. Product baseline is 30 days. */
+export async function getListingExpiryDays(executor: DbOrTx = db): Promise<number> {
+  const rows = await executor
+    .select({ days: platformSettings.integerValue })
+    .from(platformSettings)
+    .where(eq(platformSettings.key, LISTING_EXPIRY_DAYS_KEY))
+    .limit(1);
+  const days = rows[0]?.days ?? DEFAULT_LISTING_EXPIRY_DAYS;
+  return Math.max(1, Math.min(365, days));
+}
+
+async function getIntegerSetting(
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+  executor: DbOrTx = db,
+): Promise<number> {
+  const rows = await executor
+    .select({ value: platformSettings.integerValue })
+    .from(platformSettings)
+    .where(eq(platformSettings.key, key))
+    .limit(1);
+  const value = rows[0]?.value ?? fallback;
+  return Number.isInteger(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+/**
+ * Progressive restriction controls. These are intentionally small integer settings
+ * so support can tune policy without a code deploy; all callers still clamp values
+ * to safe bounds and use conservative defaults when a row is absent.
+ */
+export async function getRestrictionPolicy(executor: DbOrTx = db): Promise<RestrictionPolicy> {
+  const [lookbackDays, durationHours, prepayAt, bidAt, reserveAt, publishAt] = await Promise.all([
+    getIntegerSetting(RESTRICTION_LOOKBACK_DAYS_KEY, DEFAULT_RESTRICTION_LOOKBACK_DAYS, 7, 365, executor),
+    getIntegerSetting(RESTRICTION_DURATION_HOURS_KEY, DEFAULT_RESTRICTION_DURATION_HOURS, 24, 24 * 365, executor),
+    getIntegerSetting(BUYER_PREPAY_REQUIRED_AT_KEY, DEFAULT_BUYER_PREPAY_REQUIRED_AT, 1, 20, executor),
+    getIntegerSetting(BUYER_BID_BLOCKED_AT_KEY, DEFAULT_BUYER_BID_BLOCKED_AT, 1, 20, executor),
+    getIntegerSetting(BUYER_RESERVE_BLOCKED_AT_KEY, DEFAULT_BUYER_RESERVE_BLOCKED_AT, 1, 50, executor),
+    getIntegerSetting(SELLER_PUBLISH_BLOCKED_AT_KEY, DEFAULT_SELLER_PUBLISH_BLOCKED_AT, 1, 50, executor),
+  ]);
+  return {
+    lookbackDays,
+    durationHours,
+    buyer: {
+      prepayRequiredAt: prepayAt,
+      bidBlockedAt: bidAt,
+      reserveBlockedAt: Math.max(reserveAt, bidAt),
+    },
+    seller: {
+      meetupOnlyAt: 2,
+      publishBlockedAt: publishAt,
+    },
+  };
+}
+
+export async function setRestrictionPolicySetting(key: string, value: number, adminUserId: string, executor: DbOrTx = db): Promise<void> {
+  const bounds: Record<string, [number, number]> = {
+    [RESTRICTION_LOOKBACK_DAYS_KEY]: [7, 365],
+    [RESTRICTION_DURATION_HOURS_KEY]: [24, 24 * 365],
+    [BUYER_BID_BLOCKED_AT_KEY]: [1, 20],
+    [BUYER_PREPAY_REQUIRED_AT_KEY]: [1, 20],
+    [BUYER_RESERVE_BLOCKED_AT_KEY]: [1, 50],
+    [SELLER_PUBLISH_BLOCKED_AT_KEY]: [1, 50],
+  };
+  const bound = bounds[key];
+  if (bound === undefined || !Number.isInteger(value) || value < bound[0] || value > bound[1]) {
+    throw new Error('Invalid restriction policy setting.');
+  }
+  await executor.insert(platformSettings).values({ key, integerValue: value, updatedBy: adminUserId }).onConflictDoUpdate({
+    target: platformSettings.key,
+    set: { integerValue: value, updatedBy: adminUserId, updatedAt: new Date() },
+  });
+}
+
+export async function setListingExpiryDays(days: number, adminUserId: string): Promise<void> {
+  if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('Listing expiry must be between 1 and 365 days.');
+  await db
+    .insert(platformSettings)
+    .values({ key: LISTING_EXPIRY_DAYS_KEY, integerValue: days, updatedBy: adminUserId })
     .onConflictDoUpdate({
       target: platformSettings.key,
       set: { integerValue: days, updatedBy: adminUserId, updatedAt: new Date() },
@@ -100,6 +209,12 @@ export async function saveMarketplaceOption(
   },
   adminUserId: string,
 ): Promise<MarketplaceOption> {
+  if (isV1Launch() && input.kind === 'delivery' && input.requiresStore === true) {
+    assertLegacyFeatureAllowed('store_custody');
+  }
+  if (isV1Launch() && input.kind === 'payment' && !['cash', 'bank_transfer'].includes(input.key)) {
+    assertLegacyFeatureAllowed('seller_payment_window');
+  }
   const requiresStore = input.kind === 'delivery' && input.requiresStore === true;
   const fulfillmentPath: FulfillmentPath | null = input.kind === 'delivery'
     ? requiresStore ? 'relay' : 'cash_meetup'
@@ -184,6 +299,12 @@ export async function removeMarketplaceOption(id: string, adminUserId: string): 
     const rows = await tx.select().from(marketplaceOptions).where(eq(marketplaceOptions.id, id)).limit(1);
     const option = rows[0];
     if (option === undefined) throw new Error('Option not found.');
+    if (isV1Launch() && option.kind === 'payment' && ['cash', 'bank_transfer'].includes(option.key)) {
+      throw new Error('Cash and bank transfer are required payment options for v1.');
+    }
+    if (isV1Launch() && option.kind === 'delivery' && option.fulfillmentPath === 'cash_meetup') {
+      throw new Error('Cash meetup is required as the v1 delivery option.');
+    }
     const active = await tx
       .select({ id: marketplaceOptions.id })
       .from(marketplaceOptions)

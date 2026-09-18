@@ -15,6 +15,9 @@ import type { FulfillmentPath } from '../states/transaction';
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
+/** Platform-approved auction lengths. Listing writers must use this same allow-list. */
+export const AUCTION_DURATION_HOURS = [24, 48, 72, 168] as const;
+
 export const WINDOWS = {
   /** How long a buyer has to pay (or to complete the meetup) once a deal opens. */
   payment: {
@@ -45,6 +48,11 @@ export const WINDOWS = {
     windowSeconds: 120,
     extensionSeconds: 120,
     maxExtensions: null as number | null, // null = extend until bidding goes quiet
+  },
+
+  /** How long the next bidder has to explicitly accept a fallback offer. */
+  auctionFallback: {
+    offerMs: 24 * HOUR,
   },
 
 } as const;

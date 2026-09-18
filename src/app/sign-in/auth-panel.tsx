@@ -12,10 +12,18 @@ import { Button } from '@/components/ui/button';
 type Mode = 'sign-in' | 'sign-up';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const USERNAME_PATTERN = /^[a-zA-Z0-9_.]{3,30}$/;
+
+function isValidPhoneInput(raw: string): boolean {
+  const value = raw.trim();
+  const digits = value.replace(/\D/g, '');
+  if (value.startsWith('+')) return /^\+[1-9]\d{7,14}$/.test(`+${digits}`);
+  return digits.length === 7
+    || (digits.length === 10 && digits.startsWith('868'))
+    || (digits.length === 11 && digits.startsWith('1'));
+}
 
 type AvailabilityState = 'idle' | 'checking' | 'available' | 'taken' | 'error';
-type AvailabilityField = 'username' | 'email';
+type AvailabilityField = 'email';
 
 interface Availability {
   state: AvailabilityState;
@@ -65,27 +73,26 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
   const [notice, setNotice] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
-  const [username, setUsername] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [availability, setAvailability] = useState<Record<AvailabilityField, Availability>>({
-    username: EMPTY_AVAILABILITY,
     email: EMPTY_AVAILABILITY,
   });
-  const availabilityRequest = useRef<Record<AvailabilityField, number>>({ username: 0, email: 0 });
+  const availabilityRequest = useRef<Record<AvailabilityField, number>>({ email: 0 });
 
   function normalizedValue(field: AvailabilityField, rawValue: string) {
     const value = rawValue.trim();
-    return field === 'email' ? value.toLowerCase() : value;
+    return value.toLowerCase();
   }
 
   async function checkAvailability(field: AvailabilityField, rawValue: string): Promise<boolean> {
     const value = normalizedValue(field, rawValue);
-    const valid = field === 'email' ? EMAIL_PATTERN.test(value) : USERNAME_PATTERN.test(value);
+    const valid = EMAIL_PATTERN.test(value);
 
     if (!valid) {
-      const message = field === 'email'
-        ? 'Enter a valid email address, like you@example.com.'
-        : 'Use 3–30 letters, numbers, underscores, or periods.';
+      const message = 'Enter a valid email address, like you@example.com.';
       setAvailability((current) => ({
         ...current,
         [field]: { state: 'error', message, value },
@@ -114,9 +121,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
           [field]: {
             state: response.ok ? 'taken' : 'error',
             message: response.ok
-              ? field === 'email'
-                ? 'That email is already registered. Sign in instead.'
-                : 'That username is already taken.'
+              ? 'That email is already registered. Sign in instead.'
               : result.message ?? 'We could not check that right now. Try again.',
             value,
           },
@@ -128,7 +133,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
         ...current,
         [field]: {
           state: 'available',
-          message: field === 'email' ? 'Email is available.' : 'Username is available.',
+          message: 'Email is available.',
           value,
         },
       }));
@@ -145,8 +150,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
 
   function updateAvailabilityField(field: AvailabilityField, value: string) {
     setAvailability((current) => ({ ...current, [field]: EMPTY_AVAILABILITY }));
-    if (field === 'username') setUsername(value);
-    else setEmail(value);
+    setEmail(value);
   }
 
   async function redirectAfterAuth() {
@@ -190,14 +194,20 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
       }
 
       if (mode === 'sign-up') {
-        const requestedUsername = String(form.get('username') ?? '').trim();
+        const requestedAccountName = String(form.get('accountName') ?? '').trim();
+        const requestedDisplayName = String(form.get('displayName') ?? '').trim();
+        const requestedPhone = String(form.get('phone') ?? '').trim();
         const confirmPassword = String(form.get('confirmPassword') ?? '');
-        if (!USERNAME_PATTERN.test(requestedUsername)) {
-          setError('Use 3–30 letters, numbers, underscores, or periods for your username.');
+        if (requestedAccountName.length < 2 || requestedAccountName.length > 80) {
+          setError('Use 2–80 characters for your private account name.');
           return;
         }
-        if (!(await checkAvailability('username', requestedUsername))) {
-          setError('Choose another username before creating your account.');
+        if (requestedDisplayName.length < 2 || requestedDisplayName.length > 80) {
+          setError('Use 2–80 characters for your public display name.');
+          return;
+        }
+        if (!isValidPhoneInput(requestedPhone)) {
+          setError('Enter a valid Trinidad & Tobago mobile number or include the international country code.');
           return;
         }
         if (!(await checkAvailability('email', email))) {
@@ -209,7 +219,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
           return;
         }
 
-        const result = await authClient.signUp.email({ name: requestedUsername, email, password, callbackURL });
+        const result = await authClient.signUp.email({ name: requestedAccountName, email, password, callbackURL });
         if (result.error !== null) {
           setError(errorMessage(result.error));
         } else {
@@ -274,6 +284,16 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
         setError(errorMessage(result.error));
         return;
       }
+      const profileResponse = await fetch('/api/profile/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName, phone }),
+      });
+      if (!profileResponse.ok) {
+        const profileError = (await profileResponse.json().catch(() => null)) as { message?: string } | null;
+        setError(profileError?.message ?? 'Your email is verified, but we could not save your onboarding details.');
+        return;
+      }
       await redirectAfterAuth();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -288,9 +308,11 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
     setNotice('');
     setVerificationEmail('');
     setVerificationCode('');
-    setUsername('');
+    setAccountName('');
+    setDisplayName('');
+    setPhone('');
     setEmail('');
-    setAvailability({ username: EMPTY_AVAILABILITY, email: EMPTY_AVAILABILITY });
+    setAvailability({ email: EMPTY_AVAILABILITY });
   }
 
   function availabilityMessage(field: AvailabilityField) {
@@ -355,25 +377,55 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
       ) : (
         <form className="auth-form" noValidate onSubmit={submit}>
           {mode === 'sign-up' && (
+            <>
             <div>
-              <label htmlFor="auth-username">Username</label>
+              <label htmlFor="auth-account-name">Account name</label>
               <input
-                id="auth-username"
-                name="username"
+                id="auth-account-name"
+                name="accountName"
                 type="text"
-                value={username}
-                onChange={(event) => updateAvailabilityField('username', event.target.value)}
-                onBlur={() => void checkAvailability('username', username)}
-                autoComplete="username"
-                minLength={3}
-                maxLength={30}
-                pattern="[A-Za-z0-9_.]{3,30}"
-                aria-describedby={`auth-username-help${availability.username.state !== 'idle' ? ' auth-username-feedback' : ''}`}
+                value={accountName}
+                onChange={(event) => setAccountName(event.target.value)}
+                autoComplete="name"
+                minLength={2}
+                maxLength={80}
+                aria-describedby="auth-account-name-help"
                 required
               />
-              <small id="auth-username-help" className="field-help">3–30 letters, numbers, underscores, or periods.</small>
-              {availabilityMessage('username')}
+              <small id="auth-account-name-help" className="field-help">Private. Used only for your account and support.</small>
             </div>
+            <div>
+              <label htmlFor="auth-display-name">Display name</label>
+              <input
+                id="auth-display-name"
+                name="displayName"
+                type="text"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                minLength={2}
+                maxLength={80}
+                aria-describedby="auth-display-name-help"
+                required
+              />
+              <small id="auth-display-name-help" className="field-help">Public. Shown on listings, bids, and your Trust Snapshot.</small>
+            </div>
+            <div>
+              <label htmlFor="auth-phone">Mobile number</label>
+              <input
+                id="auth-phone"
+                name="phone"
+                type="tel"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                autoComplete="tel"
+                inputMode="tel"
+                maxLength={30}
+                aria-describedby="auth-phone-help"
+                required
+              />
+              <small id="auth-phone-help" className="field-help">Private. Shared only with the other person after a transaction begins.</small>
+            </div>
+            </>
           )}
           <div>
             <label htmlFor="auth-email">Email</label>

@@ -79,7 +79,7 @@ export const CUSTODY_TRANSITION_ACTORS: Record<string, readonly ActorRole[]> = {
   // for legacy/admin tooling, but record the system actor as the normal path.
   'at_relay->release_authorized': ['system', 'store', 'admin'],
   'at_relay->returned_to_seller': ['store', 'admin'],
-  'release_authorized->picked_up': ['store', 'admin'],
+  'release_authorized->picked_up': ['buyer', 'store', 'admin'],
   'release_authorized->returned_to_seller': ['store', 'admin'],
 };
 

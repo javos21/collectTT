@@ -7,5 +7,6 @@
 export * from './actors';
 export * from './payment';
 export * from './custody';
+export * from './handoff';
 export * from './transaction';
 export * from './listing';

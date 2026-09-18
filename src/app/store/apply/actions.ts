@@ -9,6 +9,7 @@ import {
 } from '@/domain/stores/application';
 import { currentUser } from '@/lib/session';
 import { createStoreApplication, latestStoreApplicationFor } from '@/services/store-applications';
+import { assertLegacyFeatureAllowed } from '@/lib/launch-scope';
 
 const optionalUrl = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -35,6 +36,7 @@ function value(formData: FormData, field: string): string {
 }
 
 export async function applyForStoreAction(formData: FormData): Promise<string | null> {
+  assertLegacyFeatureAllowed('store_custody');
   const viewer = await currentUser();
   if (viewer === null) redirect('/sign-in?returnTo=/store/apply');
 

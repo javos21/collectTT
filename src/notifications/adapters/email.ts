@@ -3,11 +3,9 @@
  *
  *   EMAIL_ADAPTER=console  -> prints to the terminal. No account, no network, no cost.
  *                             Verification codes and reset links stay testable offline.
- *   EMAIL_ADAPTER=brevo    -> real transactional delivery through Brevo. The same SDK
- *                             can power the separate SMS adapter when that ships.
+ *   EMAIL_ADAPTER=brevo    -> real transactional delivery through Brevo.
  *
- * The console implementation is not a stub to throw away — it is the same seam the
- * WhatsApp adapter will occupy, so exercising it locally proves the seam works.
+ * The console implementation is also the local verification path for email delivery.
  */
 
 import { BrevoClient } from '@getbrevo/brevo';
@@ -73,6 +71,14 @@ function absoluteUrl(value: string, baseUrl: string): string {
     throw new Error('Email action URL must use http or https');
   }
   return url.toString();
+}
+
+/** Choose the CTA label from the notification's actual in-app destination. */
+export function notificationActionLabel(linkUrl: string): 'View deal' | 'View listing' | undefined {
+  const path = new URL(linkUrl, 'http://localhost').pathname;
+  if (path === '/deals' || path.startsWith('/deals/')) return 'View deal';
+  if (path === '/listings' || path.startsWith('/listings/')) return 'View listing';
+  return undefined;
 }
 
 function bodyHtml(text: string, actionUrl?: string): string {
@@ -211,6 +217,10 @@ export const emailAdapter: NotificationAdapter = {
       request.message.linkUrl === undefined
         ? undefined
         : absoluteUrl(request.message.linkUrl, e.APP_URL);
+    const actionLabel =
+      request.message.linkUrl === undefined
+        ? undefined
+        : notificationActionLabel(request.message.linkUrl);
     const lines = [request.message.body];
     if (actionUrl !== undefined) {
       lines.push('', actionUrl);
@@ -220,7 +230,7 @@ export const emailAdapter: NotificationAdapter = {
       to,
       subject: request.message.title,
       text: lines.join('\n'),
-      ...(actionUrl !== undefined ? { actionUrl, actionLabel: 'Go To Deal' } : {}),
+      ...(actionUrl !== undefined && actionLabel !== undefined ? { actionUrl, actionLabel } : {}),
     });
   },
 };

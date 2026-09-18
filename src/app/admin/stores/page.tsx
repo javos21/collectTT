@@ -7,6 +7,7 @@ import { adminAccess } from '@/lib/admin';
 import { listStoreApplications } from '@/services/store-applications';
 import { AdminDenied } from '../admin-access';
 import { AdminFrame } from '../admin-frame';
+import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
 import { confirmStoreApplicationAction, declineStoreApplicationAction } from './actions';
 import { DeleteStoreButton } from './delete-store-button';
 
@@ -31,6 +32,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
   if (!isAdmin) return <AdminDenied signedIn />;
 
   const [applications, params] = await Promise.all([listStoreApplications(), searchParams]);
+  const legacyMode = isLegacyFeatureAllowed('store_custody');
   const counts = {
     pending: applications.filter((application) => application.status === 'pending').length,
     confirmed: applications.filter((application) => application.status === 'confirmed').length,
@@ -40,8 +42,8 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
   return (
     <AdminFrame activeNav="stores">
       <main className="admin-main" id="admin-main">
-        <div className="admin-heading">
-          <div><h1>Stores</h1><p>Review storefront applications before locations can receive inventory.</p></div>
+          <div className="admin-heading">
+          <div><h1>Stores</h1><p>{legacyMode ? 'Review storefront applications and custody locations.' : 'Store records are read-only.'}</p></div>
         </div>
 
         {params.notice ? <p className="admin-toast" role="status">{params.notice}</p> : null}
@@ -66,7 +68,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                 </div>
                 <div className="store-application-card__facts"><span><MapPin size={14} aria-hidden="true" />{application.area}, {application.city}</span><span>{application.phoneE164}</span><span>Submitted {application.createdAt.toLocaleDateString('en-TT')}</span></div>
                 <details className="store-application-card__details"><summary>View application details</summary><div className="store-application-card__detail-grid"><div><strong>Address</strong><p>{[application.addressLine1, application.addressLine2, application.city, application.country].filter(Boolean).join(', ')}</p></div><div><strong>Verification links</strong>{links.length === 0 ? <p>None supplied</p> : <ul>{links.map(([label, url]) => <li key={label}><a href={url} target="_blank" rel="noreferrer">{label} <ExternalLink size={12} aria-hidden="true" /></a></li>)}</ul>}</div><div><strong>Terms acceptance</strong><p>Version {application.termsVersion}, accepted {application.termsAcceptedAt.toLocaleDateString('en-TT')}</p></div></div></details>
-                {isPending ? <div className="store-application-card__actions"><form action={confirmStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><button className="admin-button admin-button--success" type="submit">Confirm Store</button></form><form className="store-decline-form" action={declineStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><input name="adminNote" aria-label={`Optional note for ${application.storeName}`} placeholder="Optional note for applicant" /><button className="admin-button admin-button--danger" type="submit">Decline</button></form></div> : <>{application.adminNote ? <p className="store-application-card__note"><strong>Admin note:</strong> {application.adminNote}</p> : null}{application.status === 'confirmed' && application.storeId !== null ? <div className="store-application-card__actions store-application-card__actions--delete"><DeleteStoreButton storeId={application.storeId} storeName={application.storeName} /></div> : null}</>}
+                {isPending && legacyMode ? <div className="store-application-card__actions"><form action={confirmStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><button className="admin-button admin-button--success" type="submit">Confirm Store</button></form><form className="store-decline-form" action={declineStoreApplicationAction}><input type="hidden" name="applicationId" value={application.id} /><input name="adminNote" aria-label={`Optional note for ${application.storeName}`} placeholder="Optional note for applicant" /><button className="admin-button admin-button--danger" type="submit">Decline</button></form></div> : <>{application.adminNote ? <p className="store-application-card__note"><strong>Admin note:</strong> {application.adminNote}</p> : null}{application.status === 'confirmed' && application.storeId !== null && legacyMode ? <div className="store-application-card__actions store-application-card__actions--delete"><DeleteStoreButton storeId={application.storeId} storeName={application.storeName} /></div> : null}</>}
               </article>;
             })}
           </div>}

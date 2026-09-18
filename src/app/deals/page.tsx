@@ -14,6 +14,7 @@ import { serializeTrustSnapshot } from './buyer-snapshot-data';
 import { BuyerSnapshotLink } from './buyer-snapshot-link';
 import { ActiveDealsList, type ActiveDealFilter, type PhysicalDealFilter } from './active-deals-list';
 import { listMarketplaceOptions } from '@/services/platform-settings';
+import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +58,7 @@ export default async function DealsPage({
   if (viewer === null) redirect('/sign-in');
 
   const params = await searchParams;
+  const offersEnabled = isLegacyFeatureAllowed('offers');
   const [activeDeals, receivedOffers, deliveryOptions, paymentOptions] = await Promise.all([
     activeDealsForUser(db, viewer.userId),
     pendingOffersReceivedBySeller(viewer.userId),
@@ -75,17 +77,17 @@ export default async function DealsPage({
   const initialTask: PhysicalDealFilter = params.task === 'to_drop_off' || params.task === 'to_collect' || params.task === 'at_store' ? params.task : 'all';
   const handoffs = activeDeals.filter((deal) => deal.physicalTask !== null);
   const selectedTab: DealsTab = params.view === 'collect' || typeof params.task === 'string'
-    ? 'handoffs'
+        ? 'handoffs'
     : typeof params.filter === 'string'
       ? 'active'
       : params.tab === 'active' || params.tab === 'offers' || params.tab === 'handoffs'
-        ? params.tab
+        ? (params.tab === 'offers' && !offersEnabled ? 'attention' : params.tab)
         : 'attention';
 
   const tabs: Array<{ id: DealsTab; label: string; count: number; href: string }> = [
     { id: 'attention', label: 'Needs attention', count: attention.length, href: '/deals' },
     { id: 'active', label: 'Active', count: activeDeals.length, href: '/deals?tab=active' },
-    { id: 'offers', label: 'Offers', count: receivedOffers.length, href: '/deals?tab=offers' },
+    ...(offersEnabled ? [{ id: 'offers' as const, label: 'Offers', count: receivedOffers.length, href: '/deals?tab=offers' }] : []),
     { id: 'handoffs', label: 'Pickups & drop-offs', count: handoffs.length, href: '/deals?tab=handoffs' },
   ];
 
@@ -105,7 +107,7 @@ export default async function DealsPage({
         {tabs.map((tab) => (
           <Link
             key={tab.id}
-            className={selectedTab === tab.id ? 'is-active' : ''}
+            className={[selectedTab === tab.id ? 'is-active' : '', tab.id === 'handoffs' && tab.count > 0 ? 'has-items' : ''].filter(Boolean).join(' ')}
             href={tab.href}
             scroll={false}
             aria-current={selectedTab === tab.id ? 'page' : undefined}
@@ -194,7 +196,7 @@ export default async function DealsPage({
         </section>
       )}
 
-      {selectedTab === 'offers' && (
+      {offersEnabled && selectedTab === 'offers' && (
         <section className="deals-tab-panel" aria-labelledby="received-offers-title">
           <div className="deals-tab-panel__heading">
             <div>

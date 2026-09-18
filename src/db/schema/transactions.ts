@@ -1,7 +1,7 @@
 /**
  * THE two-track core.
  *
- * Three state columns, not one:
+ * State tracks, not one flat status:
  *   payment_state   the money track
  *   custody_state   the item track (mirrored from custody_holdings)
  *   state           the rollup
@@ -29,6 +29,7 @@ import { profiles } from './profiles';
 import { listings, claims, bids } from './listings';
 import { relayStores, custodyHoldings } from './custody';
 import { marketplaceOptions } from './settings';
+import { sellerMeetupLocations } from './seller-settings';
 import {
   transactionStateEnum,
   paymentStateEnum,
@@ -38,6 +39,8 @@ import {
   terminationReasonEnum,
   actorRoleEnum,
   eventTrackEnum,
+  handoffStateEnum,
+  transactionDisputeStateEnum,
 } from './enums';
 
 export const transactions = pgTable(
@@ -67,6 +70,8 @@ export const transactions = pgTable(
     currency: char('currency', { length: 3 }).notNull().default('TTD'),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
     deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
+    /** Seller meetup choice captured when the commitment opens. */
+    meetupLocationId: uuid('meetup_location_id').references(() => sellerMeetupLocations.id, { onDelete: 'set null' }),
     /** The buyer's selected payment method. Nullable for transactions opened before this field existed. */
     settlementMethod: text('settlement_method'),
 
@@ -80,6 +85,10 @@ export const transactions = pgTable(
      * `consistency:check` task asserts zero drift.
      */
     custodyState: custodyStateEnum('custody_state').notNull().default('not_applicable'),
+    /** v1 peer-to-peer hand-off track; legacy transactions remain not_applicable. */
+    handoffState: handoffStateEnum('handoff_state').notNull().default('not_applicable'),
+    /** Support dispute track; an open dispute pauses automated deadlines and completion. */
+    disputeState: transactionDisputeStateEnum('dispute_state').notNull().default('none'),
 
     // ---- clocks, all set from the DB clock
     paymentDeadlineAt: timestamp('payment_deadline_at', { withTimezone: true }).notNull(),
@@ -89,6 +98,9 @@ export const transactions = pgTable(
     paymentConfirmedAt: timestamp('payment_confirmed_at', { withTimezone: true }),
     paymentDisputedAt: timestamp('payment_disputed_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    handedOverAt: timestamp('handed_over_at', { withTimezone: true }),
+    receivedAt: timestamp('received_at', { withTimezone: true }),
+    receiptDeadlineAt: timestamp('receipt_deadline_at', { withTimezone: true }),
     terminatedAt: timestamp('terminated_at', { withTimezone: true }),
     terminatedReason: terminationReasonEnum('terminated_reason'),
 
@@ -144,7 +156,9 @@ export const transactions = pgTable(
       'tx_completion_requires_both',
       sql`${t.state} <> 'completed'
           or (${t.paymentState} = 'confirmed'
-              and ${t.custodyState} in ('not_applicable', 'picked_up'))`,
+              and ${t.custodyState} in ('not_applicable', 'picked_up')
+              and ${t.handoffState} in ('not_applicable', 'buyer_received')
+              and ${t.disputeState} <> 'open')`,
     ),
   ],
 );

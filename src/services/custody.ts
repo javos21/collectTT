@@ -286,8 +286,13 @@ async function maybeAutoAuthorizePaidHolding(tx: Tx, holdingId: string): Promise
 /** Buyer physically collected it. This is what completes a custody-path deal. */
 export async function markPickedUp(input: StoreActionInput): Promise<void> {
   const holding = await loadHolding(input.tx, input.holdingId);
-  await assertStoreAuthority(input.tx, holding, input.actorUserId, input.actorRole);
-  assertActor('release_authorized', 'picked_up', input.actorRole ?? 'store');
+  const actorRole = input.actorRole ?? 'store';
+  if (actorRole === 'buyer') {
+    await assertBuyerCollectionAuthority(input.tx, holding, input.actorUserId);
+  } else {
+    await assertStoreAuthority(input.tx, holding, input.actorUserId, actorRole);
+  }
+  assertActor('release_authorized', 'picked_up', actorRole);
   assertCustodyTransitionForCounter(holding.state, 'picked_up', 'collected');
 
   const updated = await input.tx
@@ -307,7 +312,7 @@ export async function markPickedUp(input: StoreActionInput): Promise<void> {
 
   await afterCustodyChange(input.tx, input.holdingId, 'release_authorized', 'picked_up', {
     actorUserId: input.actorUserId,
-    actorRole: input.actorRole ?? 'store',
+    actorRole,
   });
 
   // Both tracks may now be done. completeIfBothTracksDone is the only thing that
@@ -316,6 +321,29 @@ export async function markPickedUp(input: StoreActionInput): Promise<void> {
   if (holdingNow.currentTransactionId !== null) {
     const { completeIfBothTracksDone } = await import('./transactions');
     await completeIfBothTracksDone(input.tx, holdingNow.currentTransactionId);
+  }
+}
+
+/** The linked buyer may close custody after the item is in their hands. */
+async function assertBuyerCollectionAuthority(
+  tx: Tx,
+  holding: Holding,
+  buyerId: string,
+): Promise<void> {
+  if (holding.currentTransactionId === null) {
+    throw new CustodyConflictError('This item is not linked to an active deal');
+  }
+  const rows = await tx
+    .select({ buyerId: transactions.buyerId, state: transactions.state, paymentState: transactions.paymentState })
+    .from(transactions)
+    .where(eq(transactions.id, holding.currentTransactionId))
+    .limit(1);
+  const deal = rows[0];
+  if (deal === undefined || deal.buyerId !== buyerId) {
+    throw new CustodyForbiddenError('Only the buyer can confirm collection');
+  }
+  if (deal.state !== 'open' || deal.paymentState !== 'confirmed') {
+    throw new CustodyConflictError('This item is not ready for collection');
   }
 }
 

@@ -1,0 +1,108 @@
+/**
+ * The single release gate for marketplace features that remain outside the v1 path.
+ *
+ * v1 is the default. `COLLECTTT_LAUNCH_SCOPE=legacy` is an explicit rollback/test
+ * switch for reading and operating historical custody records while the new
+ * marketplace is rolled out. Offers are supported in v1.
+ */
+
+export const LAUNCH_SCOPES = ['v1', 'legacy'] as const;
+export type LaunchScope = (typeof LAUNCH_SCOPES)[number];
+
+export const LEGACY_FEATURES = [
+  'offers',
+  'store_custody',
+  'reserve_price',
+  'auction_buyout',
+  'seller_payment_window',
+  'pro',
+  'raffle',
+] as const;
+export type LegacyFeature = (typeof LEGACY_FEATURES)[number];
+
+export const V1_ALLOWED_FULFILLMENT_PATHS = ['cash_meetup', 'remote_ship', 'relay', 'full_service'] as const;
+export const V1_ALLOWED_SETTLEMENT_METHODS = ['cash', 'bank_transfer'] as const;
+
+/** Provisional platform policy from the product scope; keep it centralized. */
+export const V1_PAYMENT_WINDOW_HOURS = 72;
+/** Buyer receipt confirmation window after the seller marks a meetup hand-off. */
+export const V1_HANDOFF_CONFIRMATION_WINDOW_HOURS = 48;
+
+export class V1ScopeError extends Error {
+  readonly feature: LegacyFeature;
+
+  constructor(feature: LegacyFeature, message?: string) {
+    super(message ?? `${featureLabel(feature)} is not available for v1.`);
+    this.name = 'V1ScopeError';
+    this.feature = feature;
+  }
+}
+
+function featureLabel(feature: LegacyFeature): string {
+  return feature
+    .split('_')
+    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/** Read dynamically so tests and controlled worker rollbacks can set the flag. */
+export function launchScope(): LaunchScope {
+  return process.env.COLLECTTT_LAUNCH_SCOPE === 'legacy' ? 'legacy' : 'v1';
+}
+
+export function isV1Launch(): boolean {
+  return launchScope() === 'v1';
+}
+
+export function isLegacyFeatureAllowed(feature: LegacyFeature): boolean {
+  if (feature === 'store_custody' || feature === 'offers') return true;
+  return !isV1Launch();
+}
+
+export function assertLegacyFeatureAllowed(feature: LegacyFeature): void {
+  if (!isLegacyFeatureAllowed(feature)) throw new V1ScopeError(feature);
+}
+
+export function assertV1ListingTerms(input: {
+  fulfillmentPaths: readonly string[];
+  settlementMethods: readonly string[];
+  acceptsOffers?: boolean;
+  reserveCents?: number | null;
+  buyoutCents?: number | null;
+  paymentWindowHours?: number;
+}): void {
+  if (!isV1Launch()) return;
+
+  const unsupportedPath = input.fulfillmentPaths.find(
+    (path) => !(V1_ALLOWED_FULFILLMENT_PATHS as readonly string[]).includes(path),
+  );
+  if (unsupportedPath !== undefined) {
+    throw new V1ScopeError(
+      'store_custody',
+      'This delivery method is not currently available for new listings.',
+    );
+  }
+
+  const unsupportedPayment = input.settlementMethods.find(
+    (method) => !(V1_ALLOWED_SETTLEMENT_METHODS as readonly string[]).includes(method),
+  );
+  if (unsupportedPayment !== undefined) {
+    throw new V1ScopeError(
+      'seller_payment_window',
+      'v1 listings support cash and direct bank transfer only.',
+    );
+  }
+
+  if (input.reserveCents !== undefined && input.reserveCents !== null) {
+    throw new V1ScopeError('reserve_price', 'Reserve prices are not available in v1 auctions.');
+  }
+  if (input.buyoutCents !== undefined && input.buyoutCents !== null) {
+    throw new V1ScopeError('auction_buyout', 'Auction buyouts are not available in v1.');
+  }
+  if (input.paymentWindowHours !== undefined && input.paymentWindowHours !== V1_PAYMENT_WINDOW_HOURS) {
+    throw new V1ScopeError(
+      'seller_payment_window',
+      `v1 uses the platform payment window of ${V1_PAYMENT_WINDOW_HOURS} hours.`,
+    );
+  }
+}

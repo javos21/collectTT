@@ -131,8 +131,12 @@ async function ensureProfile(userId: string, email: string, name: string | null 
   // Provider data is not guaranteed to include a useful name. Check for blank rather
   // than only null so every authentication path still creates a usable profile.
   const trimmedName = (name ?? '').trim();
-  const base = trimmedName !== '' ? trimmedName : (email.split('@')[0] ?? 'member');
-  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'member';
+  // The Better Auth name is the private account name. Never copy it onto a public
+  // profile. Sign-up sets the chosen display name immediately after verification;
+  // this neutral fallback covers legacy/provider flows safely.
+  const base = 'Collector';
+  const slugSource = email.split('@')[0] ?? (trimmedName !== '' ? trimmedName : 'member');
+  const slug = slugSource.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'member';
   const handle = `${slug}_${userId.slice(0, 6)}`;
 
   const created = await db.transaction(async (tx) => {

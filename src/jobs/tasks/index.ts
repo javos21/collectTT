@@ -22,8 +22,12 @@ import {
   promoteNext,
   reputationRecompute,
   consistencyCheck,
+  receiptWindowExpired,
+  fallbackOfferExpired,
 } from './transaction-windows';
 import { custodyOverstay } from './custody-overstay';
+import { rateLimitCleanup } from './rate-limit-cleanup';
+import { listingExpiry } from './listing-expiry';
 
 /** Payload contract for every task in the system. */
 export interface TaskPayloads {
@@ -33,15 +37,19 @@ export interface TaskPayloads {
 
   // ---- Phase 1
   'auction:close': { listingId: string };
+  'auction:fallback_expire': { offerId: string };
+  'listing:expire': { listingId: string };
   'transaction:payment_window': { transactionId: string };
   'transaction:dropoff_window': { transactionId: string };
   'transaction:promote_next': { listingId: string; failedTransactionId: string };
-  'transaction:payment_reminder': { transactionId: string };
+  'transaction:payment_reminder': { transactionId: string; reminderKind?: 'halfway' | 'two_hours' | 'deadline' };
+  'transaction:receipt_window': { transactionId: string };
   'reputation:recompute': Record<string, never>;
   'consistency:check': Record<string, never>;
 
   // ---- Phase 2 (declared now, implemented with custody)
   'custody:overstay': { holdingId: string };
+  'security:rate_limit_cleanup': Record<string, never>;
 }
 
 export type TaskName = keyof TaskPayloads;
@@ -57,14 +65,18 @@ export const taskList: TaskList = {
   'notifications:dispatch': dispatchNotification as Task,
   // Phase 1
   'auction:close': auctionClose as Task,
+  'auction:fallback_expire': fallbackOfferExpired as Task,
+  'listing:expire': listingExpiry as Task,
   'transaction:payment_window': paymentWindowExpired as Task,
   'transaction:dropoff_window': dropoffWindowExpired as Task,
   'transaction:payment_reminder': paymentReminder as Task,
+  'transaction:receipt_window': receiptWindowExpired as Task,
   'transaction:promote_next': promoteNext as Task,
   'reputation:recompute': reputationRecompute as Task,
   'consistency:check': consistencyCheck as Task,
   // Phase 2
   'custody:overstay': custodyOverstay as Task,
+  'security:rate_limit_cleanup': rateLimitCleanup as Task,
 };
 
 export const IMPLEMENTED_TASKS = Object.keys(taskList);

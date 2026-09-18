@@ -1,0 +1,4 @@
+-- The schema change is intentionally shipped as 0029_auction_fallback_offers.sql.
+-- This no-op migration pairs the generated schema snapshot with the manually
+-- authored, Render-safe migration and prevents future drizzle-kit generates from
+-- recreating the fallback-offer table.

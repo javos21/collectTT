@@ -1,0 +1,3 @@
+-- Schema snapshot companion for Milestone 6. The additive enum/table migration is
+-- intentionally hand-authored in 0031_trust_restrictions_support.sql so it can be
+-- rerun safely on Docker and Render. Keep this generated migration as a no-op.

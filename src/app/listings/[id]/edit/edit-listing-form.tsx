@@ -8,30 +8,40 @@ type ServerAction = (formData: FormData) => Promise<void>;
 
 export function EditListingForm({
   action,
+  publishAction,
   cancelAction,
   listingId,
   title,
   description,
   price,
   saleType,
+  status,
+  meetupLocations,
+  meetupLocationId,
   acceptsOffers,
   paymentWindowHours,
   deliveryOptions,
   locked,
   error,
+  v1 = false,
 }: {
   action: ServerAction;
+  publishAction: ServerAction;
   cancelAction: ServerAction;
   listingId: string;
   title: string;
   description: string;
   price: string | null;
   saleType: 'straight_sale' | 'auction';
+  status: string;
+  meetupLocations: readonly { id: string; label: string; area: string }[];
+  meetupLocationId: string | null;
   acceptsOffers: boolean;
   paymentWindowHours: number;
   deliveryOptions: readonly { id: string; label: string; expectedDeliveryDays: number }[];
   locked: boolean;
   error?: string;
+  v1?: boolean;
 }) {
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
@@ -64,7 +74,7 @@ export function EditListingForm({
 
       <fieldset className="create-section" disabled={locked}>
         <legend>Listing details</legend>
-        <p className="create-section__intro">Update the information buyers see. These settings are available until the first buyer claim, bid, offer, or open deal.</p>
+        <p className="create-section__intro">Update the information buyers see. These settings are available until the first buyer reservation, bid, offer, or open deal.</p>
         <div className="form-field">
           <label htmlFor="edit-title">Title</label>
           <input id="edit-title" name="title" type="text" defaultValue={title} required minLength={3} maxLength={160} />
@@ -85,12 +95,21 @@ export function EditListingForm({
             <span><strong>Accept offers</strong><small>Let buyers propose a price below your asking price.</small></span>
           </label>
         )}
-        <div className="form-field form-field--compact">
+        {meetupLocations.length > 0 && (
+          <div className="form-field form-field--compact">
+            <label htmlFor="edit-meetup-location">Meetup location</label>
+            <select id="edit-meetup-location" name="meetupLocationId" defaultValue={meetupLocationId ?? ''}>
+              <option value="">No saved location</option>
+              {meetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
+            </select>
+          </div>
+        )}
+        {!v1 && <div className="form-field form-field--compact">
           <label htmlFor="edit-payment-window">Payment period</label>
           <select id="edit-payment-window" name="paymentWindowHours" defaultValue={String(paymentWindowHours)}>
             <option value="48">Within 2 days</option><option value="72">Within 3 days</option><option value="120">Within 5 days</option><option value="168">Within 7 days</option>
           </select>
-        </div>
+        </div>}
         <div className="delivery-estimates">
           <h3>Expected delivery</h3>
           {deliveryOptions.map((option) => {
@@ -111,6 +130,9 @@ export function EditListingForm({
         {!locked && (
           <div className="edit-actions__right">
             <button type="submit">Save changes</button>
+            {status === 'draft' && (
+              <button className="primary" type="submit" formAction={publishAction} name="intent" value="publish">Publish listing</button>
+            )}
             <button className="secondary edit-cancel-button" type="submit" name="intent" value="cancel" formAction={cancelAction} onClick={(event) => { if (!window.confirm('Cancel this listing? Buyers will no longer be able to find it.')) event.preventDefault(); }}>Cancel listing</button>
           </div>
         )}

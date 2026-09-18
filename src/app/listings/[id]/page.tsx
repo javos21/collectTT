@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Pencil } from 'lucide-react';
+import { ImageOff, Pencil } from 'lucide-react';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { getListing, getListingActivity } from '@/services/listings';
@@ -13,7 +13,7 @@ import { db } from '@/db/client';
 import { bids, claims } from '@/db/schema/listings';
 import { profiles } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
-import { acceptOfferAction, bidAction, cancelOfferAndClaimAction, claimAction, rejectOfferAction, submitOfferAction } from './actions';
+import { acceptOfferAction, acceptFallbackOfferAction, bidAction, cancelOfferAndClaimAction, claimAction, rejectOfferAction, submitOfferAction, markSoldOutsideAction, duplicateListingAction, relistListingAction, reportListingAction } from './actions';
 import { AuctionLive } from './bid-panel';
 import { latestOfferForBuyer, pendingOffersForSeller } from '@/services/offers';
 import { trustSnapshotsForMembers } from '@/services/reputation';
@@ -21,7 +21,11 @@ import { serializeTrustSnapshot } from '../../deals/buyer-snapshot-data';
 import { SignInRequiredModal } from '@/components/sign-in-required-modal';
 import { ClaimConfirmedModal } from './claim-confirmed-modal';
 import { SettlementFields } from './settlement-fields';
+import { ReportListingModal } from './report-listing-modal';
 import { BuyerSnapshotLink } from '../../deals/buyer-snapshot-link';
+import { isLegacyFeatureAllowed, isV1Launch } from '@/lib/launch-scope';
+import { auctionFallbackOffers } from '@/db/schema/auction-fallback-offers';
+import { SUPPORT_CASE_CATEGORIES } from '@/services/support-cases';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,11 +34,12 @@ export default async function ListingPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; claimed?: string; bid?: string; offer?: string; auth?: string }>;
+  searchParams: Promise<{ error?: string; errorCode?: string; claimed?: string; bid?: string; offer?: string; auth?: string; reported?: string }>;
 }) {
   const { id } = await params;
   const flash = await searchParams;
-  const result = await getListing(id);
+  const viewer = await currentUser();
+  const result = await getListing(id, viewer?.userId);
   if (result === null) notFound();
 
   const { listing, sellerName, sellerSince, images, deliveryOptions, paymentOptions } = result;
@@ -44,7 +49,6 @@ export default async function ListingPage({
   ]);
   const sellerSnapshot = sellerSnapshots.get(listing.sellerId) ?? null;
   const attributes = listing.attributes as Record<string, unknown>;
-  const viewer = await currentUser();
   const showSignInModal = viewer === null && flash.auth === 'buy';
   const isSeller = viewer?.userId === listing.sellerId;
   const sellerActivity = isSeller ? await getListingActivity(id) : null;
@@ -53,6 +57,13 @@ export default async function ListingPage({
     : [];
   const myOffer = viewer !== null && !isSeller && listing.saleType === 'straight_sale'
     ? await latestOfferForBuyer(id, viewer.userId)
+    : null;
+  const myFallbackOffer = viewer !== null && !isSeller && listing.saleType === 'auction'
+    ? (await db.select().from(auctionFallbackOffers).where(and(
+        eq(auctionFallbackOffers.listingId, id),
+        eq(auctionFallbackOffers.buyerId, viewer.userId),
+        eq(auctionFallbackOffers.status, 'pending'),
+      )).limit(1))[0] ?? null
     : null;
 
   const isAuction = listing.saleType === 'auction';
@@ -120,7 +131,9 @@ export default async function ListingPage({
     (option) => !option.requiresStore || relayCandidates.length > 0,
   );
   const paymentWindowDays = Math.ceil(listing.paymentWindowHours / 24);
-  const canMakeOffer = !isAuction && viewer !== null && !isSeller && listing.status === 'active' && listing.acceptsOffers;
+  const offersEnabled = isLegacyFeatureAllowed('offers');
+  const v1 = isV1Launch();
+  const canMakeOffer = offersEnabled && !isAuction && viewer !== null && !isSeller && listing.status === 'active' && listing.acceptsOffers;
 
   const settleForm = (idPrefix: string, fieldPrefix = '') => (
     <SettlementFields
@@ -129,6 +142,7 @@ export default async function ListingPage({
       deliveryOptions={choosableDeliveryOptions}
       paymentOptions={paymentOptions}
       relayCandidates={relayCandidates}
+      v1={v1}
     />
   );
 
@@ -162,7 +176,7 @@ export default async function ListingPage({
       </div>
 
       {flash.error !== undefined && (
-        <div className="alert alert--error" role="alert">
+        <div className="alert alert--error" role="alert" data-error-code={flash.errorCode}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
             <path d="M12 7v6m0 3.5v.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -187,6 +201,7 @@ export default async function ListingPage({
       {flash.offer === 'rejected' && (
         <div className="alert alert--info" role="status">Offer rejected.</div>
       )}
+      {flash.reported === '1' && <div className="alert alert--info" role="status">Thanks — your report was sent privately to CollectTT support.</div>}
 
       <div className="listing-body">
         {/* ------------------------------------------------ gallery */}
@@ -225,7 +240,11 @@ export default async function ListingPage({
               )}
             </>
           ) : (
-            <div className="gallery__empty">No photos yet</div>
+            <div className="gallery__empty" role="status">
+              <ImageOff size={30} strokeWidth={1.7} aria-hidden="true" />
+              <strong>No photos yet</strong>
+              <span>The seller has not added photos to this listing.</span>
+            </div>
           )}
           </div>
 
@@ -248,7 +267,7 @@ export default async function ListingPage({
                     <>
                       <span className="listing-seller-summary__header">
                         <h2 id="seller-snapshot-heading" className="listing-detail-title">Seller</h2>
-                        <span className="listing-seller-summary__hint">Click to view trust snapshot</span>
+                        <span className="listing-seller-summary__hint">View trust snapshot →</span>
                       </span>
                       <span className="listing-seller-summary__body">
                         <span className="listing-seller-summary__identity">
@@ -263,8 +282,8 @@ export default async function ListingPage({
                           </span>
                         </span>
                         <span className="listing-seller-summary__metric">
-                          <strong>{sellerSnapshot.counters.sellCompleted}</strong>
-                          <span>Completed sales</span>
+                          <strong>{sellerSnapshot.counters.buyCompleted + sellerSnapshot.counters.sellCompleted}</strong>
+                          <span>Completed deals</span>
                         </span>
                       </span>
                     </>
@@ -275,7 +294,7 @@ export default async function ListingPage({
 
             <section className="listing-detail-card listing-settlement-card" aria-label="Settlement options">
               <div className="listing-settlement-panel">
-                <h2 id="delivery-heading" className="listing-detail-title">Delivery options</h2>
+                <h2 id="delivery-heading" className="listing-detail-title">{v1 ? 'Meetup options' : 'Delivery options'}</h2>
                 {choosableDeliveryOptions.length > 0 ? (
                   <ul className="settle-list">
                     {choosableDeliveryOptions.map((option) => {
@@ -308,7 +327,7 @@ export default async function ListingPage({
                     })}
                   </ul>
                 ) : (
-                  <p className="buybox__note">No delivery options are currently available for this item.</p>
+                  <p className="buybox__note">No {v1 ? 'meetup' : 'delivery'} options are currently available for this item.</p>
                 )}
               </div>
               <div className="listing-settlement-panel">
@@ -326,6 +345,13 @@ export default async function ListingPage({
                   </p>
                 </div>
               </div>
+              {result.meetupLocation !== null && (
+                <div className="listing-settlement-panel">
+                  <h2 className="listing-detail-title">Meetup location</h2>
+                  <p>{result.meetupLocation.label} — {result.meetupLocation.area}</p>
+                  {result.meetupLocation.instructions !== null && <p className="buybox__note">{result.meetupLocation.instructions}</p>}
+                </div>
+              )}
             </section>
 
             <section className="listing-detail-card" aria-labelledby="listing-details-heading">
@@ -340,6 +366,13 @@ export default async function ListingPage({
                   <dd>{isAuction ? 'Auction' : 'Straight sale'}</dd>
                 </div>
               </dl>
+              {viewer !== null && !isSeller && (
+                <ReportListingModal
+                  listingId={id}
+                  categories={SUPPORT_CASE_CATEGORIES}
+                  action={reportListingAction}
+                />
+              )}
             </section>
 
             {attributeRows.length > 0 && (
@@ -366,6 +399,7 @@ export default async function ListingPage({
                 </dl>
               </section>
             )}
+
           </div>
         </div>
 
@@ -396,7 +430,7 @@ export default async function ListingPage({
           {/* ------------------------------------------------ act */}
           {viewer === null ? (
             <div className="buybox__state">
-              <Link href={`/listings/${id}?auth=buy#buy-panel`}>sign in</Link> to {isAuction ? 'bid' : 'claim this or make an offer'}.
+              <Link href={`/listings/${id}?auth=buy#buy-panel`}>sign in</Link> to {isAuction ? 'bid' : offersEnabled ? 'reserve this or make an offer' : 'reserve / buy this item'}.
             </div>
           ) : isSeller ? (
             <>
@@ -413,7 +447,25 @@ export default async function ListingPage({
                   </Link>
                 )}
               </div>
-              {pendingOffers.length > 0 && (
+              {!sellerActivity?.locked && listing.status === 'active' && (
+                <form className="buybox__form" action={markSoldOutsideAction}>
+                  <input type="hidden" name="listingId" value={id} />
+                  <button className="secondary" type="submit">Mark sold outside CollectTT</button>
+                </form>
+              )}
+              {(listing.status === 'expired' || listing.status === 'sold_outside' || listing.status === 'ended_no_sale') && (
+                <form className="buybox__form" action={relistListingAction}>
+                  <input type="hidden" name="listingId" value={id} />
+                  <button type="submit">Relist as new draft</button>
+                </form>
+              )}
+              {!sellerActivity?.locked && listing.status !== 'claimed' && listing.status !== 'ended_won' && listing.status !== 'cancelled' && listing.status !== 'expired' && listing.status !== 'sold_outside' && (
+                <form className="buybox__form" action={duplicateListingAction}>
+                  <input type="hidden" name="listingId" value={id} />
+                  <button className="secondary" type="submit">Duplicate &amp; edit</button>
+                </form>
+              )}
+              {offersEnabled && pendingOffers.length > 0 && (
                 <p className="buybox__owner-detail">
                   {pendingOffers.length} offer{pendingOffers.length === 1 ? '' : 's'} waiting.
                 </p>
@@ -425,7 +477,19 @@ export default async function ListingPage({
               )}
             </>
           ) : isAuction ? (
-            isOpen ? (
+            myFallbackOffer !== null ? (
+              <div className="buybox__pending-offer">
+                <div className="buybox__state">
+                  <strong>A fallback offer is waiting for you.</strong>
+                  <p className="buybox__note">Accept at {formatMoney(myFallbackOffer.amountCents)} by {myFallbackOffer.expiresAt.toLocaleString('en-TT')} to open the deal.</p>
+                  <form className="buybox__form" action={acceptFallbackOfferAction}>
+                    <input type="hidden" name="listingId" value={id} />
+                    <input type="hidden" name="offerId" value={myFallbackOffer.id} />
+                    <button type="submit">Accept fallback offer</button>
+                  </form>
+                </div>
+              </div>
+            ) : isOpen ? (
               <form className="buybox__form" action={bidAction}>
                 <input type="hidden" name="listingId" value={id} />
                 <label htmlFor="amount">Your bid (minimum {formatMoney(minBid)})</label>
@@ -438,6 +502,10 @@ export default async function ListingPage({
                   required
                 />
                 {settleForm('bid-')}
+                <label className="commitment-ack">
+                  <input type="checkbox" name="commitmentAcknowledged" value="yes" required />
+                  <span>I understand this bid is a binding purchase commitment if I win.</span>
+                </label>
                 <button type="submit">Place bid</button>
               </form>
             ) : (
@@ -454,14 +522,14 @@ export default async function ListingPage({
                   <form className="buybox__form" action={cancelOfferAndClaimAction}>
                     <input type="hidden" name="listingId" value={id} />
                     <input type="hidden" name="offerId" value={myOffer.id} />
-                    <button type="submit">Cancel offer and claim at full price</button>
+                    <button type="submit">Cancel offer and reserve at full price</button>
                   </form>
                 )}
               </div>
             </div>
           ) : myClaim !== undefined ? (
             <div className="buybox__state">
-              You have claimed this item.
+              You have reserved this item.
               {myClaim.transactionId !== null && (
                 <>
                   {' '}
@@ -473,7 +541,11 @@ export default async function ListingPage({
             <form className="buybox__form" action={claimAction}>
               <input type="hidden" name="listingId" value={id} />
               {settleForm('')}
-              <button type="submit">Claim it</button>
+              <label className="commitment-ack" htmlFor="commitmentAcknowledged">
+                <input id="commitmentAcknowledged" name="commitmentAcknowledged" type="checkbox" value="yes" required />
+                <span><strong>This is a purchase commitment.</strong> If you do not complete it, your trust record and buying access may be affected.</span>
+              </label>
+              <button type="submit">Reserve / buy now</button>
               {canMakeOffer && (
                 <div className="buybox__offer-wrap">
                   <hr />
@@ -495,7 +567,7 @@ export default async function ListingPage({
               )}
             </form>
           ) : (
-            <div className="buybox__state">This listing is no longer available for new claims.</div>
+            <div className="buybox__state">This listing is no longer available for new reservations.</div>
           )}
 
           <div className="trust">
@@ -523,7 +595,7 @@ export default async function ListingPage({
         </aside>
       </div>
 
-      {isSeller && !isAuction && pendingOffers.length > 0 && (
+      {offersEnabled && isSeller && !isAuction && pendingOffers.length > 0 && (
         <section className="offers-section" aria-labelledby="offers-heading">
           <h2 id="offers-heading" className="section-label">Offers to review</h2>
           <div className="table-wrap">

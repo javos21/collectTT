@@ -14,19 +14,23 @@
  * deciding the item's fate, and pickup completing the deal.
  */
 
-import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql, inArray, lt, gt, lte } from 'drizzle-orm';
 
 import { dbNow, type Tx } from '../db/client';
 import { transactions, transactionEvents } from '../db/schema/transactions';
-import { listings, claims, bids } from '../db/schema/listings';
+import { listings, claims, bids, listingAuditEvents } from '../db/schema/listings';
+import { auctionFallbackOffers } from '../db/schema/auction-fallback-offers';
 import { offers } from '../db/schema/offers';
 import { custodyHoldings } from '../db/schema/custody';
 import { profiles } from '../db/schema/profiles';
+import { disputes } from '../db/schema/notifications';
 import { enqueue } from '../jobs/enqueue';
 import { notify } from '../notifications/dispatch';
+import { recordAnalyticsEvent } from './analytics';
 import { recordEvent, evaluateRestrictions, incrementCounter } from './reputation';
 import {
   openOrRelinkHolding,
+  markPickedUp,
   onPaymentConfirmed,
   onTransactionTerminated,
   returnToSeller,
@@ -48,7 +52,17 @@ import {
   type TransactionSource,
 } from '../domain';
 import { formatMoney } from '../domain/money';
+import { WINDOWS } from '../domain/policy/windows';
+import { recordAdminAudit } from './admin-audit';
 import type { SettlementMethod } from '../domain/policy/settlement';
+import { acquireCommitmentEligibility } from './marketplace-eligibility';
+import { MarketplaceEligibilityError } from './marketplace-eligibility';
+import { isV1Launch, V1_HANDOFF_CONFIRMATION_WINDOW_HOURS } from '@/lib/launch-scope';
+import {
+  assertHandoffTransition,
+  initialHandoffState,
+  type HandoffState,
+} from '@/domain/states/handoff';
 
 /**
  * Promotion jobs are at-least-once. Two deliveries can both pass the open-row check
@@ -100,6 +114,8 @@ export interface OpenTransactionInput {
   fulfillmentPath: FulfillmentPath;
   /** Exact admin-managed delivery choice; null for legacy records. */
   deliveryOptionId?: string | null;
+  /** Seller meetup choice captured at commitment time; null for legacy records. */
+  meetupLocationId?: string | null;
   source: TransactionSource;
   claimId?: string | null;
   winningBidId?: string | null;
@@ -111,6 +127,8 @@ export interface OpenTransactionInput {
   relayStoreId?: string | null;
   /** The buyer's selected payment method. Nullable for legacy transactions. */
   settlementMethod?: string | null;
+  /** Set by the v1 user-facing commitment action. Internal legacy callers may omit it. */
+  commitmentAcknowledged?: boolean;
 }
 
 /**
@@ -120,8 +138,10 @@ export interface OpenTransactionInput {
  */
 export async function openTransaction(input: OpenTransactionInput): Promise<{ id: string }> {
   const { tx } = input;
+  await acquireCommitmentEligibility(tx, input.buyerId);
   const now = await dbNow(tx);
   const deadlines = computeDeadlines(input.fulfillmentPath, now, input.paymentWindowHours);
+  const handoffState = initialHandoffState(input.fulfillmentPath, isV1Launch() && input.commitmentAcknowledged === true);
 
   // Attempt numbers are unique per listing; an auction runner-up opens the next one.
   const prior = await tx
@@ -144,10 +164,12 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
       amountCents: input.amountCents,
       fulfillmentPath: input.fulfillmentPath,
       deliveryOptionId: input.deliveryOptionId ?? null,
+      meetupLocationId: input.meetupLocationId ?? null,
       settlementMethod: input.settlementMethod ?? null,
       state: 'open',
       paymentState: 'pending',
       custodyState: usesCustodyTrack(input.fulfillmentPath) ? 'awaiting_dropoff' : 'not_applicable',
+      handoffState,
       paymentDeadlineAt: deadlines.paymentDeadlineAt,
       sellerDropoffDeadlineAt: deadlines.sellerDropoffDeadlineAt,
     })
@@ -194,16 +216,20 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
     { jobKey: `payment_window:${created.id}`, runAt: deadlines.paymentDeadlineAt },
   );
 
-  // One reminder at the two-thirds mark. Terse and consolidated on purpose — WhatsApp
-  // bills per message, so this is one nudge, not a drip campaign.
-  const remindAt = new Date(
-    now.getTime() + (deadlines.paymentDeadlineAt.getTime() - now.getTime()) * 0.66,
+  // Two policy reminders: halfway through the payment window and two hours before it.
+  const halfwayAt = new Date(now.getTime() + (deadlines.paymentDeadlineAt.getTime() - now.getTime()) * 0.5);
+  const twoHoursAt = new Date(deadlines.paymentDeadlineAt.getTime() - 2 * 60 * 60 * 1000);
+  await enqueue(
+    tx,
+    'transaction:payment_reminder',
+    { transactionId: created.id, reminderKind: 'halfway' },
+    { jobKey: `payment_reminder:halfway:${created.id}`, runAt: halfwayAt },
   );
   await enqueue(
     tx,
     'transaction:payment_reminder',
-    { transactionId: created.id },
-    { jobKey: `payment_reminder:${created.id}`, runAt: remindAt },
+    { transactionId: created.id, reminderKind: 'two_hours' },
+    { jobKey: `payment_reminder:two_hours:${created.id}`, runAt: twoHoursAt > now ? twoHoursAt : halfwayAt, jobKeyMode: 'preserve_run_at' },
   );
 
   if (deadlines.sellerDropoffDeadlineAt !== null) {
@@ -219,6 +245,8 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
   const buyerEvent =
     input.source === 'auction_win'
       ? 'auction_won'
+      : input.source === 'auction_runner_up'
+        ? 'auction_runner_up_buyer'
       : input.source === 'offer_accept'
         ? 'offer_accepted_buyer'
         : 'claim_confirmed_buyer';
@@ -265,23 +293,29 @@ async function displayName(tx: Tx, userId: string): Promise<string> {
 
 // ---------------------------------------------------------------- payment track
 
-/** Buyer asserts they have paid (or that the meetup happened and cash changed hands). */
+/** Buyer records payment. This single assertion settles the payment track. */
 export async function markPaid(tx: Tx, transactionId: string, buyerId: string): Promise<void> {
   const row = await load(tx, transactionId);
   if (row.buyerId !== buyerId) throw new ForbiddenError('Only the buyer can mark a deal paid');
-  if (row.state !== 'open') throw new ConflictError('This deal is no longer open');
+  if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
 
-  assertPaymentTransition(row.paymentState, 'buyer_marked_paid');
+  if (row.paymentState === 'confirmed') return;
+  assertPaymentTransition(row.paymentState, 'confirmed');
 
   // Conditional UPDATE: a concurrent expiry job cannot be overtaken.
   const updated = await tx
     .update(transactions)
-    .set({ paymentState: 'buyer_marked_paid', markedPaidAt: sql`now()`, updatedAt: sql`now()` })
+    .set({
+      paymentState: 'confirmed',
+      markedPaidAt: sql`coalesce(${transactions.markedPaidAt}, now())`,
+      paymentConfirmedAt: sql`now()`,
+      updatedAt: sql`now()`,
+    })
     .where(
       and(
         eq(transactions.id, transactionId),
         eq(transactions.state, 'open'),
-        eq(transactions.paymentState, 'pending'),
+        inArray(transactions.paymentState, ['pending', 'buyer_marked_paid']),
       ),
     )
     .returning({ id: transactions.id });
@@ -291,8 +325,8 @@ export async function markPaid(tx: Tx, transactionId: string, buyerId: string): 
   await recordTransition(tx, {
     transactionId,
     track: 'payment',
-    from: 'pending',
-    to: 'buyer_marked_paid',
+    from: row.paymentState,
+    to: 'confirmed',
     actorUserId: buyerId,
     actorRole: 'buyer',
   });
@@ -305,9 +339,11 @@ export async function markPaid(tx: Tx, transactionId: string, buyerId: string): 
     linkUrl: `/deals/${transactionId}`,
     idempotencyKey: `marked_paid:${transactionId}`,
   });
+
+  await afterPaymentConfirmed(tx, transactionId, row);
 }
 
-/** Seller confirms the money arrived. This is the half of the handshake that matters. */
+/** Legacy compatibility for deals created under the former seller-confirmation flow. */
 export async function confirmPayment(
   tx: Tx,
   transactionId: string,
@@ -315,7 +351,8 @@ export async function confirmPayment(
 ): Promise<void> {
   const row = await load(tx, transactionId);
   if (row.sellerId !== sellerId) throw new ForbiddenError('Only the seller can confirm payment');
-  if (row.state !== 'open') throw new ConflictError('This deal is no longer open');
+  if (row.paymentState === 'confirmed') return;
+  if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
 
   assertPaymentTransition(row.paymentState, 'confirmed');
 
@@ -346,6 +383,15 @@ export async function confirmPayment(
     actorRole: 'seller',
   });
 
+  await afterPaymentConfirmed(tx, transactionId, row, true);
+}
+
+async function afterPaymentConfirmed(
+  tx: Tx,
+  transactionId: string,
+  row: Awaited<ReturnType<typeof load>>,
+  notifyBuyer = false,
+): Promise<void> {
   // Objective fact: on time, or late? Measured against the server-set deadline.
   const now = await dbNow(tx);
   const onTime = now.getTime() <= row.paymentDeadlineAt.getTime();
@@ -357,14 +403,16 @@ export async function confirmPayment(
     counterpartyUserId: row.sellerId,
   });
 
-  await notify({
-    tx,
-    userId: row.buyerId,
-    event: 'payment_confirmed_buyer',
-    data: { listingTitle: row.listingTitle },
-    linkUrl: `/deals/${transactionId}`,
-    idempotencyKey: `payment_confirmed:${transactionId}`,
-  });
+  if (notifyBuyer) {
+    await notify({
+      tx,
+      userId: row.buyerId,
+      event: 'payment_confirmed_buyer',
+      data: { listingTitle: row.listingTitle },
+      linkUrl: `/deals/${transactionId}`,
+      idempotencyKey: `payment_confirmed:${transactionId}`,
+    });
+  }
 
   // An accepted offer does not displace competing offers until payment is
   // authoritative. If the accepted buyer never pays, those offers remain available
@@ -402,6 +450,131 @@ export async function confirmPayment(
   await completeIfBothTracksDone(tx, transactionId);
 }
 
+/** Buyer confirms that a store-held item is physically in their hands. */
+export async function confirmCustodyCollection(
+  tx: Tx,
+  transactionId: string,
+  buyerId: string,
+): Promise<void> {
+  const row = await load(tx, transactionId);
+  if (row.buyerId !== buyerId) throw new ForbiddenError('Only the buyer can confirm collection');
+  if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
+  if (!usesCustodyTrack(row.fulfillmentPath)) throw new ConflictError('This deal does not use store collection');
+  if (row.paymentState !== 'confirmed') throw new ConflictError('Mark payment as sent before collecting the item');
+
+  let holdings = await tx
+    .select({ id: custodyHoldings.id, state: custodyHoldings.state })
+    .from(custodyHoldings)
+    .where(eq(custodyHoldings.currentTransactionId, transactionId))
+    .limit(1);
+  if (holdings[0]?.state === 'at_relay') {
+    await onPaymentConfirmed(tx, transactionId);
+    holdings = await tx
+      .select({ id: custodyHoldings.id, state: custodyHoldings.state })
+      .from(custodyHoldings)
+      .where(eq(custodyHoldings.currentTransactionId, transactionId))
+      .limit(1);
+  }
+  const holding = holdings[0];
+  if (holding === undefined || holding.state !== 'release_authorized') {
+    throw new ConflictError('This item is not ready for collection');
+  }
+  await markPickedUp({ tx, holdingId: holding.id, actorUserId: buyerId, actorRole: 'buyer' });
+}
+
+/** Seller records that the paid item was handed to the buyer at the meetup. */
+export async function markItemHandedOver(
+  tx: Tx,
+  transactionId: string,
+  sellerId: string,
+): Promise<void> {
+  const row = await load(tx, transactionId);
+  if (row.sellerId !== sellerId) throw new ForbiddenError('Only the seller can mark the item handed over');
+  if (row.handoffState === 'seller_handed_over' || row.handoffState === 'buyer_received') return;
+  if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
+  if (row.fulfillmentPath !== 'cash_meetup') throw new ConflictError('Item hand-off is only available for meetup deals');
+  if (row.paymentState !== 'confirmed') throw new ConflictError('Payment must be confirmed before hand-off');
+  assertHandoffTransition(row.handoffState, 'seller_handed_over');
+  const now = await dbNow(tx);
+
+  const updated = await tx.update(transactions).set({
+    handoffState: 'seller_handed_over',
+    handedOverAt: sql`now()`,
+    receiptDeadlineAt: sql`now() + (${V1_HANDOFF_CONFIRMATION_WINDOW_HOURS} || ' hours')::interval`,
+    updatedAt: sql`now()`,
+  }).where(and(
+    eq(transactions.id, transactionId),
+    eq(transactions.state, 'open'),
+    eq(transactions.handoffState, 'awaiting_handoff'),
+  )).returning({ id: transactions.id });
+  if (updated.length === 0) throw new ConflictError('This hand-off has already been recorded');
+
+  await recordTransition(tx, {
+    transactionId,
+    track: 'overall',
+    from: 'awaiting_handoff',
+    to: 'seller_handed_over',
+    actorUserId: sellerId,
+    actorRole: 'seller',
+  });
+  await notify({
+    tx,
+    userId: row.buyerId,
+    event: 'item_handed_over_buyer',
+    data: { listingTitle: row.listingTitle, deadline: 'buyer confirmation required' },
+    linkUrl: `/deals/${transactionId}`,
+    idempotencyKey: `item_handed_over:${transactionId}`,
+  });
+  const receiptDeadline = new Date(now.getTime() + V1_HANDOFF_CONFIRMATION_WINDOW_HOURS * 60 * 60 * 1000);
+  await enqueue(tx, 'transaction:receipt_window', { transactionId }, {
+    jobKey: `receipt_window:${transactionId}`,
+    runAt: receiptDeadline,
+  });
+}
+
+/** Buyer confirms receipt after the seller records the hand-off. */
+export async function confirmItemReceived(
+  tx: Tx,
+  transactionId: string,
+  buyerId: string,
+): Promise<void> {
+  const row = await load(tx, transactionId);
+  if (row.buyerId !== buyerId) throw new ForbiddenError('Only the buyer can confirm receipt');
+  if (row.handoffState === 'buyer_received') return;
+  if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
+  if (row.fulfillmentPath !== 'cash_meetup') throw new ConflictError('Item receipt is only available for meetup deals');
+  assertHandoffTransition(row.handoffState, 'buyer_received');
+
+  const updated = await tx.update(transactions).set({
+    handoffState: 'buyer_received',
+    receivedAt: sql`now()`,
+    updatedAt: sql`now()`,
+  }).where(and(
+    eq(transactions.id, transactionId),
+    eq(transactions.state, 'open'),
+    eq(transactions.handoffState, 'seller_handed_over'),
+  )).returning({ id: transactions.id });
+  if (updated.length === 0) throw new ConflictError('This receipt has already been recorded');
+
+  await recordTransition(tx, {
+    transactionId,
+    track: 'overall',
+    from: 'seller_handed_over',
+    to: 'buyer_received',
+    actorUserId: buyerId,
+    actorRole: 'buyer',
+  });
+  await notify({
+    tx,
+    userId: row.sellerId,
+    event: 'item_received_seller',
+    data: { listingTitle: row.listingTitle },
+    linkUrl: `/deals/${transactionId}`,
+    idempotencyKey: `item_received:${transactionId}`,
+  });
+  await completeIfBothTracksDone(tx, transactionId);
+}
+
 /** Seller says the money never arrived. The deadline is NOT extended. */
 export async function disputePayment(
   tx: Tx,
@@ -410,7 +583,7 @@ export async function disputePayment(
 ): Promise<void> {
   const row = await load(tx, transactionId);
   if (row.sellerId !== sellerId) throw new ForbiddenError('Only the seller can dispute');
-  if (row.state !== 'open') throw new ConflictError('This deal is no longer open');
+  if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
 
   assertPaymentTransition(row.paymentState, 'pending');
 
@@ -445,6 +618,28 @@ export async function disputePayment(
     reason: 'seller disputes the payment claim',
   });
 
+  // Keep the seller's binary payment response visible in the dispute work queue as
+  // well as in the payment timeline. Do not create duplicates when a payment is
+  // marked and disputed repeatedly before support has reviewed the first report.
+  const existingDispute = await tx
+    .select({ id: disputes.id })
+    .from(disputes)
+    .where(and(
+      eq(disputes.transactionId, transactionId),
+      eq(disputes.raisedBy, sellerId),
+      eq(disputes.reason, 'payment_not_received'),
+      eq(disputes.status, 'open'),
+    ))
+    .limit(1);
+  if (existingDispute[0] === undefined) {
+    await tx.insert(disputes).values({
+      transactionId,
+      raisedBy: sellerId,
+      reason: 'payment_not_received',
+      detail: 'The seller reported that the buyer marked the payment as sent, but the payment was not received.',
+    });
+  }
+
   await notify({
     tx,
     userId: row.buyerId,
@@ -458,6 +653,54 @@ export async function disputePayment(
   });
 }
 
+/** Admin/support extension. Sellers and buyers cannot move platform deadlines. */
+export async function extendPaymentDeadline(input: {
+  tx: Tx;
+  transactionId: string;
+  hours: number;
+  reason: string;
+  adminUserId: string;
+}): Promise<Date> {
+  if (!Number.isInteger(input.hours) || input.hours < 1 || input.hours > 168) {
+    throw new ConflictError('Deadline extensions must be between 1 and 168 hours.');
+  }
+  if (input.reason.trim().length < 10 || input.reason.trim().length > 500) {
+    throw new ConflictError('Enter an extension reason between 10 and 500 characters.');
+  }
+  const row = await load(input.tx, input.transactionId);
+  if (row.state !== 'open') throw new ConflictError('Only an open deal can be extended.');
+  const now = await dbNow(input.tx);
+  const nextDeadline = new Date(Math.max(row.paymentDeadlineAt.getTime(), now.getTime()) + input.hours * 60 * 60 * 1000);
+  const updated = await input.tx.update(transactions).set({ paymentDeadlineAt: nextDeadline, updatedAt: sql`now()` })
+    .where(and(eq(transactions.id, input.transactionId), eq(transactions.state, 'open')))
+    .returning({ paymentDeadlineAt: transactions.paymentDeadlineAt });
+  if (updated.length === 0) throw new ConflictError('The deal changed before its deadline could be extended.');
+  await recordTransition(input.tx, {
+    transactionId: input.transactionId,
+    track: 'overall',
+    from: 'open',
+    to: 'open',
+    actorUserId: input.adminUserId,
+    actorRole: 'admin',
+    reason: input.reason.trim(),
+    metadata: { previousDeadlineAt: row.paymentDeadlineAt.toISOString(), extendedHours: input.hours },
+  });
+  await enqueue(input.tx, 'transaction:payment_window', { transactionId: input.transactionId }, { jobKey: `payment_window:${input.transactionId}`, runAt: nextDeadline });
+  await enqueue(input.tx, 'transaction:payment_reminder', { transactionId: input.transactionId, reminderKind: 'halfway' }, { jobKey: `payment_reminder:halfway:${input.transactionId}`, runAt: new Date(now.getTime() + (nextDeadline.getTime() - now.getTime()) * 0.5) });
+  await enqueue(input.tx, 'transaction:payment_reminder', { transactionId: input.transactionId, reminderKind: 'two_hours' }, { jobKey: `payment_reminder:two_hours:${input.transactionId}`, runAt: new Date(nextDeadline.getTime() - 2 * 60 * 60 * 1000) });
+  for (const userId of [row.buyerId, row.sellerId]) {
+    await notify({
+      tx: input.tx,
+      userId,
+      event: 'payment_deadline_extended',
+      data: { listingTitle: row.listingTitle, deadline: nextDeadline.toLocaleString('en-TT') },
+      linkUrl: `/deals/${input.transactionId}`,
+      idempotencyKey: `payment_deadline_extended:${input.transactionId}:${userId}:${nextDeadline.toISOString()}`,
+    });
+  }
+  return updated[0]!.paymentDeadlineAt;
+}
+
 // ---------------------------------------------------------------- completion
 
 /**
@@ -466,8 +709,8 @@ export async function disputePayment(
  */
 export async function completeIfBothTracksDone(tx: Tx, transactionId: string): Promise<boolean> {
   const row = await load(tx, transactionId);
-  if (row.state !== 'open') return false;
-  if (!canComplete(row.paymentState, row.custodyState)) return false;
+  if (row.state !== 'open' || row.disputeState === 'open') return false;
+  if (!canComplete(row.paymentState, row.custodyState, row.handoffState)) return false;
 
   assertTransactionTransition('open', 'completed');
 
@@ -506,6 +749,15 @@ export async function completeIfBothTracksDone(tx: Tx, transactionId: string): P
     counterpartyUserId: row.buyerId,
   });
 
+  await recordAnalyticsEvent(tx, {
+    eventName: 'transaction_completed',
+    userId: row.buyerId,
+    subjectType: 'transaction',
+    subjectId: transactionId,
+    metadata: { listingId: row.listingId, amountCents: row.amountCents },
+    idempotencyKey: `transaction-completed:${transactionId}`,
+  });
+
   // The listing is done — this is the one terminal success state.
   await tx
     .update(listings)
@@ -540,6 +792,27 @@ export async function completeIfBothTracksDone(tx: Tx, transactionId: string): P
     });
   }
 
+  // A completed auction supersedes any fallback offer that is still waiting for
+  // an answer. Keep the record for audit history, but remove the buyer action.
+  const pendingFallbacks = await tx
+    .select({ id: auctionFallbackOffers.id, buyerId: auctionFallbackOffers.buyerId })
+    .from(auctionFallbackOffers)
+    .where(and(eq(auctionFallbackOffers.listingId, row.listingId), eq(auctionFallbackOffers.status, 'pending')));
+  await tx
+    .update(auctionFallbackOffers)
+    .set({ status: 'superseded', respondedAt: sql`now()`, updatedAt: sql`now()` })
+    .where(and(eq(auctionFallbackOffers.listingId, row.listingId), eq(auctionFallbackOffers.status, 'pending')));
+  for (const offer of pendingFallbacks) {
+    await notify({
+      tx,
+      userId: offer.buyerId,
+      event: 'auction_fallback_offer_expired_buyer',
+      data: { listingTitle: row.listingTitle },
+      linkUrl: `/listings/${row.listingId}`,
+      idempotencyKey: `fallback_superseded:${row.listingId}:${offer.id}`,
+    });
+  }
+
   for (const userId of [row.buyerId, row.sellerId]) {
     await notify({
       tx,
@@ -564,21 +837,59 @@ export interface TerminateInput {
   actorUserId?: string | null;
   /** Skip auction runner-up promotion when the seller is at fault. */
   promoteNext?: boolean;
+  /** Require the relevant deadline to have elapsed at the final mutation. */
+  dueAt?: 'payment' | 'seller_dropoff';
 }
 
 /**
  * End a transaction attempt unsuccessfully, record the objective facts, and either
  * hand an auction to its next bid or return a fixed-price listing to the seller.
  *
+ * Automatic expiry takes a row lock before reading the state. This serializes expiry
+ * with disputes and payment confirmation, while the conditional UPDATE remains a
+ * second line of defence if another writer changed the row before the mutation.
+ *
  * IDEMPOTENT: the conditional UPDATE means a duplicate job delivery no-ops.
  */
 export async function terminateTransaction(input: TerminateInput): Promise<boolean> {
   const { tx, transactionId, reason } = input;
+
+  // Do not read the state and then decide outside the row's lock. A dispute or payment
+  // confirmation can otherwise commit between those two operations while leaving the
+  // transaction rollup open.
+  const locked = await tx
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.id, transactionId))
+    .for('update')
+    .limit(1);
+  if (locked[0] === undefined) throw new NotFoundError('Deal not found');
+
   const row = await load(tx, transactionId);
-  if (row.state !== 'open') return false;
+  if (row.state !== 'open' || row.disputeState === 'open') return false;
+
+  // The payment expiry handler may have read "not confirmed" before a concurrent
+  // confirmation committed. Re-check the current locked row before assigning blame.
+  if (input.dueAt === 'payment' && row.paymentState === 'confirmed') return false;
+  if (
+    input.dueAt === 'seller_dropoff'
+    && (row.paymentState !== 'confirmed' || row.custodyState !== 'awaiting_dropoff')
+  ) return false;
 
   const toState = REASON_TO_STATE[reason];
   assertTransactionTransition('open', toState);
+
+  const duePredicate = input.dueAt === 'payment'
+    ? lte(transactions.paymentDeadlineAt, sql`now()`)
+    : input.dueAt === 'seller_dropoff'
+      ? lte(transactions.sellerDropoffDeadlineAt, sql`now()`)
+      : undefined;
+  const automaticStatePredicate = input.dueAt === undefined
+    ? undefined
+    : and(
+      ne(transactions.disputeState, 'open'),
+      eq(transactions.paymentState, row.paymentState),
+    );
 
   const updated = await tx
     .update(transactions)
@@ -590,10 +901,24 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
       terminatedReason: reason,
       updatedAt: sql`now()`,
     })
-    .where(and(eq(transactions.id, transactionId), eq(transactions.state, 'open')))
+    .where(and(
+      eq(transactions.id, transactionId),
+      eq(transactions.state, 'open'),
+      duePredicate,
+      automaticStatePredicate,
+    ))
     .returning({ id: transactions.id });
 
   if (updated.length === 0) return false; // someone else got there first
+
+  await recordAnalyticsEvent(tx, {
+    eventName: 'transaction_terminated',
+    userId: input.actorUserId ?? null,
+    subjectType: 'transaction',
+    subjectId: transactionId,
+    metadata: { listingId: row.listingId, reason, actorRole: input.actorRole },
+    idempotencyKey: `transaction-terminated:${transactionId}`,
+  });
 
   await recordTransition(tx, {
     transactionId,
@@ -669,6 +994,14 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
       linkUrl: `/deals/${transactionId}`,
       idempotencyKey: `lapsed_buyer:${transactionId}`,
     });
+    await notify({
+      tx,
+      userId: row.sellerId,
+      event: 'payment_window_lapsed_seller',
+      data: { listingTitle: row.listingTitle },
+      linkUrl: `/deals/${transactionId}`,
+      idempotencyKey: `lapsed_seller_payment:${transactionId}`,
+    });
   }
   if (toState === 'reneged_seller') {
     await notify({
@@ -703,6 +1036,16 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
   // ladder when the buyer reneges, preserving the existing runner-up behavior.
   const shouldPromote = isAuction && (input.promoteNext ?? toState === 'reneged_buyer');
 
+  // There is no open deal while the next bidder is deciding whether to accept a
+  // fallback offer. Clear the pointer atomically; the acceptance path will set it
+  // again when it opens the next transaction.
+  if (shouldPromote) {
+    await tx
+      .update(listings)
+      .set({ activeTransactionId: null, updatedAt: sql`now()` })
+      .where(eq(listings.id, row.listingId));
+  }
+
   // If an auction promotion is coming, custody stays with the item and is re-linked by
   // the promotion job. A fixed-price failure has no next candidate, so the item returns
   // to the seller and may be relisted according to their setting.
@@ -736,7 +1079,7 @@ export async function promoteNextCandidate(
   tx: Tx,
   listingId: string,
   failedTransactionId: string,
-): Promise<{ promoted: boolean; transactionId?: string }> {
+): Promise<{ promoted: boolean; transactionId?: string; fallbackOfferId?: string }> {
   const listingRows = await tx.select().from(listings).where(eq(listings.id, listingId)).limit(1);
   const listing = listingRows[0];
   if (listing === undefined) return { promoted: false };
@@ -771,6 +1114,113 @@ export async function promoteNextCandidate(
     .where(and(eq(transactions.listingId, listingId), eq(transactions.state, 'open')))
     .limit(1);
   if (openRows[0] !== undefined) return { promoted: false };
+
+  // v1 requires an explicit acceptance step. Keep the legacy immediate-promotion
+  // implementation below available behind the rollback scope for historical rows
+  // and compatibility tests, but never open a buyer transaction automatically in v1.
+  if (isV1Launch()) {
+    const pending = await tx
+      .select({ id: auctionFallbackOffers.id })
+      .from(auctionFallbackOffers)
+      .where(and(eq(auctionFallbackOffers.listingId, listingId), eq(auctionFallbackOffers.status, 'pending')))
+      .limit(1);
+    if (pending[0] !== undefined) return { promoted: false, fallbackOfferId: pending[0].id };
+
+    const failed = await tx
+      .select({ buyerId: transactions.buyerId })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.listingId, listingId),
+          ne(transactions.state, 'completed'),
+          ne(transactions.state, 'open'),
+        ),
+      );
+    const excluded = new Set(failed.map((f) => f.buyerId));
+    const spentFallbacks = await tx
+      .select({ buyerId: auctionFallbackOffers.buyerId })
+      .from(auctionFallbackOffers)
+      .where(and(
+        eq(auctionFallbackOffers.listingId, listingId),
+        inArray(auctionFallbackOffers.status, ['accepted', 'declined', 'expired', 'superseded']),
+      ));
+    for (const fallback of spentFallbacks) excluded.add(fallback.buyerId);
+
+    const candidate = await nextFromBidLadder(tx, listingId, excluded);
+    if (candidate === null) {
+      await resolveListingAfterFailure(tx, listingId, listing.autoRelistOnRenege);
+      return { promoted: false };
+    }
+
+    const now = await dbNow(tx);
+    const expiresAt = new Date(now.getTime() + WINDOWS.auctionFallback.offerMs);
+    const inserted = await tx
+      .insert(auctionFallbackOffers)
+      .values({
+        listingId,
+        bidId: candidate.bidId,
+        sellerId: listing.sellerId,
+        buyerId: candidate.buyerId,
+        amountCents: candidate.amountCents,
+        fulfillmentPath: candidate.fulfillmentPath,
+        deliveryOptionId: candidate.deliveryOptionId ?? null,
+        settlementMethod: candidate.settlementMethod ?? null,
+        relayStoreId: candidate.relayStoreId ?? null,
+        status: 'pending',
+        expiresAt,
+      })
+      .onConflictDoNothing()
+      .returning({ id: auctionFallbackOffers.id });
+
+    const offerId = inserted[0]?.id;
+    if (offerId === undefined) {
+      const existing = await tx
+        .select({ id: auctionFallbackOffers.id })
+        .from(auctionFallbackOffers)
+        .where(and(eq(auctionFallbackOffers.listingId, listingId), eq(auctionFallbackOffers.status, 'pending')))
+        .limit(1);
+      return { promoted: false, fallbackOfferId: existing[0]?.id };
+    }
+
+    const expiresText = expiresAt.toLocaleString('en-TT');
+    await notify({
+      tx,
+      userId: candidate.buyerId,
+      event: 'auction_fallback_offer_buyer',
+      data: {
+        listingTitle: listing.title,
+        amount: formatMoney(candidate.amountCents),
+        expiresAt: expiresText,
+      },
+      linkUrl: `/listings/${listingId}`,
+      idempotencyKey: `fallback_offer:${offerId}:buyer`,
+    });
+    await notify({
+      tx,
+      userId: listing.sellerId,
+      event: 'auction_fallback_offer_seller',
+      data: {
+        listingTitle: listing.title,
+        amount: formatMoney(candidate.amountCents),
+        expiresAt: expiresText,
+      },
+      linkUrl: `/listings/${listingId}`,
+      idempotencyKey: `fallback_offer:${offerId}:seller`,
+    });
+    await tx.insert(listingAuditEvents).values({
+      listingId,
+      actorUserId: null,
+      eventType: 'auction_fallback_offer_created',
+      metadata: { offerId, bidId: candidate.bidId, buyerId: candidate.buyerId, amountCents: candidate.amountCents, expiresAt: expiresAt.toISOString() },
+    });
+    await enqueue(
+      tx,
+      'auction:fallback_expire',
+      { offerId },
+      { jobKey: `auction_fallback_expire:${offerId}`, runAt: expiresAt },
+    );
+    return { promoted: false, fallbackOfferId: offerId };
+  }
 
   // Everyone who has already failed on this listing is excluded from re-promotion.
   const failed = await tx
@@ -814,6 +1264,7 @@ export async function promoteNextCandidate(
           listingTitle: listing.title,
           paymentWindowHours: listing.paymentWindowHours,
           settlementMethod: candidate.settlementMethod,
+          commitmentAcknowledged: true,
           relayStoreId: candidate.relayStoreId ?? null,
         });
 
@@ -850,7 +1301,7 @@ export async function promoteNextCandidate(
         // authoritative promotion, so this delivery has nothing left to do.
         return { promoted: false };
       }
-      if (!(error instanceof CustodyConflictError)) throw error;
+      if (!(error instanceof CustodyConflictError) && !(error instanceof MarketplaceEligibilityError)) throw error;
       // Everything this candidate wrote has been rolled back to the savepoint.
       console.warn(
         `[promote] listing ${listingId}: candidate ${candidate.buyerId} could not take ` +
@@ -859,6 +1310,242 @@ export async function promoteNextCandidate(
       excluded.add(candidate.buyerId);
     }
   }
+}
+
+/** Accept a pending auction fallback offer and open exactly one transaction. */
+export async function acceptAuctionFallbackOffer(
+  tx: Tx,
+  offerId: string,
+  buyerId: string,
+): Promise<{ transactionId: string }> {
+  const now = await dbNow(tx);
+  const accepted = await tx
+    .update(auctionFallbackOffers)
+    .set({ status: 'accepted', respondedAt: sql`now()`, updatedAt: sql`now()` })
+    .where(and(
+      eq(auctionFallbackOffers.id, offerId),
+      eq(auctionFallbackOffers.buyerId, buyerId),
+      eq(auctionFallbackOffers.status, 'pending'),
+      gt(auctionFallbackOffers.expiresAt, now),
+    ))
+    .returning();
+  const offer = accepted[0];
+  if (offer === undefined) {
+    const existing = await tx
+      .select({ buyerId: auctionFallbackOffers.buyerId, status: auctionFallbackOffers.status, expiresAt: auctionFallbackOffers.expiresAt })
+      .from(auctionFallbackOffers)
+      .where(eq(auctionFallbackOffers.id, offerId))
+      .limit(1);
+    if (existing[0]?.buyerId !== buyerId) throw new ForbiddenError('This fallback offer is not addressed to you');
+    throw new ConflictError(
+      existing[0]?.status === 'pending' ? 'This fallback offer has expired' : 'This fallback offer is no longer available',
+      existing[0]?.status === 'pending' ? 'fallback_offer_expired' : 'fallback_offer_closed',
+    );
+  }
+
+  const listingRows = await tx.select().from(listings).where(eq(listings.id, offer.listingId)).limit(1);
+  const listing = listingRows[0];
+  if (listing === undefined || listing.saleType !== 'auction') {
+    throw new ConflictError('This auction is no longer available');
+  }
+  const openRows = await tx
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(and(eq(transactions.listingId, offer.listingId), eq(transactions.state, 'open')))
+    .limit(1);
+  if (openRows[0] !== undefined) throw new ConflictError('This auction already has an active buyer');
+
+  try {
+    const opened = await openTransaction({
+      tx,
+      listingId: offer.listingId,
+      sellerId: offer.sellerId,
+      buyerId: offer.buyerId,
+      amountCents: offer.amountCents,
+      fulfillmentPath: offer.fulfillmentPath,
+      deliveryOptionId: offer.deliveryOptionId,
+      source: 'auction_runner_up',
+      winningBidId: offer.bidId,
+      listingTitle: listing.title,
+      paymentWindowHours: listing.paymentWindowHours,
+      settlementMethod: offer.settlementMethod,
+      commitmentAcknowledged: true,
+      relayStoreId: offer.relayStoreId,
+    });
+    await tx
+      .update(auctionFallbackOffers)
+      .set({ transactionId: opened.id, updatedAt: sql`now()` })
+      .where(eq(auctionFallbackOffers.id, offer.id));
+    await tx.update(bids).set({ status: 'won' }).where(eq(bids.id, offer.bidId));
+    await tx.insert(listingAuditEvents).values({
+      listingId: offer.listingId,
+      actorUserId: buyerId,
+      eventType: 'auction_fallback_offer_accepted',
+      metadata: { offerId: offer.id, transactionId: opened.id, bidId: offer.bidId },
+    });
+    return { transactionId: opened.id };
+  } catch (error) {
+    // If opening failed after the offer was marked accepted, roll the offer back
+    // so the buyer can retry (the surrounding transaction will normally do this).
+    throw error;
+  }
+}
+
+/** Expire one fallback offer and immediately offer the item to the next bidder. */
+export async function expireAuctionFallbackOffer(
+  tx: Tx,
+  offerId: string,
+): Promise<{ expired: boolean; nextOfferId?: string }> {
+  const now = await dbNow(tx);
+  const expired = await tx
+    .update(auctionFallbackOffers)
+    .set({ status: 'expired', respondedAt: sql`now()`, updatedAt: sql`now()` })
+    .where(and(
+      eq(auctionFallbackOffers.id, offerId),
+      eq(auctionFallbackOffers.status, 'pending'),
+      lt(auctionFallbackOffers.expiresAt, now),
+    ))
+    .returning({ id: auctionFallbackOffers.id, listingId: auctionFallbackOffers.listingId, buyerId: auctionFallbackOffers.buyerId });
+  const offer = expired[0];
+  if (offer === undefined) return { expired: false };
+
+  const listingRows = await tx.select({ title: listings.title }).from(listings).where(eq(listings.id, offer.listingId)).limit(1);
+  await notify({
+    tx,
+    userId: offer.buyerId,
+    event: 'auction_fallback_offer_expired_buyer',
+    data: { listingTitle: listingRows[0]?.title ?? 'the auction' },
+    linkUrl: `/listings/${offer.listingId}`,
+    idempotencyKey: `fallback_expired:${offer.id}`,
+  });
+  const next = await promoteNextCandidate(tx, offer.listingId, offer.id);
+  return { expired: true, nextOfferId: next.fallbackOfferId };
+}
+
+/**
+ * Invalidate one auction bid from the admin console. The bid is never deleted;
+ * the ladder is recomputed from non-void bids and a winning transaction is
+ * terminated before the next fallback offer is generated.
+ */
+export async function invalidateAuctionBid(
+  tx: Tx,
+  input: { bidId: string; adminUserId: string; reason: string },
+): Promise<{ changed: boolean; listingId?: string }> {
+  const reason = input.reason.trim();
+  if (reason.length < 10 || reason.length > 500) {
+    throw new ConflictError('A bid invalidation reason of 10–500 characters is required', 'admin_reason_required');
+  }
+  const rows = await tx
+    .select({ bid: bids, listing: listings })
+    .from(bids)
+    .innerJoin(listings, eq(listings.id, bids.listingId))
+    .where(eq(bids.id, input.bidId))
+    .limit(1);
+  const current = rows[0];
+  if (current === undefined) throw new NotFoundError('Bid not found');
+  const before = {
+    status: current.bid.status,
+    amountCents: current.bid.amountCents,
+    bidderId: current.bid.bidderId,
+    listingId: current.bid.listingId,
+  };
+  if (current.bid.status === 'void' || current.bid.status === 'retracted') {
+    await recordAdminAudit(tx, {
+      actorUserId: input.adminUserId,
+      targetType: 'bid',
+      targetId: input.bidId,
+      action: 'invalidate_bid',
+      reason,
+      outcome: 'rejected',
+      beforeContext: before,
+      afterContext: before,
+      requestMetadata: { source: 'admin_ui', rejection: 'already_invalid' },
+    });
+    return { changed: false, listingId: current.bid.listingId };
+  }
+
+  const updated = await tx
+    .update(bids)
+    .set({ status: 'void' })
+    .where(and(eq(bids.id, input.bidId), ne(bids.status, 'void'), ne(bids.status, 'retracted')))
+    .returning({ id: bids.id });
+  if (updated.length === 0) return { changed: false, listingId: current.bid.listingId };
+
+  await tx
+    .update(listings)
+    .set({
+      currentBidCents: sql`(
+        select amount_cents from bids
+        where listing_id = ${current.bid.listingId}
+          and status not in ('void', 'retracted')
+        order by amount_cents desc
+        limit 1
+      )`,
+      currentBidId: sql`(
+        select id from bids
+        where listing_id = ${current.bid.listingId}
+          and status not in ('void', 'retracted')
+        order by amount_cents desc
+        limit 1
+      )`,
+      bidCount: sql`(
+        select count(*)::int from bids
+        where listing_id = ${current.bid.listingId}
+          and status not in ('void', 'retracted')
+      )`,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(listings.id, current.bid.listingId));
+
+  const openRows = await tx
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(and(eq(transactions.listingId, current.bid.listingId), eq(transactions.winningBidId, input.bidId), eq(transactions.state, 'open')))
+    .limit(1);
+  if (openRows[0] !== undefined) {
+    await terminateTransaction({
+      tx,
+      transactionId: openRows[0].id,
+      reason: 'admin',
+      actorRole: 'admin',
+      actorUserId: input.adminUserId,
+      promoteNext: true,
+    });
+  } else {
+    const fallbackRows = await tx
+      .select({ id: auctionFallbackOffers.id })
+      .from(auctionFallbackOffers)
+      .where(and(eq(auctionFallbackOffers.bidId, input.bidId), eq(auctionFallbackOffers.status, 'pending')))
+      .limit(1);
+    if (fallbackRows[0] !== undefined) {
+      await tx.update(auctionFallbackOffers).set({ status: 'declined', respondedAt: sql`now()`, updatedAt: sql`now()` }).where(eq(auctionFallbackOffers.id, fallbackRows[0].id));
+      await promoteNextCandidate(tx, current.bid.listingId, input.bidId);
+    }
+  }
+
+  await notify({
+    tx,
+    userId: current.bid.bidderId,
+    event: 'auction_bid_invalidated_buyer',
+    data: {
+      listingTitle: current.listing.title,
+      amount: formatMoney(current.bid.amountCents),
+      reason,
+    },
+    linkUrl: `/listings/${current.bid.listingId}`,
+    idempotencyKey: `bid_invalidated:${input.bidId}`,
+  });
+  await recordAdminAudit(tx, {
+    actorUserId: input.adminUserId,
+    targetType: 'bid',
+    targetId: input.bidId,
+    action: 'invalidate_bid',
+    reason,
+    beforeContext: before,
+    afterContext: { ...before, status: 'void' },
+    requestMetadata: { source: 'admin_ui' },
+  });
+  return { changed: true, listingId: current.bid.listingId };
 }
 
 interface Candidate {
@@ -899,7 +1586,7 @@ async function nextFromBidLadder(
   for (const row of rows) {
     if (excluded.has(row.bidderId)) continue;
     // A runner-up owes their OWN bid, not the winner's — and only if it clears reserve.
-    if (listing.reserve !== null && row.amountCents < listing.reserve) return null;
+    if (!isV1Launch() && listing.reserve !== null && row.amountCents < listing.reserve) return null;
     return {
       buyerId: row.bidderId,
       amountCents: row.amountCents,
@@ -924,6 +1611,12 @@ async function resolveListingAfterFailure(
   listingId: string,
   autoRelist: boolean,
 ): Promise<void> {
+  const listingMeta = await tx
+    .select({ saleType: listings.saleType })
+    .from(listings)
+    .where(eq(listings.id, listingId))
+    .limit(1);
+  const saleType = listingMeta[0]?.saleType;
   // ★ Nobody is left to hand the item to. If it is sitting on a shelf, it becomes the
   //   seller's to reclaim — an unpaid item must never become the store's problem.
   const stranded = await tx
@@ -967,10 +1660,12 @@ async function resolveListingAfterFailure(
     }
   }
 
-  const status = statusAfterFailedAttempt({
-    hasRemainingCandidates: false,
-    autoRelistOnRenege: autoRelist,
-  });
+  // An auction has no safe "relisted" state: its authoritative close time has
+  // already passed and a fresh auction must be a new draft. v1 therefore ends an
+  // exhausted auction as expired, while fixed-price rows retain seller auto-relist.
+  const status = isV1Launch() && saleType === 'auction'
+    ? 'expired'
+    : statusAfterFailedAttempt({ hasRemainingCandidates: false, autoRelistOnRenege: autoRelist });
 
   await tx
     .update(listings)
@@ -1003,13 +1698,75 @@ export interface LoadedTransaction {
   state: (typeof transactions.$inferSelect)['state'];
   paymentState: (typeof transactions.$inferSelect)['paymentState'];
   custodyState: (typeof transactions.$inferSelect)['custodyState'];
+  handoffState: HandoffState;
+  disputeState: (typeof transactions.$inferSelect)['disputeState'];
+  handedOverAt: Date | null;
+  receivedAt: Date | null;
+  receiptDeadlineAt: Date | null;
   fulfillmentPath: FulfillmentPath;
+  meetupLocationId: string | null;
   settlementMethod: string | null;
   amountCents: number;
   paymentDeadlineAt: Date;
   sellerDropoffDeadlineAt: Date | null;
   claimId: string | null;
   offerId: string | null;
+}
+
+/**
+ * Re-arm deadline jobs after support resumes an open transaction. Jobs may have been
+ * consumed while a dispute was open, so the resume transition must restore work from
+ * the transaction's current tracks and clocks in the same database transaction.
+ */
+export async function rescheduleTransactionDeadlineJobs(
+  tx: Tx,
+  transaction: Pick<
+    LoadedTransaction,
+    | 'id'
+    | 'paymentState'
+    | 'paymentDeadlineAt'
+    | 'sellerDropoffDeadlineAt'
+    | 'custodyState'
+    | 'fulfillmentPath'
+    | 'handoffState'
+    | 'receiptDeadlineAt'
+  >,
+): Promise<void> {
+  if (transaction.paymentState !== 'confirmed') {
+    await enqueue(
+      tx,
+      'transaction:payment_window',
+      { transactionId: transaction.id },
+      { jobKey: `payment_window:${transaction.id}`, runAt: transaction.paymentDeadlineAt },
+    );
+  }
+
+  if (
+    transaction.paymentState === 'confirmed'
+    && transaction.custodyState === 'awaiting_dropoff'
+    && transaction.sellerDropoffDeadlineAt !== null
+  ) {
+    await enqueue(
+      tx,
+      'transaction:dropoff_window',
+      { transactionId: transaction.id },
+      { jobKey: `dropoff_window:${transaction.id}`, runAt: transaction.sellerDropoffDeadlineAt },
+    );
+  }
+
+  if (
+    transaction.fulfillmentPath === 'cash_meetup'
+    && transaction.paymentState === 'confirmed'
+    && transaction.handoffState === 'seller_handed_over'
+    && transaction.receiptDeadlineAt !== null
+  ) {
+    await enqueue(
+      tx,
+      'transaction:receipt_window',
+      { transactionId: transaction.id },
+      { jobKey: `receipt_window:${transaction.id}`, runAt: transaction.receiptDeadlineAt },
+    );
+  }
 }
 
 async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {
@@ -1033,7 +1790,13 @@ async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {
     state: row.t.state,
     paymentState: row.t.paymentState,
     custodyState: row.t.custodyState,
+    handoffState: row.t.handoffState,
+    disputeState: row.t.disputeState,
+    handedOverAt: row.t.handedOverAt,
+    receivedAt: row.t.receivedAt,
+    receiptDeadlineAt: row.t.receiptDeadlineAt,
     fulfillmentPath: row.t.fulfillmentPath,
+    meetupLocationId: row.t.meetupLocationId,
     settlementMethod: row.t.settlementMethod,
     amountCents: row.t.amountCents,
     paymentDeadlineAt: row.t.paymentDeadlineAt,
@@ -1047,4 +1810,12 @@ export { load as loadTransaction, isFailedTransactionState };
 
 export class NotFoundError extends Error {}
 export class ForbiddenError extends Error {}
-export class ConflictError extends Error {}
+export class ConflictError extends Error {
+  readonly code: string;
+
+  constructor(message: string, code = 'conflict') {
+    super(message);
+    this.name = 'ConflictError';
+    this.code = code;
+  }
+}

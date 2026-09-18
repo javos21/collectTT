@@ -10,19 +10,21 @@ export function SettlementFields({
   deliveryOptions,
   paymentOptions,
   relayCandidates,
+  v1 = true,
 }: {
   idPrefix: string;
   fieldPrefix?: string;
   deliveryOptions: readonly { id: string; label: string; requiresStore: boolean }[];
   paymentOptions: readonly { key: string; label: string }[];
   relayCandidates: readonly RelayStore[];
+  v1?: boolean;
 }) {
   const [selectedDeliveryOptionId, setSelectedDeliveryOptionId] = useState('');
 
   if (deliveryOptions.length === 0) {
     return (
       <p className="buybox__note">
-        No delivery option is available right now — the seller&apos;s store pickup
+        No {v1 ? 'meetup' : 'delivery'} option is available right now — the seller&apos;s store pickup
         locations cannot take this item.
       </p>
     );
@@ -40,13 +42,12 @@ export function SettlementFields({
           How do you want to settle this? <span className="required-mark" aria-hidden="true">*</span>
         </p>
         <p id={helpId} className="buybox__settlement-help">
-          Choose one delivery option and one payment method. Both are required to claim
-          this item or make an offer.
+          Choose one {v1 ? 'meetup' : 'delivery'} option and one payment method. Both are required to {v1 ? 'reserve' : 'claim'} this item or make an offer.
         </p>
       </div>
 
       <label htmlFor={deliveryId}>
-        Delivery option <span className="required-mark" aria-hidden="true">*</span>
+        {v1 ? 'Meetup' : 'Delivery'} option <span className="required-mark" aria-hidden="true">*</span>
       </label>
       <select
         id={deliveryId}
@@ -56,7 +57,7 @@ export function SettlementFields({
         aria-describedby={helpId}
         required
       >
-        <option value="" disabled>Select a delivery option</option>
+        <option value="" disabled>Select a {v1 ? 'meetup' : 'delivery'} option</option>
         {deliveryOptions.map((option) => (
           <option key={option.id} value={option.id}>
             {option.label}

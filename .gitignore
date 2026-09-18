@@ -19,6 +19,9 @@ coverage/
 .playwright-mcp/
 .playwright-cli/
 
+# Generated QA and readiness artifacts (screenshots, run logs, probe scripts).
+output/
+
 .vscode/
 .idea/
 

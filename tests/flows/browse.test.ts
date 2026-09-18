@@ -48,7 +48,7 @@ const mine = { browseTag: TAG } as const;
 
 beforeAll(async () => {
   await db.insert(users).values({ id: seller, name: seller, email: `${seller}@test.local`, emailVerified: true });
-  await db.insert(profiles).values({ userId: seller, displayName: seller, handle: seller });
+  await db.insert(profiles).values({ userId: seller, displayName: seller, handle: seller, phoneE164: `+1868555${SUFFIX.replace(/\D/g, '').padEnd(4, '0').slice(0, 4)}` });
   await db.insert(reputationCounters).values({ userId: seller });
 
   // 5 straight sales + 3 auctions, all tagged.
@@ -107,6 +107,14 @@ describe('browseListings', () => {
 
     const ids1 = new Set(page1.rows.map((r) => r.id));
     expect(page3.rows.some((r) => ids1.has(r.id))).toBe(false);
+  });
+
+  it('supports stable keyset cursors without repeating rows', async () => {
+    const page1 = await browseListings({ attributes: mine, pageSize: 3, sort: 'newest' });
+    expect(page1.nextCursor).toBeDefined();
+    const page2 = await browseListings({ attributes: mine, pageSize: 3, sort: 'newest', cursor: page1.nextCursor });
+    expect(page2.rows.length).toBeGreaterThan(0);
+    expect(page2.rows.some((row) => page1.rows.some((first) => first.id === row.id))).toBe(false);
   });
 
   it('supports delivery, payment, price, and sort facets', async () => {

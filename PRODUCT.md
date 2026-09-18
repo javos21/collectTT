@@ -1,101 +1,74 @@
-# Product
+# CollectTT product contract
 
 <!-- impeccable:product-schema 1 -->
 
+This file is the concise product contract for the v1 marketplace. The complete,
+normative requirements and acceptance scenarios live in
+[COLLECTTT_PRODUCT_SCOPE.md](COLLECTTT_PRODUCT_SCOPE.md).
+
 ## Platform
 
-web
+CollectTT is a free web marketplace for trading cards, comics, and collectibles in
+Trinidad & Tobago. Its promise is to make selling easier than scattered social posts
+while keeping ordinary payments peer to peer.
 
-## Users
+The loop is **List → Discover → Commit → Transact → Build Trust → Repeat**.
 
-Collectors, buyers, sellers, Store owners and staff, and platform administrators in Trinidad
-& Tobago. Buyers and sellers use the product to discover and coordinate collectible
-deals; Store staff use the custody board to receive, hold, and release items; platform
-administrators will operate the support and moderation console required for launch.
+## Users and identity
 
-## Product Purpose
+A marketplace user can buy and sell through one account. The private account name is
+used for account operations; the public display name is the only public identity
+field. A phone number is required during onboarding. Phone numbers stay private before
+commitment and are disclosed only to the two
+transaction parties or an authorized, audited administrator.
 
-CollectTT helps people trade cards, comics, and collectibles with visible trust and
-coordination. It supports the complete deal lifecycle while keeping payment peer to
-peer: the platform never holds buyer or seller funds.
+Support and administrators use explicit, permission-checked actions. Every material
+admin action records actor, target, reason, before/after context, and timestamp in an
+append-only audit trail. Admin impersonation is not supported.
 
-## Positioning
+## v1 capabilities
 
-The product combines a buyer/seller transaction state with a separate item-custody
-state, including Store custody and payment-gated release. This makes the deal's
-money track and physical item track explicit instead of pretending they are one status.
+- Manual fixed-price and auction listings with title, description, category/condition,
+  image(s), price or starting bid, and predefined duration.
+- Drafts, duplicate/relist into a new record, automatic expiration, and Sold outside
+  CollectTT closure.
+- Global keyword search, practical filters, stable pagination, and deterministic
+  Newest/Ending Soon sorting.
+- Seller-defined reusable meetup and payment choices, with cash meetup and direct bank
+  transfer as the v1 payment methods. CollectTT does not store bank details or funds.
+- Fixed-price listings may accept buyer offers below the asking price.
+- Deliberate atomic fixed-price reservation and binding bids with two-minute
+  anti-sniping, winner/default fallback, deadlines, reminders, disputes, and
+  idempotent automation.
+- Transaction event timelines, factual behavioral Trust Snapshots, progressive
+  restrictions, contextual reporting/support, transactional email, and admin tools.
+- Marketplace, direct-payment, privacy, and authenticity disclaimers in the relevant
+  flows.
 
-## Operating Context
+## Explicit v1 non-goals
 
-People browse listings, claim or bid on an item, coordinate payment directly, and may
-drop the item at a nominated Store. Sellers and buyers need quick status scanning;
-Store staff need an operational board with codes, shelf clocks, and clear counter actions.
+Store staff, store applications, or custody entry points; reserve prices; auction buyouts;
+proxy/max bids; self-service bid retraction;
+seller-authored payment windows; ratings, written reviews, or numerical trust scores;
+Pro subscriptions; raffles; Featured Listings; Collect Protect; SMS/WhatsApp;
+in-app chat; payment holding; government-ID/KYC; recommendation feeds; bulk imports;
+inventory suites; storefront customization; bank-account storage; automatic
+counterfeit detection/takedown; and administrator impersonation.
 
-## Capabilities and Constraints
+Featured Listings are v1.5. Collect Protect and SMS are v2 candidates. Deferred features
+must not be placed on the v1 critical path.
 
-The existing app includes Google-first authentication, verified email/password accounts,
-password recovery, listings, category-specific filters, image uploads, straight sales,
-auctions, payment handshakes, reputation, ratings, Store custody, drop-off
-codes, shelf clocks, and store controls. Preserve all existing routes, server actions,
-state meanings, and accessibility/native browser affordances.
+## Legacy compatibility
 
-## Account & Store model
+Historical custody records, store applications, and their schema are retained for
+controlled inspection and migration planning. Fixed-price offers remain supported in
+v1; the single `COLLECTTT_LAUNCH_SCOPE=v1` flag prevents new writes into the remaining
+legacy paths. Setting the flag to `legacy` is reserved for rollback/testing.
 
-- A personal profile can buy and sell. Store staff do not need personal marketplace
-  profiles to perform their jobs.
-- A Store is a separate business profile with one or more invited staff members. Staff
-  share access to the Store workspace for dropped-off and picked-up inventory.
-- Any individual seller can choose a Store as a pickup or drop-off location while the
-  individual remains the seller and owns the listing reputation.
-- A Store may optionally sell Store-owned inventory as the seller. Consigned inventory
-  remains owned by the original seller.
-- `Verified Store` and `Verified Seller` are separate trust states. A paid Pro
-  subscription unlocks seller tools and raffle hosting; payment alone does not create
-  verification.
+## Design and legal principles
 
-## MVP monetization scope
-
-- Pro subscription is available to sellers and raffle hosts. It is not required for a
-  Store to provide basic pickup, drop-off, and custody operations.
-- A Pro member may host up to two free raffles per calendar month. Each additional
-  raffle in that month is a paid overage.
-- Store Pro tools, such as advanced inventory management, multiple locations, and
-  expanded staff controls, are outside the MVP.
-
-## Authentication & Communications
-
-- Better Auth remains self-hosted and stores users, sessions, linked identities, and
-  password credentials in CollectTT's Postgres database.
-- Google is the visually preferred sign-in path. Verified email/password registration
-  and password reset remain available as a secondary path.
-- Provider accounts may link only when the email addresses match and the required email
-  verification checks pass; one person should retain one stable CollectTT identity.
-- Brevo sends verification, password-reset, and transactional deal email in production.
-  Console delivery keeps those flows testable locally without sending real messages.
-- SMS is a future Brevo notification adapter, not an authentication dependency. It must
-  add phone verification, consent, delivery logging, and local compliance work before use.
-
-## Brand Commitments
-
-The name CollectTT and Trinidad & Tobago community context are fixed. The user's visual
-direction is a more premium, space-efficient interface with richer color, especially
-for product tags.
-
-## Evidence on Hand
-
-README.md, product-design-document.md, the current Next.js routes and components, and
-the existing visual implementation in src/app/globals.css. No fabricated testimonials,
-market data, or commercial claims.
-
-## Product Principles
-
-- Trust should be legible in the interface, not implied by marketing language.
-- Keep payment, custody, and responsibility states distinct.
-- Keep personal marketplace activity separate from shared Store operations.
-- Let collectors scan dense information quickly without losing confidence.
-- Make the community and local context feel specific, not like a generic marketplace.
-
-## Accessibility & Inclusion
-
-Maintain semantic HTML, keyboard access, visible focus, readable contrast, reduced-motion
-support, and responsive behavior for mobile web.
+Use semantic HTML, keyboard access, visible focus, readable contrast, responsive
+layouts, and useful loading/empty/error states. Direct-payment screens state that
+payments made directly to another user are not protected by CollectTT. Listing and
+trust surfaces state that CollectTT does not authenticate collectibles. Final legal
+wording requires review before launch.

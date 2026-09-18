@@ -1,20 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type RelayStore = { id: string; name: string; area: string };
-type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; defaultDays: number };
+type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; fulfillmentPath: string; defaultDays: number };
 
 export function DeliveryFields({
   deliveryOptions,
   relayStoreOptions,
+  defaultDeliveryOptionIds,
+  defaultRelayStoreIds,
+  onSelectionChange,
 }: {
   deliveryOptions: readonly DeliveryOption[];
   relayStoreOptions: RelayStore[];
+  defaultDeliveryOptionIds: readonly string[];
+  defaultRelayStoreIds: readonly string[];
+  onSelectionChange: (ids: string[]) => void;
 }) {
-  const defaultOption = deliveryOptions[0];
-  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>(defaultOption === undefined ? [] : [defaultOption.id]);
-  const storeOptionSelected = deliveryOptions.some((option) => option.requiresStore && selectedOptionIds.includes(option.id));
+  const configuredDefaults = deliveryOptions.filter((option) => defaultDeliveryOptionIds.includes(option.id)).map((option) => option.id);
+  const initialOptionIds = configuredDefaults.length > 0 ? configuredDefaults : deliveryOptions[0] === undefined ? [] : [deliveryOptions[0].id];
+  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>(initialOptionIds);
+  const storeOptionSelected = deliveryOptions.some((option) => (option.requiresStore || option.fulfillmentPath === 'relay') && selectedOptionIds.includes(option.id));
+
+  useEffect(() => {
+    onSelectionChange(selectedOptionIds);
+  }, [onSelectionChange, selectedOptionIds]);
 
   return (
     <>
@@ -26,7 +37,8 @@ export function DeliveryFields({
               type="checkbox"
               name="deliveryOptionIds"
               value={option.id}
-              defaultChecked={option.id === defaultOption?.id}
+              data-requires-store={option.requiresStore || option.fulfillmentPath === 'relay' ? 'true' : undefined}
+              defaultChecked={selectedOptionIds.includes(option.id)}
               onChange={(event) => {
                 setSelectedOptionIds((current) => event.target.checked
                   ? [...current, option.id]
@@ -57,7 +69,7 @@ export function DeliveryFields({
           <div className="choice-grid choice-grid--stores">
             {relayStoreOptions.map((store) => (
               <label className="choice-card" key={store.id} htmlFor={`store_${store.id}`}>
-                <input id={`store_${store.id}`} type="checkbox" name="relayStoreIds" value={store.id} />
+                <input id={`store_${store.id}`} type="checkbox" name="relayStoreIds" value={store.id} defaultChecked={defaultRelayStoreIds.includes(store.id)} />
                 <span><strong>{store.name}</strong><small>{store.area}</small></span>
               </label>
             ))}

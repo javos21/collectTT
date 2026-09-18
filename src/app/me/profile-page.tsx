@@ -5,6 +5,7 @@ import type { Key } from 'react-aria-components';
 import Link from 'next/link';
 import {
   BadgeCheck,
+  Bell,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -17,11 +18,14 @@ import {
   ShoppingBag,
   Trash2,
   WalletCards,
+  Phone,
+  UserRound,
 } from 'lucide-react';
 
 import { Tabs } from '@/components/application/tabs/tabs';
 import { NativeSelect } from '@/components/base/select/select-native';
 import { normalizeProfileTab, profileTabs } from '@/lib/profile-tabs';
+import { OPTIONAL_NOTIFICATION_PREFERENCES } from '@/notifications/events';
 
 type CounterData = {
   buyClaimsTotal: number;
@@ -48,6 +52,9 @@ type BidData = { id: string; title: string; amount: string; status: string; plac
 type OfferData = { id: string; title: string; amount: string; status: string; createdAt: string };
 type DealData = { id: string; title: string; role: string; amount: string; state: string; fulfillmentPath: string; createdAt: string; completedAt: string | null };
 type ReputationEventData = { id: string; type: string; title: string | null; occurredAt: string; transactionId: string | null; amount: string | null; role: string | null };
+type DeliveryOptionData = { id: string; key: string; label: string; description: string | null; requiresStore: boolean };
+type RelayStoreData = { id: string; name: string; area: string };
+type MeetupLocationData = { id: string; label: string; area: string; instructions: string | null; active: boolean };
 
 interface ProfilePageProps {
   signOutAction: () => Promise<void>;
@@ -60,6 +67,22 @@ interface ProfilePageProps {
   offers: OfferData[];
   deals: DealData[];
   reputationEvents: ReputationEventData[];
+  deliveryOptions: DeliveryOptionData[];
+  relayStores: RelayStoreData[];
+  identity: {
+    accountName: string;
+    displayName: string;
+    email: string;
+    phoneE164: string | null;
+  };
+  feedback?: { error?: string; success?: string };
+  savePhoneNumberAction: (formData: FormData) => Promise<void>;
+  meetupLocations: MeetupLocationData[];
+  sellerPreferences: { defaultDeliveryOptionIds: string[]; defaultRelayStoreIds: string[]; defaultPaymentMethods: string[] };
+  saveMeetupLocationAction: (formData: FormData) => Promise<void>;
+  saveSellerDefaultsAction: (formData: FormData) => Promise<void>;
+  notificationPreferences: Record<string, boolean>;
+  saveNotificationPreferencesAction: (formData: FormData) => Promise<void>;
 }
 
 const date = (value: string) => new Date(value).toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -90,6 +113,143 @@ const EmptyState: FC<{ icon: ReactNode; title: string; children: ReactNode }> = 
 const StatusPill: FC<{ value: string }> = ({ value }) => (
   <span className={`profile-status profile-status--${value}`}>{titleCase(value)}</span>
 );
+
+function AccountPanel(props: ProfilePageProps) {
+  const [showAddLocationForm, setShowAddLocationForm] = useState(false);
+  const initialDeliveryOptionIds = props.sellerPreferences.defaultDeliveryOptionIds.length > 0
+    ? props.sellerPreferences.defaultDeliveryOptionIds
+    : props.deliveryOptions.filter((option) => option.key === 'cash_meetup').map((option) => option.id);
+  const activeRelayStoreIds = new Set(props.relayStores.map((store) => store.id));
+  const initialRelayStoreIds = props.sellerPreferences.defaultRelayStoreIds.filter((id) => activeRelayStoreIds.has(id));
+  const [selectedDeliveryOptionIds, setSelectedDeliveryOptionIds] = useState<string[]>(initialDeliveryOptionIds);
+  const [selectedRelayStoreIds, setSelectedRelayStoreIds] = useState<string[]>(initialRelayStoreIds);
+  const meetupDeliverySelected = props.deliveryOptions.some((option) => option.key === 'cash_meetup' && selectedDeliveryOptionIds.includes(option.id));
+  const pickupDeliverySelected = props.deliveryOptions.some((option) => (option.requiresStore || option.key === 'relay') && selectedDeliveryOptionIds.includes(option.id));
+
+  return (
+    <div className="profile-content-stack">
+      {props.feedback?.error !== undefined && <p className="profile-account-feedback profile-account-feedback--error" role="alert">{props.feedback.error}</p>}
+      {props.feedback?.success !== undefined && <p className="profile-account-feedback profile-account-feedback--success" role="status">{props.feedback.success}</p>}
+      <section className="profile-panel profile-account-panel" aria-labelledby="profile-identity-title">
+        <div className="profile-panel__title"><UserRound size={19} aria-hidden="true" /><h3 id="profile-identity-title">Names and identity</h3></div>
+        <p className="profile-panel__note">Your display name is shown publicly. Your account name and email remain private.</p>
+        <div className="profile-identity-fields" aria-label="Identity details">
+          <div className="profile-identity-field"><span>Account name <small>Private</small></span><strong>{props.identity.accountName}</strong></div>
+          <div className="profile-identity-field"><span>Display name <small>Public</small></span><strong>{props.identity.displayName}</strong></div>
+          <div className="profile-identity-field"><span>Email <small>Private</small></span><strong>{props.identity.email}</strong></div>
+        </div>
+      </section>
+
+      <section className="profile-panel profile-account-panel" aria-labelledby="profile-seller-settings-title">
+        <div className="profile-panel__title"><ShoppingBag size={19} aria-hidden="true" /><h3 id="profile-seller-settings-title">Seller defaults</h3></div>
+        <p className="profile-panel__note">Save reusable delivery methods, meetup locations, and payment choices. Each listing still records its own choices.</p>
+        <form className="profile-account-form" action={props.saveSellerDefaultsAction}>
+          <div className="profile-form-section">
+            <h4>Default delivery methods</h4>
+            <p className="profile-form-section__note">Preselect the delivery choices you usually offer when creating a listing.</p>
+            <div className="profile-choice-row">
+              {props.deliveryOptions.map((option) => (
+                <label key={option.id}>
+                  <input
+                    type="checkbox"
+                    name="defaultDeliveryOptionIds"
+                    value={option.id}
+                    checked={selectedDeliveryOptionIds.includes(option.id)}
+                    onChange={(event) => setSelectedDeliveryOptionIds((current) => event.target.checked
+                      ? [...current, option.id]
+                      : current.filter((id) => id !== option.id))}
+                  />
+                  <span><strong>{option.label}</strong><small>{option.description ?? (option.requiresStore ? 'Buyer chooses a pickup store.' : 'Seller and buyer arrange delivery.')}</small></span>
+                </label>
+              ))}
+            </div>
+          </div>
+          {meetupDeliverySelected && <div className="profile-form-section">
+            <div className="profile-section-heading profile-section-heading--tight">
+              <div>
+                <h4>Meetup locations</h4>
+                <p className="profile-form-section__note">One active location is used automatically. With multiple locations, choose one per listing.</p>
+              </div>
+              <button
+                className="profile-add-location-toggle"
+                type="button"
+                aria-controls="add-meetup-location"
+                aria-expanded={showAddLocationForm}
+                onClick={() => setShowAddLocationForm((visible) => !visible)}
+              >
+                {showAddLocationForm ? 'Hide form' : 'Add a meetup location'}
+              </button>
+            </div>
+            <div className="profile-mini-list">
+              {props.meetupLocations.length === 0 && <p className="profile-panel__note">No saved locations yet.</p>}
+              {props.meetupLocations.map((location) => <div key={location.id} className="profile-mini-row"><span><strong>{location.label}</strong><small>{location.area}{location.active ? '' : ' · Inactive'}</small></span></div>)}
+            </div>
+          </div>}
+          {pickupDeliverySelected && <div className="profile-form-section">
+            <h4>Default pickup stores</h4>
+            <p className="profile-form-section__note">Preselect the stores you usually use for store pickup. You can change them for each listing.</p>
+            {props.relayStores.length === 0
+              ? <p className="profile-panel__note">No active pickup stores are available yet.</p>
+              : <div className="profile-choice-row">
+                {props.relayStores.map((store) => (
+                  <label key={store.id}>
+                    <input
+                      type="checkbox"
+                      name="defaultRelayStoreIds"
+                      value={store.id}
+                      checked={selectedRelayStoreIds.includes(store.id)}
+                      onChange={(event) => setSelectedRelayStoreIds((current) => event.target.checked
+                        ? [...current, store.id]
+                        : current.filter((id) => id !== store.id))}
+                    />
+                    <span><strong>{store.name}</strong><small>{store.area}</small></span>
+                  </label>
+                ))}
+              </div>}
+          </div>}
+          <div className="profile-form-section">
+            <h4>Default payment methods</h4>
+            <div className="profile-choice-row">
+              <label><input type="checkbox" name="defaultPaymentMethods" value="cash" defaultChecked={props.sellerPreferences.defaultPaymentMethods.includes('cash')} /><span>Cash</span></label>
+              <label><input type="checkbox" name="defaultPaymentMethods" value="bank_transfer" defaultChecked={props.sellerPreferences.defaultPaymentMethods.includes('bank_transfer')} /><span>Bank transfer</span></label>
+            </div>
+          </div>
+          <button type="submit">Save seller defaults</button>
+        </form>
+        {meetupDeliverySelected && <form className="profile-account-form profile-add-location-form" id="add-meetup-location" action={props.saveMeetupLocationAction} hidden={!showAddLocationForm}>
+          <h4>Add a meetup location</h4>
+          <label>Name<input name="label" placeholder="e.g. Trincity Mall" required minLength={2} maxLength={120} /></label>
+          <label>Area<input name="area" placeholder="e.g. Tunapuna" required minLength={2} maxLength={120} /></label>
+          <label>Instructions <span>Optional</span><input name="instructions" placeholder="Public meeting point details" maxLength={500} /></label>
+          <button type="submit">Add meetup location</button>
+        </form>}
+      </section>
+
+      <section className="profile-panel profile-account-panel" aria-labelledby="profile-phone-title">
+        <div className="profile-panel__title"><Phone size={19} aria-hidden="true" /><h3 id="profile-phone-title">Contact details</h3><span>Private</span></div>
+        <p className="profile-panel__note">Your mobile number is shared only with the other person after a transaction begins.</p>
+        <form className="profile-account-form" action={props.savePhoneNumberAction}>
+          <label>Mobile number<input name="phone" type="tel" defaultValue={props.identity.phoneE164 ?? ''} autoComplete="tel" inputMode="tel" maxLength={30} required /></label>
+          <button type="submit">Save mobile number</button>
+        </form>
+      </section>
+
+      <section className="profile-panel profile-account-panel" aria-labelledby="profile-notification-title">
+        <div className="profile-panel__title"><Bell size={19} aria-hidden="true" /><h3 id="profile-notification-title">Notification preferences</h3></div>
+        <p className="profile-panel__note">You can turn off optional email updates. Commitment, payment, deadline, dispute, security, and restriction emails always remain on.</p>
+        <form className="profile-account-form profile-notification-form" action={props.saveNotificationPreferencesAction}>
+          {OPTIONAL_NOTIFICATION_PREFERENCES.map(({ eventType, label, description }) => (
+            <label className="profile-notification-choice" key={eventType}>
+              <input type="checkbox" name={`email:${eventType}`} defaultChecked={props.notificationPreferences[eventType] !== false} />
+              <span><strong>{label}</strong><small>{description}</small></span>
+            </label>
+          ))}
+          <button type="submit">Save notification preferences</button>
+        </form>
+      </section>
+    </div>
+  );
+}
 
 function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'counters' | 'reputationEvents'>) {
   const completedDeals = (counters?.buyCompleted ?? 0) + (counters?.sellCompleted ?? 0);
@@ -161,7 +321,7 @@ function ActivityPanel({ claims, bids, offers, deals }: Pick<ProfilePageProps, '
       id: `claim-${claim.id}`,
       kind: 'claim',
       title: claim.title,
-      detail: `${fulfillmentLabel(claim.fulfillmentPath)} · Claimed ${date(claim.claimedAt)}`,
+      detail: `${fulfillmentLabel(claim.fulfillmentPath)} · Reserved ${date(claim.claimedAt)}`,
       occurredAt: claim.claimedAt,
       status: claim.status,
       href: claim.transactionId === null ? undefined : `/deals/${claim.transactionId}`,
@@ -405,6 +565,7 @@ function BidsOffersPanel({ bids, offers }: Pick<ProfilePageProps, 'bids' | 'offe
 }
 
 const panelByTab: Record<string, FC<ProfilePageProps>> = {
+  account: (props) => <AccountPanel {...props} />,
   activity: ({ claims, bids, offers, deals }) => <ActivityPanel claims={claims} bids={bids} offers={offers} deals={deals} />,
   trust: ({ counters, reputationEvents }) => <TrustPanel counters={counters} reputationEvents={reputationEvents} />,
   listings: ({ listings, deleteListingAction }) => <ListingsPanel listings={listings} deleteListingAction={deleteListingAction} />,

@@ -1,5 +1,7 @@
 'use client';
 
+import { AUCTION_DURATION_HOURS } from '@/domain/policy/windows';
+
 export type SaleType = 'straight_sale' | 'auction';
 
 const stroke = {
@@ -13,9 +15,21 @@ const stroke = {
 export function SaleTypeFields({
   saleType,
   onSaleTypeChange,
+  initialPrice,
+  initialStartBid,
+  initialBuyout,
+  initialDurationHours,
+  initialAcceptsOffers = false,
+  v1 = false,
 }: {
   saleType: SaleType;
   onSaleTypeChange: (value: SaleType) => void;
+  initialPrice?: string;
+  initialStartBid?: string;
+  initialBuyout?: string;
+  initialDurationHours?: number;
+  initialAcceptsOffers?: boolean;
+  v1?: boolean;
 }) {
   return (
     <>
@@ -53,10 +67,10 @@ export function SaleTypeFields({
         <>
           <div className="form-field create-price-field">
             <label className="sr-only" htmlFor="price">Price</label>
-            <div className="money-input"><span>TT$</span><input id="price" name="price" type="text" inputMode="decimal" placeholder="Price" required /></div>
+            <div className="money-input"><span>TT$</span><input id="price" name="price" type="text" inputMode="decimal" defaultValue={initialPrice ?? ''} placeholder="Price" required /></div>
           </div>
           <label className="auto-relist" htmlFor="acceptsOffers">
-            <input id="acceptsOffers" type="checkbox" name="acceptsOffers" />
+            <input id="acceptsOffers" type="checkbox" name="acceptsOffers" defaultChecked={initialAcceptsOffers} />
             <span><strong>Accept offers</strong><small>Let buyers propose a price below your asking price.</small></span>
           </label>
         </>
@@ -64,20 +78,19 @@ export function SaleTypeFields({
         <div className="form-grid form-grid--three sale-type-auction-fields">
           <div className="form-field">
             <label className="sr-only" htmlFor="startBid">Starting bid</label>
-            <div className="money-input"><span>TT$</span><input id="startBid" name="startBid" type="text" inputMode="decimal" placeholder="Starting bid" required /></div>
+            <div className="money-input"><span>TT$</span><input id="startBid" name="startBid" type="text" inputMode="decimal" defaultValue={initialStartBid ?? ''} placeholder="Starting bid" required /></div>
           </div>
-          <div className="form-field">
+          {!v1 && <div className="form-field">
             <label className="sr-only" htmlFor="buyout">Buyout</label>
-            <div className="money-input"><span>TT$</span><input id="buyout" name="buyout" type="text" inputMode="decimal" placeholder="Buyout (optional)" /></div>
-          </div>
+            <div className="money-input"><span>TT$</span><input id="buyout" name="buyout" type="text" inputMode="decimal" defaultValue={initialBuyout ?? ''} placeholder="Buyout (optional)" /></div>
+          </div>}
           <div className="form-field">
             <label className="sr-only" htmlFor="durationHours">Auction duration</label>
-            <select id="durationHours" name="durationHours" defaultValue="" required aria-label="Auction duration">
+            <select id="durationHours" name="durationHours" defaultValue={initialDurationHours === undefined ? '' : String(initialDurationHours)} required aria-label="Auction duration">
               <option value="" hidden>Select auction length</option>
-              <option value="24">1 day</option>
-              <option value="48">2 days</option>
-              <option value="72">3 days</option>
-              <option value="168">7 days</option>
+              {AUCTION_DURATION_HOURS.map((hours) => (
+                <option key={hours} value={hours}>{hours / 24} day{hours === 24 ? '' : 's'}</option>
+              ))}
             </select>
           </div>
         </div>

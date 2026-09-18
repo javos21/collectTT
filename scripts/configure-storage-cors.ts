@@ -1,8 +1,8 @@
-/** Configure browser CORS for the MinIO or R2 bucket used by image uploads. */
+/** Configure browser CORS for the public image and private evidence buckets. */
 
 import '../src/lib/load-env';
 
-import { configureStorageCors, bucket } from '../src/lib/storage';
+import { configureStorageCors, bucket, evidenceBucket } from '../src/lib/storage';
 import { env } from '../src/lib/env';
 
 function origins(): string[] {
@@ -22,7 +22,8 @@ function origins(): string[] {
 async function main(): Promise<void> {
   const allowedOrigins = origins();
   await configureStorageCors(allowedOrigins);
-  console.log(`[storage] configured CORS for ${bucket()}: ${allowedOrigins.join(', ')}`);
+  await configureStorageCors(allowedOrigins, evidenceBucket());
+  console.log(`[storage] configured CORS for ${bucket()} and ${evidenceBucket()}: ${allowedOrigins.join(', ')}`);
 }
 
 main().catch((error: unknown) => {

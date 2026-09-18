@@ -1,4 +1,5 @@
 export const profileTabs = [
+  { id: 'account', label: 'Account' },
   { id: 'activity', label: 'Activity' },
   { id: 'bids-offers', label: 'Bids & Offers' },
   { id: 'trust', label: 'Trust' },
@@ -18,6 +19,7 @@ export function isProfileTabId(value: string | undefined): value is ProfileTabId
 export function normalizeProfileTab(value: string | undefined): ProfileTabId {
   if (isProfileTabId(value)) return value;
   if (value === 'bids' || value === 'offers') return 'bids-offers';
-  if (value === 'details' || value === 'claims' || value === 'history' || value === 'settings') return 'activity';
+  if (value === 'details' || value === 'settings') return 'account';
+  if (value === 'claims' || value === 'history') return 'activity';
   return 'activity';
 }

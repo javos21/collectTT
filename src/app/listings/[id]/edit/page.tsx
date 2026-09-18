@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
 import { currentUser } from '@/lib/session';
-import { getListing, getListingActivity, listingAuditForSeller } from '@/services/listings';
+import { getListing, getListingActivity, listingAuditForSeller, sellerMeetupLocationsFor } from '@/services/listings';
 import { imageVariants } from '@/services/images';
 import { EditListingForm } from './edit-listing-form';
-import { cancelListingAction, updateListingAction } from './actions';
+import { cancelListingAction, updateListingAction, publishListingAction } from './actions';
+import { isV1Launch } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,14 +22,15 @@ export default async function EditListingPage({
   const user = await currentUser();
   if (user === null) redirect(`/sign-in?returnTo=${encodeURIComponent(`/listings/${id}/edit`)}`);
 
-  const result = await getListing(id);
+  const result = await getListing(id, user.userId);
   if (result === null) notFound();
   const { listing, images, deliveryOptions } = result;
   if (listing.sellerId !== user.userId) redirect(`/listings/${id}`);
   if (listing.status !== 'active' && listing.status !== 'draft') redirect(`/listings/${id}`);
-  const [activity, auditEvents] = await Promise.all([
+  const [activity, auditEvents, meetupLocations] = await Promise.all([
     getListingActivity(id),
     listingAuditForSeller(id, user.userId),
+    sellerMeetupLocationsFor(user.userId),
   ]);
 
   return (
@@ -76,17 +78,22 @@ export default async function EditListingPage({
 
       <EditListingForm
         action={updateListingAction}
+        publishAction={publishListingAction}
         cancelAction={cancelListingAction}
         listingId={listing.id}
         title={listing.title}
         description={listing.description ?? ''}
         price={listing.saleType === 'straight_sale' && listing.priceCents !== null ? (listing.priceCents / 100).toFixed(2) : null}
         saleType={listing.saleType}
+        status={listing.status}
+        meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area }))}
+        meetupLocationId={listing.meetupLocationId}
         acceptsOffers={listing.acceptsOffers}
         paymentWindowHours={listing.paymentWindowHours}
         deliveryOptions={deliveryOptions}
         locked={activity.locked}
         error={error}
+        v1={isV1Launch()}
       />
     </main>
   );

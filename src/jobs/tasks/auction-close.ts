@@ -18,6 +18,8 @@ import { notify } from '../../notifications/dispatch';
 import { enqueue } from '../enqueue';
 import { formatMoney } from '../../domain/money';
 import { fallbackFulfillmentPath } from '../../domain/states/transaction';
+import { MarketplaceEligibilityError } from '../../services/marketplace-eligibility';
+import { assertV1ListingTerms, isV1Launch, V1ScopeError } from '../../lib/launch-scope';
 
 interface Payload {
   listingId: string;
@@ -75,7 +77,7 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
       await tx
         .update(listings)
         .set({
-          status: 'ended_no_sale',
+          status: isV1Launch() ? 'expired' : 'ended_no_sale',
           resolvedAt: sql`now()`,
           updatedAt: sql`now()`,
         })
@@ -92,6 +94,26 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
 
       helpers.logger.info(`auction ${listingId} closed with no sale`);
     };
+
+    // Historical rows may still carry reserve/buyout terms. v1 must not execute
+    // those rules; close such a row honestly with an auditable no-sale outcome
+    // instead of retrying a job forever on an unsupported term.
+    if (isV1Launch()) {
+      try {
+        assertV1ListingTerms({
+          fulfillmentPaths: listing.fulfillmentPaths,
+          settlementMethods: listing.settlementMethods,
+          acceptsOffers: listing.acceptsOffers,
+          reserveCents: listing.reserveCents,
+          buyoutCents: listing.buyoutCents,
+          paymentWindowHours: listing.paymentWindowHours,
+        });
+      } catch (error) {
+        if (!(error instanceof V1ScopeError)) throw error;
+        await endWithoutSale(`This auction used a legacy term that is not available in v1: ${error.message}`);
+        return;
+      }
+    }
 
     if (winner === undefined || !clearsReserve) {
       await endWithoutSale(
@@ -143,11 +165,13 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
           fulfillmentPath:
             winner.fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
           deliveryOptionId: winner.deliveryOptionId,
+          meetupLocationId: listing.meetupLocationId,
           source: 'auction_win',
           winningBidId: winner.id,
           listingTitle: listing.title,
           paymentWindowHours: listing.paymentWindowHours,
           settlementMethod: winner.settlementMethod ?? listing.settlementMethods[0] ?? null,
+          commitmentAcknowledged: true,
           relayStoreId: winner.relayStoreId,
         });
 
@@ -166,7 +190,7 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
         return 'sold';
       })
       .catch((error: unknown) => {
-        if (!(error instanceof CustodyConflictError)) throw error;
+        if (!(error instanceof CustodyConflictError) && !(error instanceof MarketplaceEligibilityError)) throw error;
         refusal = error.message;
         return 'custody_unavailable' as const;
       });
@@ -178,7 +202,7 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
       helpers.logger.warn(
         `auction ${listingId}: the winning bid could not take custody (${reason}) — closing with no sale`,
       );
-      await endWithoutSale(`The winning bid could not be fulfilled: ${reason}`);
+      await endWithoutSale(`The winning bid was no longer eligible to create a transaction: ${reason}`);
       return;
     }
 

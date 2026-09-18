@@ -1,4 +1,9 @@
-# Phase 2 — Custody & Store Tooling
+# Historical archive — Phase 2 Custody & Store Tooling
+
+> **HISTORICAL ARCHIVE — not part of v1 launch scope.** The Store/custody workflow
+> remains in the schema for legacy inspection and controlled rollback, but no new v1
+> listing may enter it. See `COLLECTTT_PRODUCT_SCOPE.md` and
+> `V1_ROUTE_STATE_INVENTORY.md` for current policy.
 
 **Date:** 2026-08-18
 **Status:** Approved design, ready for implementation planning
@@ -43,7 +48,7 @@ These were settled during brainstorming and are not open in the plan.
    appears in `relay_store_staff`. No new credential type. This keeps
    `received_by_user_id` / `released_by_user_id` — already `profiles` foreign keys —
    meaningful, which is half of what an audit log is for. A shared-device mode belongs
-   with the Phase 3 WhatsApp store bot, which is the real answer to shop-floor friction.
+   with the authenticated store control board, which is the real answer to shop-floor friction.
 
 2. **The seller nominates candidate stores; the buyer picks one at claim time.** Both
    parties consent to the location before the claim locks. The seller controls where
@@ -57,10 +62,9 @@ These were settled during brainstorming and are not open in the plan.
    collection. It is the clerk's lookup key and the member's token.
 
 5. **Approach: a `/store` route group in the existing Next app**, with server actions
-   calling `src/services/custody.ts` directly. No API tier — the Phase 3 WhatsApp bot
-   runs in the worker process and can import the same service module, so the shared
-   layer the PDD wants already exists and is the service, not an HTTP surface. An API
-   tier would put custody authorisation logic in two places.
+   calling `src/services/custody.ts` directly. The authenticated store control board
+   imports the same service module, so custody authorization remains in one place.
+   An API tier would put custody authorization logic in two places.
 
 ---
 
@@ -297,7 +301,6 @@ Added to `package.json` as `verify:phase2`.
 
 Explicitly deferred, to keep this phase honest:
 
-- WhatsApp adapter and the store bot (Phase 3 — gated on Meta verification)
 - The pickup and delivery rail, and the `full_service` path's courier flows beyond the
   `release_authorized` state already modelled
 - Holding fees and the store-credit ledger — `holding_fee_config` stays an unused seam

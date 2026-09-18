@@ -4,10 +4,13 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { currentUser } from '@/lib/session';
+import { enforceUserAndIpRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 import { createListing } from '@/services/listings';
 import { UnavailableMarketplaceOptionError } from '@/services/platform-settings';
 import { categoryDefinitionWithCatalogValues } from '@/services/catalog';
 import { parseMoneyInput } from '@/domain/money';
+import { MarketplaceEligibilityError } from '@/services/marketplace-eligibility';
+import { V1ScopeError } from '@/lib/launch-scope';
 
 function collectAttributes(definition: Awaited<ReturnType<typeof categoryDefinitionWithCatalogValues>>, formData: FormData): Record<string, unknown> {
   const attributes: Record<string, unknown> = {};
@@ -42,6 +45,7 @@ export async function createListingAction(formData: FormData): Promise<void> {
   const saleType = String(formData.get('saleType') ?? 'straight_sale');
 
   try {
+    await enforceUserAndIpRateLimit('listing:create', user.userId, RATE_LIMITS.listingCreate);
     const definition = await categoryDefinitionWithCatalogValues(category, { activeOnly: true });
     const listing = await createListing(user.userId, {
       category,
@@ -66,15 +70,22 @@ export async function createListingAction(formData: FormData): Promise<void> {
       autoRelistOnRenege: formData.get('autoRelistOnRenege') !== null,
       imageIds: formData.getAll('imageIds').map(String),
       attributes: collectAttributes(definition, formData),
-    }, { publish: true });
+      meetupLocationId: String(formData.get('meetupLocationId') ?? '').trim() || undefined,
+    }, { publish: formData.get('intent') !== 'draft' });
 
-    redirect(`/listings/${listing.id}`);
+    redirect(formData.get('intent') === 'draft' ? `/listings/${listing.id}/edit` : `/listings/${listing.id}`);
   } catch (error) {
     if (error instanceof z.ZodError) {
       const detail = error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(' | ');
       redirect(`/listings/new?error=${encodeURIComponent(detail)}`);
     }
     if (error instanceof UnavailableMarketplaceOptionError) {
+      redirect(`/listings/new?error=${encodeURIComponent(error.message)}`);
+    }
+    if (error instanceof MarketplaceEligibilityError) {
+      redirect(`/me?tab=account&error=${encodeURIComponent(error.message)}`);
+    }
+    if (error instanceof V1ScopeError) {
       redirect(`/listings/new?error=${encodeURIComponent(error.message)}`);
     }
     throw error;

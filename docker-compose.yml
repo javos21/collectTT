@@ -47,7 +47,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot: creates the images bucket so the app has somewhere to upload on first run.
+  # One-shot: creates the public images bucket and private evidence bucket.
   minio-init:
     image: minio/mc:latest
     container_name: collecttt-minio-init
@@ -59,7 +59,9 @@ services:
       mc alias set local http://minio:9000 collecttt collecttt_dev &&
       mc mb --ignore-existing local/collecttt-images &&
       mc anonymous set download local/collecttt-images &&
-      echo 'bucket collecttt-images ready'
+      mc mb --ignore-existing local/collecttt-evidence &&
+      mc anonymous set none local/collecttt-evidence &&
+      echo 'buckets collecttt-images (public) and collecttt-evidence (private) ready'
       "
 
 volumes:

@@ -73,6 +73,9 @@ async function scheduleNow(task: string, payload: object, jobKey: string) {
 }
 
 async function main(): Promise<void> {
+  if (process.env.COLLECTTT_LAUNCH_SCOPE !== 'legacy') {
+    throw new Error('Phase 2 custody verification is legacy-only. Set COLLECTTT_LAUNCH_SCOPE=legacy for a controlled run.');
+  }
   for (const id of everyone) await mkUser(id);
 
   // ─────────────────────────────────────────────── 1. a store, a shelf, an item

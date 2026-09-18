@@ -29,6 +29,10 @@ import { notify } from '../../notifications/dispatch';
 import type { FulfillmentPath } from '../../domain/states/transaction';
 import type { SettlementMethod } from '../../domain/policy/settlement';
 import { getListingDeliveryOption } from '../../services/platform-settings';
+import { assertMarketplaceEligible } from '../../services/marketplace-eligibility';
+import { assertV1ListingTerms } from '../../lib/launch-scope';
+import { isLegacyFeatureAllowed } from '../../lib/launch-scope';
+import { recordAnalyticsEvent } from '../../services/analytics';
 
 export interface ClaimResult {
   outcome: 'claimed';
@@ -47,9 +51,12 @@ export async function claimListing(opts: {
   relayStoreId?: string | null;
   /** Cancel this buyer's pending offer as part of the same atomic claim. */
   cancelPendingOfferId?: string;
+  /** Deliberate acknowledgement of the v1 purchase commitment. */
+  commitmentAcknowledged?: boolean;
 }): Promise<ClaimResult> {
   return db.transaction(async (tx) => {
     const listing = await loadListingForClaim(tx, opts.listingId);
+    assertV1ListingTerms(listing);
 
     if (listing.sellerId === opts.claimantId) {
       throw new ForbiddenError('You cannot claim your own listing');
@@ -57,6 +64,15 @@ export async function claimListing(opts: {
     if (listing.saleType !== 'straight_sale') {
       throw new ConflictError('This is an auction — place a bid instead');
     }
+
+    // The web action requires the acknowledgement. Existing internal jobs/tests may
+    // omit it while the atomic service remains backwards-compatible; an explicit
+    // negative value can never be accepted.
+    if (opts.commitmentAcknowledged === false) {
+      throw new ConflictError('Confirm that this is a purchase commitment before reserving the item.', 'commitment_confirmation_required');
+    }
+
+    await assertMarketplaceEligible(tx, opts.claimantId, 'reserve');
 
     let fulfillmentPath = opts.fulfillmentPath;
     let deliveryOptionId = opts.deliveryOptionId;
@@ -70,6 +86,10 @@ export async function claimListing(opts: {
       deliveryOptionId: string | null;
     } | null = null;
 
+    const offersEnabled = isLegacyFeatureAllowed('offers');
+    if (opts.cancelPendingOfferId !== undefined && !offersEnabled) {
+      throw new ConflictError('Offers are not available in v1.');
+    }
     if (opts.cancelPendingOfferId !== undefined) {
       const pendingOfferRows = await tx.execute(sql`
         select id, fulfillment_path, delivery_option_id, settlement_method, relay_store_id
@@ -101,7 +121,7 @@ export async function claimListing(opts: {
         relayStoreId: pendingOffer.relay_store_id,
         deliveryOptionId: pendingOffer.delivery_option_id,
       };
-    } else {
+    } else if (offersEnabled) {
       const pendingOfferRows = await tx.execute(sql`
         select id
           from offers
@@ -220,6 +240,7 @@ export async function claimListing(opts: {
           status: 'active',
           fulfillmentPath,
           deliveryOptionId: deliveryOptionId ?? null,
+          meetupLocationId: listing.meetupLocationId,
           settlementMethod,
           relayStoreId: relayStoreId ?? null,
         })
@@ -236,33 +257,46 @@ export async function claimListing(opts: {
         amountCents: price,
         fulfillmentPath,
         deliveryOptionId: deliveryOptionId ?? null,
+        meetupLocationId: listing.meetupLocationId,
         source: 'claim',
         claimId: claim.id,
         listingTitle: listing.title,
         paymentWindowHours: listing.paymentWindowHours,
         settlementMethod,
+        commitmentAcknowledged: opts.commitmentAcknowledged === true,
         relayStoreId: relayStoreId ?? null,
       });
 
       await tx.update(claims).set({ transactionId: opened.id }).where(eq(claims.id, claim.id));
 
-      const pendingOffers = await tx
-        .select({ buyerId: offers.buyerId })
-        .from(offers)
-        .where(and(eq(offers.listingId, opts.listingId), eq(offers.status, 'pending')));
-      await tx
-        .update(offers)
-        .set({ status: 'rejected', respondedAt: sql`now()`, updatedAt: sql`now()` })
-        .where(and(eq(offers.listingId, opts.listingId), eq(offers.status, 'pending')));
-      for (const offer of pendingOffers) {
-        await notify({
-          tx,
-          userId: offer.buyerId,
-          event: 'offer_rejected_buyer',
-          data: { listingTitle: listing.title },
-          linkUrl: `/listings/${opts.listingId}`,
-          idempotencyKey: `offer_rejected:claim:${claim.id}:${offer.buyerId}`,
-        });
+      await recordAnalyticsEvent(tx, {
+        eventName: 'reservation_created',
+        userId: opts.claimantId,
+        subjectType: 'transaction',
+        subjectId: opened.id,
+        metadata: { listingId: opts.listingId, saleType: listing.saleType, source: 'fixed_price' },
+        idempotencyKey: `reservation-created:${opened.id}`,
+      });
+
+      if (offersEnabled) {
+        const pendingOffers = await tx
+          .select({ buyerId: offers.buyerId })
+          .from(offers)
+          .where(and(eq(offers.listingId, opts.listingId), eq(offers.status, 'pending')));
+        await tx
+          .update(offers)
+          .set({ status: 'rejected', respondedAt: sql`now()`, updatedAt: sql`now()` })
+          .where(and(eq(offers.listingId, opts.listingId), eq(offers.status, 'pending')));
+        for (const offer of pendingOffers) {
+          await notify({
+            tx,
+            userId: offer.buyerId,
+            event: 'offer_rejected_buyer',
+            data: { listingTitle: listing.title },
+            linkUrl: `/listings/${opts.listingId}`,
+            idempotencyKey: `offer_rejected:claim:${claim.id}:${offer.buyerId}`,
+          });
+        }
       }
 
       return { outcome: 'claimed' as const, transactionId: opened.id };
@@ -272,7 +306,7 @@ export async function claimListing(opts: {
     // Lost the race (or the listing was already claimed). No claim record or transaction
     // is created for the loser; the conditional UPDATE above is the source of truth.
     // ────────────────────────────────────────────────────────────────────────
-    throw new ConflictError('This item was just claimed by another collector.');
+    throw new ConflictError('This item was just claimed by another collector.', 'listing_unavailable');
   });
 }
 

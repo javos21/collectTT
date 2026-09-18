@@ -12,7 +12,7 @@ import { AdminFrame } from '../admin-frame';
 
 const PAGE_SIZE = 25;
 const DELIVERY_STATUSES = ['pending', 'sent', 'failed', 'skipped'] as const;
-const DELIVERY_CHANNELS = ['email', 'in_app', 'whatsapp', 'sms'] as const;
+const DELIVERY_CHANNELS = ['email', 'in_app', 'sms'] as const;
 type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 type DeliveryChannel = (typeof DELIVERY_CHANNELS)[number];
 

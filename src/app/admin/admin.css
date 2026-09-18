@@ -156,6 +156,10 @@ td small { margin-top: .18rem; color: #a1a1aa; font-size: .62rem; }
 .admin-detail-note { margin: 1rem 0 0; padding: .75rem .85rem; border-left: 3px solid var(--admin-primary); border-radius: 0 8px 8px 0; color: var(--admin-muted); background: var(--admin-primary-wash); font-size: .73rem; line-height: 1.5; }
 .admin-empty-copy { margin: 0; padding: 1rem; border-radius: 9px; color: var(--admin-muted); background: var(--admin-neutral-wash); font-size: .75rem; }
 .admin-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }
+.admin-filter-tabs { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 0 1rem; }
+.admin-filter-tabs a { padding: .45rem .7rem; border: 1px solid var(--admin-line); border-radius: 999px; color: var(--admin-muted); font-size: .75rem; text-decoration: none; }
+.admin-filter-tabs a.is-active { color: var(--admin-primary-strong); border-color: var(--admin-primary); background: var(--admin-primary-wash); }
+.admin-table__detail { max-width: 28rem; margin: .35rem 0; color: var(--admin-muted); font-size: .78rem; line-height: 1.4; white-space: normal; }
 .admin-action-card { min-width: 0; padding: 1rem; border: 1px solid var(--admin-line); border-radius: 11px; background: #fff; }
 .admin-action-card__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; margin-bottom: .9rem; }
 .admin-action-card__heading h3 { margin: 0; color: var(--admin-ink); font-size: .88rem; }
@@ -168,6 +172,21 @@ td small { margin-top: .18rem; color: #a1a1aa; font-size: .62rem; }
 .admin-action-card button { justify-self: start; margin-top: .25rem; }
 .admin-action-card button:disabled, .admin-inline-action button:disabled { cursor: wait; opacity: .6; }
 .admin-action-note { margin: 0; padding: .75rem; border-radius: 8px; color: var(--admin-muted); background: var(--admin-neutral-wash); font-size: .7rem; line-height: 1.45; }
+.admin-dispute-actions { display: grid; gap: .75rem; margin-top: 1.25rem; padding-top: 1.1rem; border-top: 1px solid var(--admin-line); }
+.admin-dispute-actions > h3 { margin: 0; color: var(--admin-ink); font-size: .86rem; }
+.admin-dispute-actions > p { margin: -.35rem 0 .15rem; color: var(--admin-muted); font-size: .7rem; line-height: 1.45; }
+.admin-dispute-action { display: grid; gap: .9rem; padding: 1rem; border: 1px solid var(--admin-amber-line); border-left: 3px solid var(--admin-amber); border-radius: 10px; background: #fffdf7; }
+.admin-dispute-action__copy { min-width: 0; }
+.admin-dispute-action__copy > div { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.admin-dispute-action__copy strong { color: var(--admin-ink); font-size: .77rem; }
+.admin-dispute-action__copy p { margin: .6rem 0 0; color: #52525b; font-size: .74rem; line-height: 1.5; overflow-wrap: anywhere; }
+.admin-dispute-action form { display: grid; gap: .45rem; }
+.admin-dispute-action label { color: var(--admin-primary-strong); font-size: .68rem; font-weight: 750; }
+.admin-dispute-action textarea { width: 100%; min-height: 42px; padding: .55rem .65rem; resize: vertical; border: 1px solid var(--admin-line); border-radius: 8px; color: var(--admin-ink); background: #fff; font: inherit; font-size: .75rem; line-height: 1.45; }
+.admin-dispute-action textarea:focus-visible { outline: 3px solid rgba(79,70,229,.15); border-color: var(--admin-primary); }
+.admin-dispute-action__buttons { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .25rem; }
+.admin-dispute-action__buttons button { min-width: 132px; }
+.admin-dispute-action__buttons button:disabled { cursor: wait; opacity: .6; }
 .admin-inline-action { display: grid; gap: .35rem; min-width: 170px; }
 .admin-inline-action label { color: var(--admin-muted); font-size: .62rem; }
 .admin-inline-action button { justify-self: start; min-height: 36px; padding: .45rem .7rem; font-size: .66rem; }

@@ -28,7 +28,7 @@ function label(value: string): string {
 
 function statusTone(status: string): string {
   if (status === 'active') return 'active';
-  if (status === 'cancelled' || status === 'expired' || status === 'ended_no_sale') return 'ended';
+  if (status === 'cancelled' || status === 'expired' || status === 'ended_no_sale' || status === 'sold_outside') return 'ended';
   return status === 'claimed' || status === 'ended_won' ? 'confirmed' : 'draft';
 }
 

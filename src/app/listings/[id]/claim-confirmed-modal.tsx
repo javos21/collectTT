@@ -50,7 +50,7 @@ export function ClaimConfirmedModal({
         aria-describedby="claim-confirmed-description"
         tabIndex={-1}
       >
-        <p className="claim-confirmed-modal__eyebrow">Claim confirmed</p>
+        <p className="claim-confirmed-modal__eyebrow">Reservation confirmed</p>
         <h2 id="claim-confirmed-title">Congratulations — you got it!</h2>
         <p id="claim-confirmed-description">Your deal is ready. Open it to review the payment deadline and next steps.</p>
         <div className="claim-confirmed-modal__actions">

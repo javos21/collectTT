@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { BadgeCheck, MapPin, UserRound, X } from 'lucide-react';
 
-import { publicHandle } from '@/lib/profile-display';
 import type { BuyerSnapshotData } from './buyer-snapshot-data';
 
 const EVENT_LABELS: Record<string, string> = {
@@ -60,7 +59,6 @@ export function BuyerSnapshotLink({
   const triggerRef = useRef<HTMLAnchorElement>(null);
   const titleId = `buyer-snapshot-title-${snapshot.userId}`;
   const subject = subjectLabel.toLowerCase();
-  const displayHandle = publicHandle(snapshot.handle);
   const completedDeals = snapshot.counters.buyCompleted + snapshot.counters.sellCompleted;
   const paidOnTime = `${snapshot.counters.buyPaidOnTime} / ${snapshot.counters.buyClaimsTotal}`;
 
@@ -147,7 +145,7 @@ export function BuyerSnapshotLink({
                 <p className="buyer-snapshot-modal__eyebrow">Trust snapshot</p>
                 <h2 id={titleId}>{snapshot.displayName}</h2>
                 <p className="buyer-snapshot-modal__meta">
-                  @{displayHandle} · member since {date(snapshot.memberSince)}
+                  Member since {date(snapshot.memberSince)}
                   {snapshot.area !== null && <><span aria-hidden="true"> · </span>{snapshot.area}</>}
                 </p>
               </div>
@@ -165,6 +163,10 @@ export function BuyerSnapshotLink({
               <div className="buyer-snapshot-modal__metric">
                 <strong>{snapshot.counters.sellCompleted}</strong>
                 <span>Sales</span>
+              </div>
+              <div className="buyer-snapshot-modal__metric">
+                <strong>{snapshot.counters.successfulAuctions}</strong>
+                <span>Successful auctions</span>
               </div>
               <div className="buyer-snapshot-modal__metric">
                 <strong>{paidOnTime}</strong>

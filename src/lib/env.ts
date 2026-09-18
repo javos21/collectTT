@@ -10,6 +10,8 @@ import { z } from 'zod';
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_URL: z.string().url().default('http://localhost:3000'),
+  // v1 is the safe default. Set to `legacy` only for controlled rollback/testing.
+  COLLECTTT_LAUNCH_SCOPE: z.enum(['v1', 'legacy']).default('v1'),
 
   DATABASE_URL: z.string().min(1),
 
@@ -21,6 +23,9 @@ const envSchema = z.object({
   STORAGE_ENDPOINT: z.string().url(),
   STORAGE_REGION: z.string().default('auto'),
   STORAGE_BUCKET: z.string().min(1),
+  // Transaction evidence must never share the public listing-image bucket.
+  // The development default is created by docker-compose; production must set it explicitly.
+  STORAGE_EVIDENCE_BUCKET: z.string().min(1).default('collecttt-evidence'),
   STORAGE_ACCESS_KEY_ID: z.string().min(1),
   STORAGE_SECRET_ACCESS_KEY: z.string().min(1),
   STORAGE_FORCE_PATH_STYLE: z
@@ -33,6 +38,7 @@ const envSchema = z.object({
   EMAIL_ADAPTER: z.enum(['console', 'brevo']).default('console'),
   BREVO_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('CollectTT <noreply@example.com>'),
+
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -55,6 +61,15 @@ export function env(): Env {
 
   if (parsed.data.EMAIL_ADAPTER === 'brevo' && !parsed.data.BREVO_API_KEY) {
     throw new Error('EMAIL_ADAPTER=brevo requires BREVO_API_KEY to be set.');
+  }
+  if (parsed.data.STORAGE_EVIDENCE_BUCKET === parsed.data.STORAGE_BUCKET) {
+    throw new Error('STORAGE_EVIDENCE_BUCKET must be different from STORAGE_BUCKET.');
+  }
+  if (parsed.data.NODE_ENV === 'production' && process.env.STORAGE_EVIDENCE_BUCKET === undefined) {
+    throw new Error('Production requires STORAGE_EVIDENCE_BUCKET to be set explicitly.');
+  }
+  if (parsed.data.NODE_ENV === 'production' && process.env.APP_URL === undefined) {
+    throw new Error('Production requires APP_URL to be set explicitly.');
   }
 
   cached = parsed.data;

@@ -25,6 +25,7 @@ import {
 import { profiles } from './profiles';
 import { images } from './images';
 import { marketplaceOptions } from './settings';
+import { sellerMeetupLocations } from './seller-settings';
 import {
   listingStatusEnum,
   saleTypeEnum,
@@ -96,6 +97,11 @@ export const listings = pgTable(
     fulfillmentPaths: fulfillmentPathEnum('fulfillment_paths').array().notNull(),
     settlementMethods: text('settlement_methods').array().notNull(),
     autoRelistOnRenege: boolean('auto_relist_on_renege').notNull().default(true),
+    /** Reusable seller-owned meetup choice selected for this listing. */
+    meetupLocationId: uuid('meetup_location_id').references(() => sellerMeetupLocations.id, { onDelete: 'set null' }),
+
+    /** Fixed-price listings become terminal after this platform-configured deadline. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
 
     /** The currently open transaction attempt, if any. FK added post-create. */
     activeTransactionId: uuid('active_transaction_id'),
@@ -114,6 +120,9 @@ export const listings = pgTable(
     index('listings_auction_close')
       .on(t.endsAt)
       .where(sql`${t.status} = 'active' and ${t.saleType} = 'auction'`),
+    index('listings_fixed_price_expiry')
+      .on(t.expiresAt)
+      .where(sql`${t.status} = 'active' and ${t.saleType} = 'straight_sale' and ${t.expiresAt} is not null`),
 
     check(
       'listing_straight_sale_shape',
@@ -221,6 +230,8 @@ export const claims = pgTable(
     status: claimStatusEnum('status').notNull(),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
     deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
+    /** The meetup choice captured when the fixed-price commitment opens. */
+    meetupLocationId: uuid('meetup_location_id').references(() => sellerMeetupLocations.id, { onDelete: 'set null' }),
     /** The buyer's chosen payment method for this claim. Nullable for legacy rows. */
     settlementMethod: text('settlement_method'),
     /** Which relay store this claimant chose, for the `relay` path. */

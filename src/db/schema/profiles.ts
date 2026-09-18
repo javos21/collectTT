@@ -12,10 +12,12 @@ import {
   text,
   timestamp,
   integer,
+  boolean,
   uniqueIndex,
   index,
   jsonb,
   uuid,
+  check,
 } from 'drizzle-orm/pg-core';
 
 import { users } from './auth';
@@ -37,7 +39,6 @@ export const profiles = pgTable(
     displayName: text('display_name').notNull(),
     handle: text('handle').notNull(),
     phoneE164: text('phone_e164'),
-    phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     avatarImageId: uuid('avatar_image_id').references(() => images.id, { onDelete: 'set null' }),
     bio: text('bio'),
     area: text('area'),
@@ -53,9 +54,6 @@ export const profiles = pgTable(
   },
   (t) => [
     uniqueIndex('profiles_handle_key').on(sql`lower(${t.handle})`),
-    uniqueIndex('profiles_phone_key')
-      .on(t.phoneE164)
-      .where(sql`${t.phoneE164} is not null`),
   ],
 );
 
@@ -121,6 +119,9 @@ export const restrictions = pgTable(
       .references(() => profiles.userId, { onDelete: 'cascade' }),
     type: restrictionTypeEnum('type').notNull(),
     source: restrictionSourceEnum('source').notNull(),
+    sourceEventId: uuid('source_event_id').references(() => reputationEvents.id, { onDelete: 'set null' }),
+    sourceActorUserId: text('source_actor_user_id').references(() => profiles.userId, { onDelete: 'set null' }),
+    lifecycleStatus: text('lifecycle_status').notNull().default('active'),
     reason: text('reason').notNull(),
     effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -128,6 +129,7 @@ export const restrictions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    check('restrictions_lifecycle_status_valid', sql`${t.lifecycleStatus} in ('active', 'lifted', 'expired')`),
     index('restrictions_active')
       .on(t.userId, t.expiresAt)
       .where(sql`${t.liftedAt} is null`),

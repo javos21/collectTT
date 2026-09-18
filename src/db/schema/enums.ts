@@ -22,6 +22,7 @@ import {
   TERMINATION_REASONS,
   TRANSACTION_SOURCES,
   TRANSACTION_STATES,
+  HANDOFF_STATES,
 } from '../../domain/states/index';
 import {
   REPUTATION_EVENT_TYPES,
@@ -39,6 +40,7 @@ const tuple = <T extends string>(values: readonly T[]): [T, ...T[]] => [
 export const paymentStateEnum = pgEnum('payment_state', tuple(PAYMENT_STATES));
 export const custodyStateEnum = pgEnum('custody_state', tuple(CUSTODY_STATES));
 export const transactionStateEnum = pgEnum('transaction_state', tuple(TRANSACTION_STATES));
+export const handoffStateEnum = pgEnum('handoff_state', tuple(HANDOFF_STATES));
 export const listingStatusEnum = pgEnum('listing_status', tuple(LISTING_STATUSES));
 export const saleTypeEnum = pgEnum('sale_type', tuple(SALE_TYPES));
 export const fulfillmentPathEnum = pgEnum('fulfillment_path', tuple(FULFILLMENT_PATHS));
@@ -69,6 +71,13 @@ export const claimStatusEnum = pgEnum('claim_status', [
 ]);
 export const bidStatusEnum = pgEnum('bid_status', ['active', 'outbid', 'won', 'retracted', 'void']);
 export const offerStatusEnum = pgEnum('offer_status', ['pending', 'accepted', 'rejected', 'cancelled']);
+export const fallbackOfferStatusEnum = pgEnum('fallback_offer_status', [
+  'pending',
+  'accepted',
+  'expired',
+  'declined',
+  'superseded',
+]);
 export const imageStatusEnum = pgEnum('image_status', ['pending', 'processing', 'ready', 'failed']);
 export const custodyHolderEnum = pgEnum('custody_holder', ['relay_store', 'platform_courier']);
 export const storeStaffRoleEnum = pgEnum('store_staff_role', ['staff', 'manager']);
@@ -80,7 +89,6 @@ export const storeApplicationStatusEnum = pgEnum('store_application_status', [
 export const notificationChannelEnum = pgEnum('notification_channel', [
   'in_app',
   'email',
-  'whatsapp', // adapter arrives later; the value exists now so the seam is real
   'sms',
 ]);
 export const deliveryStatusEnum = pgEnum('delivery_status', [
@@ -97,4 +105,7 @@ export const disputeReasonEnum = pgEnum('dispute_reason', [
   'other',
 ]);
 export const disputeStatusEnum = pgEnum('dispute_status', ['open', 'resolved', 'dismissed']);
+export const transactionDisputeStateEnum = pgEnum('transaction_dispute_state', ['none', 'open', 'resolved']);
+export const transactionEvidenceTypeEnum = pgEnum('transaction_evidence_type', ['payment_screenshot']);
+export const transactionEvidenceStatusEnum = pgEnum('transaction_evidence_status', ['pending', 'ready', 'failed']);
 export const adminAuditOutcomeEnum = pgEnum('admin_audit_outcome', ['succeeded', 'failed', 'rejected']);

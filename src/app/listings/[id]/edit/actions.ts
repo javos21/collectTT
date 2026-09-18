@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { parseMoneyInput } from '@/domain/money';
 import { currentUser } from '@/lib/session';
-import { cancelListing, updateListingBasics } from '@/services/listings';
+import { cancelListing, publishListing, updateListingBasics } from '@/services/listings';
 
 const money = (formData: FormData): number | undefined => {
   const raw = String(formData.get('price') ?? '').trim();
@@ -35,6 +35,7 @@ export async function updateListingAction(formData: FormData): Promise<void> {
       paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
       ...(Object.keys(deliveryOptionEstimates).length > 0 ? { deliveryOptionEstimates } : {}),
       imageIds: formData.getAll('imageIds').map(String),
+      meetupLocationId: String(formData.get('meetupLocationId') ?? '').trim() || null,
     });
     redirect(`/listings/${listingId}`);
   } catch (error) {
@@ -60,5 +61,17 @@ export async function cancelListingAction(formData: FormData): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not cancel this listing.';
     redirect(`/listings/${listingId}/edit?error=${encodeURIComponent(message)}`);
+  }
+}
+
+export async function publishListingAction(formData: FormData): Promise<void> {
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+  const listingId = String(formData.get('listingId') ?? '');
+  try {
+    await publishListing(user.userId, listingId);
+    redirect(`/listings/${listingId}`);
+  } catch (error) {
+    redirect(`/listings/${listingId}/edit?error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not publish this listing.')}`);
   }
 }

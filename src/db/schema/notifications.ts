@@ -1,9 +1,7 @@
 /**
  * Channel-agnostic notifications.
  *
- * One dispatch job, pluggable adapters. `in_app` and `email` ship now; `whatsapp` is
- * already a legal channel value so adding it later is one adapter file and zero
- * changes at any call site. That is the whole point of the seam.
+ * One dispatch job with in-app and email adapters for the beta.
  */
 
 import { sql } from 'drizzle-orm';

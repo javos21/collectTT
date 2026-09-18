@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { and, eq, asc } from 'drizzle-orm';
+import { and, eq, asc, desc } from 'drizzle-orm';
 import {
   ArrowLeft,
   Bell,
@@ -10,7 +10,9 @@ import {
   Clock3,
   CreditCard,
   FileClock,
+  AlertTriangle,
   Package,
+  Phone,
   Settings2,
   Store,
   UserRound,
@@ -21,17 +23,28 @@ import { currentUser } from '@/lib/session';
 import { transactions, transactionEvents } from '@/db/schema/transactions';
 import { listings } from '@/db/schema/listings';
 import { marketplaceOptions } from '@/db/schema/settings';
+import { sellerMeetupLocations } from '@/db/schema/seller-settings';
+import { disputes as disputeRecords } from '@/db/schema/notifications';
 import { custodyPanelFor } from '@/services/custody';
 import { trustSnapshotsForMembers } from '@/services/reputation';
+import { counterpartyContact, PrivateDisclosureNotFoundError } from '@/services/private-disclosure';
 import { formatMoney } from '@/domain/money';
 import { usesCustodyTrack } from '@/domain/states/transaction';
 import {
   markPaidAction,
-  confirmPaymentAction,
-  disputePaymentAction,
+  confirmCollectionAction,
+  submitDisputeAction,
+  markItemHandedOverAction,
+  confirmItemReceivedAction,
 } from './actions';
 import { serializeTrustSnapshot } from '../buyer-snapshot-data';
 import { BuyerSnapshotLink } from '../buyer-snapshot-link';
+import { EvidenceUpload } from './evidence-upload';
+import { evidenceForViewer } from '@/services/transaction-evidence';
+import {
+  DISPUTE_REASONS,
+  DISPUTE_REASON_LABELS,
+} from '@/services/disputes';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,8 +78,8 @@ const STATE_LABELS: Record<string, string> = {
   expired: 'Expired',
 };
 
-const PAYMENT_STEPS = ['Awaiting payment', 'Marked paid', 'Confirmed'];
-const PAYMENT_INDEX: Record<string, number> = { pending: 0, buyer_marked_paid: 1, confirmed: 2 };
+const PAYMENT_STEPS = ['Awaiting payment', 'Payment recorded'];
+const PAYMENT_INDEX: Record<string, number> = { pending: 0, buyer_marked_paid: 1, confirmed: 1 };
 
 const CUSTODY_STEPS = ['Awaiting drop-off', 'On the shelf', 'Collected'];
 const CUSTODY_INDEX: Record<string, number> = {
@@ -108,7 +121,7 @@ function humanize(value: string | null) {
 }
 
 function historyReason(value: string | null) {
-  if (value === 'claim') return 'Claim opened';
+  if (value === 'claim') return 'Reservation opened';
   if (value === 'offer_accept') return 'Offer accepted';
   if (value === 'auction_win') return 'Auction won';
   if (value === 'auction_runner_up') return 'Auction promotion';
@@ -134,7 +147,7 @@ function historyDescription(
 
   if (event.track === 'overall' && event.toState === 'open') {
     if (event.reason === 'claim') {
-      return `The buyer claimed the listing. Payment was due by ${formatDateTime(deal.paymentDeadlineAt)}${usesCustodyTrack(deal.fulfillmentPath) ? '; seller drop-off was not required until payment was confirmed' : ''}.`;
+      return `The buyer reserved the listing. Payment was due by ${formatDateTime(deal.paymentDeadlineAt)}${usesCustodyTrack(deal.fulfillmentPath) ? '; seller drop-off was not required until payment was confirmed' : ''}.`;
     }
     if (event.reason === 'offer_accept') {
       return `The seller accepted the offer. Payment was due by ${formatDateTime(deal.paymentDeadlineAt)}.`;
@@ -217,7 +230,7 @@ export default async function DealPage({
   // A deal is private to its two parties — this is not a public record.
   if (!isBuyer && !isSeller) notFound();
 
-  const [deliveryOption, paymentOption] = await Promise.all([
+  const [deliveryOption, paymentOption, meetupLocation] = await Promise.all([
     t.deliveryOptionId === null
       ? Promise.resolve(null)
       : db.select({ label: marketplaceOptions.label }).from(marketplaceOptions).where(eq(marketplaceOptions.id, t.deliveryOptionId)).limit(1).then((rows) => rows[0] ?? null),
@@ -227,20 +240,40 @@ export default async function DealPage({
           eq(marketplaceOptions.kind, 'payment'),
           eq(marketplaceOptions.key, t.settlementMethod),
         )).limit(1).then((rows) => rows[0] ?? null),
+    t.meetupLocationId === null
+      ? Promise.resolve(null)
+      : db.select({ label: sellerMeetupLocations.label, area: sellerMeetupLocations.area, instructions: sellerMeetupLocations.instructions })
+        .from(sellerMeetupLocations)
+        .where(eq(sellerMeetupLocations.id, t.meetupLocationId))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
   ]);
 
   const counterpartyId = isBuyer ? t.sellerId : t.buyerId;
   const counterpartySnapshot = (await trustSnapshotsForMembers(db, [counterpartyId])).get(counterpartyId) ?? null;
+  const contact = await counterpartyContact(db, viewer.userId, id).catch((error: unknown) => {
+    if (error instanceof PrivateDisclosureNotFoundError) return null;
+    throw error;
+  });
   const counterpartyName = counterpartySnapshot?.displayName ?? 'the other member';
   const counterpartyRole: 'Seller' | 'Buyer' = isBuyer ? 'Seller' : 'Buyer';
 
-  const timeline = await db
-    .select()
-    .from(transactionEvents)
-    .where(eq(transactionEvents.transactionId, id))
-    .orderBy(asc(transactionEvents.occurredAt));
+  const [timeline, disputeRows, evidenceRows] = await Promise.all([
+    db
+      .select()
+      .from(transactionEvents)
+      .where(eq(transactionEvents.transactionId, id))
+      .orderBy(asc(transactionEvents.occurredAt)),
+    db
+      .select()
+      .from(disputeRecords)
+      .where(eq(disputeRecords.transactionId, id))
+      .orderBy(desc(disputeRecords.createdAt)),
+    evidenceForViewer(db, id, viewer.userId),
+  ]);
 
   const isOpen = t.state === 'open';
+  const isDisputed = t.disputeState === 'open';
   const hasCustody = usesCustodyTrack(t.fulfillmentPath);
   const custodyPanel = hasCustody ? await custodyPanelFor(db, id) : null;
 
@@ -259,6 +292,9 @@ export default async function DealPage({
     ? 'Not recorded'
     : paymentOption?.label ?? SETTLEMENT_LABELS[t.settlementMethod] ?? t.settlementMethod;
   const fulfillmentLabel = deliveryOption?.label ?? PATH_LABELS[t.fulfillmentPath] ?? t.fulfillmentPath;
+  const myDisputes = disputeRows.filter((dispute) => dispute.raisedBy === viewer.userId);
+  const hasOpenDispute = myDisputes.some((dispute) => dispute.status === 'open');
+  const hasOtherOpenDispute = disputeRows.some((dispute) => dispute.raisedBy !== viewer.userId && dispute.status === 'open');
 
   return (
     <main className="deal-page">
@@ -282,9 +318,19 @@ export default async function DealPage({
           <span>{flash.error}</span>
         </div>
       )}
-      {flash.done === 'marked' && <div className="alert alert--info">Marked as paid. {counterpartyName} has been notified.</div>}
-      {flash.done === 'confirmed' && <div className="alert alert--info">Payment confirmed.</div>}
-      {flash.done === 'disputed' && <div className="alert alert--warn">Recorded. The buyer has been told nothing arrived.</div>}
+      {flash.done === 'marked' && <div className="alert alert--info">Payment marked as sent. The deal has moved to the next step.</div>}
+      {flash.done === 'collected' && <div className="alert alert--info">Collection confirmed. This deal is complete.</div>}
+      {flash.done === 'handed-over' && <div className="alert alert--info">Hand-off recorded. The buyer has been notified to confirm receipt.</div>}
+      {flash.done === 'received' && <div className="alert alert--info">Receipt confirmed. This deal is complete.</div>}
+      {flash.done === 'dispute-submitted' && <div className="alert alert--info" role="status">Your dispute was submitted. CollectTT support will review this deal.</div>}
+
+      {contact !== null && (
+        <section className="deal-contact-card" aria-labelledby="deal-contact-title">
+          <div><Phone aria-hidden="true" /><h2 id="deal-contact-title">Contact {contact.displayName}</h2></div>
+          <a href={`tel:${contact.phoneE164}`}>{contact.phoneE164}</a>
+          <p>This number is private and available only because this transaction connects you.</p>
+        </section>
+      )}
 
       <div className="deal-room">
         <section className="deal-action-card" aria-labelledby="deal-action-title">
@@ -304,16 +350,35 @@ export default async function DealPage({
                 <input type="hidden" name="transactionId" value={id} />
                 <button type="submit">Mark as paid</button>
               </form>
-              <p className="deal-action-card__notice"><Bell aria-hidden="true" />Marking as paid notifies {counterpartyName}.</p>
+              <p className="deal-action-card__notice"><Bell aria-hidden="true" />This records payment and moves the deal forward immediately.</p>
+              {t.settlementMethod === 'bank_transfer' && <EvidenceUpload transactionId={id} />}
             </>
           )}
 
           {isOpen && isBuyer && t.paymentState === 'buyer_marked_paid' && (
             <>
-              <p className="deal-action-card__eyebrow">Waiting on {counterpartyName}</p>
+              <p className="deal-action-card__eyebrow">One quick update</p>
               <h2 id="deal-action-title">Payment marked as sent</h2>
-              <p className="deal-action-card__help">The seller needs to confirm the money arrived. There is nothing else for you to do right now.</p>
-              <p className="deal-action-card__notice"><Bell aria-hidden="true" />We’ll let you know when the seller responds.</p>
+              <p className="deal-action-card__help">This deal was started under the previous payment flow. Continue once to move it forward without seller confirmation.</p>
+              <form action={markPaidAction}><input type="hidden" name="transactionId" value={id} /><button type="submit">Continue deal</button></form>
+            </>
+          )}
+
+          {isOpen && isBuyer && t.paymentState === 'confirmed' && (custodyPanel?.state === 'at_relay' || custodyPanel?.state === 'release_authorized') && (
+            <>
+              <p className="deal-action-card__eyebrow">Ready for collection</p>
+              <h2 id="deal-action-title">Collect your item</h2>
+              <dl className="deal-action-card__facts">
+                <div><Store aria-hidden="true" /><dt>Collect from</dt><dd>{storeLocation}</dd></div>
+                {custodyPanel.custodyExpiresAt !== null && <div><CalendarDays aria-hidden="true" /><dt>Collect by</dt><dd><time dateTime={custodyPanel.custodyExpiresAt.toISOString()}>{formatDateTime(custodyPanel.custodyExpiresAt)}</time></dd></div>}
+              </dl>
+              <span className="codebox" aria-label={`Collection code ${custodyPanel.dropoffCode}`}>
+                <span className="codebox__label">Collection code</span>
+                <span className="codebox__code">{custodyPanel.dropoffCode}</span>
+              </span>
+              <p className="deal-action-card__help">Collect the item from the store, then confirm once it is in your hands.</p>
+              <form action={confirmCollectionAction}><input type="hidden" name="transactionId" value={id} /><button type="submit">I collected the item</button></form>
+              <p className="deal-action-card__notice"><Bell aria-hidden="true" />This completes the deal. Only confirm after you have the item.</p>
             </>
           )}
 
@@ -343,23 +408,63 @@ export default async function DealPage({
 
           {isOpen && isSeller && t.paymentState === 'buyer_marked_paid' && (
             <>
-              <p className="deal-action-card__eyebrow">Your next step</p>
-              <h2 id="deal-action-title">Did the money arrive?</h2>
-              <p className="deal-action-card__help">Confirm only after you can see the payment. Saying no returns the deal to awaiting payment without extending the deadline.</p>
-              <div className="deal-action-card__button-group">
-                <form action={confirmPaymentAction}>
-                  <input type="hidden" name="transactionId" value={id} />
-                  <button type="submit">Yes, I received it</button>
-                </form>
-                <form action={disputePaymentAction}>
-                  <input type="hidden" name="transactionId" value={id} />
-                  <button className="secondary" type="submit">No, nothing arrived</button>
-                </form>
-              </div>
+              <p className="deal-action-card__eyebrow">Payment recorded by buyer</p>
+              <h2 id="deal-action-title">No confirmation needed</h2>
+              <p className="deal-action-card__help">This older deal will move forward when the buyer next opens it. You do not need to verify the payment.</p>
             </>
           )}
 
-          {!isOpen && (
+          {isOpen && isSeller && t.paymentState === 'confirmed' && (custodyPanel?.state === 'at_relay' || custodyPanel?.state === 'release_authorized') && (
+            <>
+              <p className="deal-action-card__eyebrow">Waiting on {counterpartyName}</p>
+              <h2 id="deal-action-title">Item ready for collection</h2>
+              <p className="deal-action-card__help">The item is at {storeLocation}. The buyer will confirm after collecting it; the store does not need to release it in the app.</p>
+            </>
+          )}
+
+          {isOpen && t.fulfillmentPath === 'cash_meetup' && t.paymentState === 'confirmed' && t.handoffState === 'awaiting_handoff' && isSeller && (
+            <>
+              <p className="deal-action-card__eyebrow">Your next step</p>
+              <h2 id="deal-action-title">Item handed over?</h2>
+              <p className="deal-action-card__help">Meet at the agreed location, exchange the item and payment, then record the hand-off.</p>
+              <form action={markItemHandedOverAction}><input type="hidden" name="transactionId" value={id} /><button type="submit">Item handed over</button></form>
+            </>
+          )}
+
+          {isOpen && t.fulfillmentPath === 'cash_meetup' && t.paymentState === 'confirmed' && t.handoffState === 'awaiting_handoff' && isBuyer && (
+            <>
+              <p className="deal-action-card__eyebrow">Waiting on {counterpartyName}</p>
+              <h2 id="deal-action-title">Meetup hand-off</h2>
+              <p className="deal-action-card__help">The seller still needs to hand over the item at the agreed meetup location.</p>
+            </>
+          )}
+
+          {isOpen && t.fulfillmentPath === 'cash_meetup' && t.handoffState === 'seller_handed_over' && isBuyer && (
+            <>
+              <p className="deal-action-card__eyebrow">Your next step</p>
+              <h2 id="deal-action-title">Did you receive the item?</h2>
+              <p className="deal-action-card__help">Confirm only after the meetup is complete. This closes the deal for both members.</p>
+              <form action={confirmItemReceivedAction}><input type="hidden" name="transactionId" value={id} /><button type="submit">Item received</button></form>
+            </>
+          )}
+
+          {isOpen && t.fulfillmentPath === 'cash_meetup' && t.handoffState === 'seller_handed_over' && isSeller && (
+            <>
+              <p className="deal-action-card__eyebrow">Waiting on {counterpartyName}</p>
+              <h2 id="deal-action-title">Waiting for receipt confirmation</h2>
+              <p className="deal-action-card__help">The buyer has until the receipt deadline to report a problem or confirm the item.</p>
+            </>
+          )}
+
+          {isDisputed && (
+            <>
+              <p className="deal-action-card__eyebrow">Support review</p>
+              <h2 id="deal-action-title">Deal under review</h2>
+              <p className="deal-action-card__help">Automatic completion, expiry, and blame are paused while CollectTT reviews the reported issue.</p>
+            </>
+          )}
+
+          {!isOpen && !isDisputed && (
             <>
               <p className="deal-action-card__eyebrow">{t.state === 'completed' ? 'Deal complete' : 'Deal closed'}</p>
               <h2 id="deal-action-title">{STATE_LABELS[t.state]}</h2>
@@ -410,8 +515,22 @@ export default async function DealPage({
                 <div className="deal-status__steps"><Stepper steps={CUSTODY_STEPS} current={custodyIdx} off={custodyOff} /></div>
               </details>
             )}
+            {t.fulfillmentPath === 'cash_meetup' && (
+              <details>
+                <summary><span className="deal-status__icon"><Package aria-hidden="true" /></span><strong>Meetup hand-off</strong><span>{humanize(t.handoffState)}</span><ChevronDown aria-hidden="true" /></summary>
+                <div className="deal-status__steps"><Stepper steps={['Awaiting hand-off', 'Seller handed over', 'Buyer received']} current={t.handoffState === 'awaiting_handoff' ? 0 : t.handoffState === 'seller_handed_over' ? 1 : t.handoffState === 'buyer_received' ? 2 : 0} off={t.handoffState === 'not_applicable'} /></div>
+              </details>
+            )}
           </div>
         </section>
+
+        {evidenceRows.length > 0 && (
+          <section className="deal-disclosure deal-evidence" aria-labelledby="deal-evidence-title">
+            <h2 id="deal-evidence-title" className="deal-room__section-label">Payment evidence</h2>
+            <p>Private to the two deal members and CollectTT support.</p>
+            <ul>{evidenceRows.map((evidence) => <li key={evidence.id}><a href={`/api/deals/${id}/evidence/${evidence.id}`}>{evidence.originalFilename ?? 'Payment screenshot'}</a></li>)}</ul>
+          </section>
+        )}
 
         <details className="deal-disclosure">
           <summary><FileClock aria-hidden="true" /><strong>History</strong><ChevronDown aria-hidden="true" /></summary>
@@ -452,10 +571,56 @@ export default async function DealPage({
               </strong>
             </div>
             <div className="deal-detail"><span>Fulfillment</span><strong>{fulfillmentLabel}</strong></div>
+            {meetupLocation !== null && <div className="deal-detail"><span>Meetup location</span><strong>{meetupLocation.label} — {meetupLocation.area}</strong></div>}
             <div className="deal-detail"><span>Payment method</span><strong>{settlementLabel}</strong></div>
             {t.attemptNumber > 1 && <div className="deal-detail"><span>Attempt</span><strong>{t.attemptNumber}</strong></div>}
           </div>
         </details>
+
+        <section className="deal-support" aria-labelledby="deal-support-title">
+          <div className="deal-support__heading">
+            <div>
+              <p className="deal-room__section-label">Need help with this deal?</p>
+              <h2 id="deal-support-title">Report an issue</h2>
+              <p>Tell CollectTT what went wrong. We’ll create a support record and notify the other member.</p>
+            </div>
+            <AlertTriangle aria-hidden="true" />
+          </div>
+
+          {hasOtherOpenDispute && <p className="deal-support__notice">The other member has reported an issue with this deal. We’ll let you know when support records a decision.</p>}
+
+          {myDisputes.length > 0 && (
+            <div className="deal-support__history" aria-label="Your dispute history">
+              {myDisputes.map((dispute) => (
+                <article className="deal-support__report" key={dispute.id}>
+                  <div>
+                    <strong>{DISPUTE_REASON_LABELS[dispute.reason as keyof typeof DISPUTE_REASON_LABELS] ?? humanize(dispute.reason)}</strong>
+                    <span className={`deal-support__status deal-support__status--${dispute.status}`}>{humanize(dispute.status)}</span>
+                  </div>
+                  <p>{dispute.detail}</p>
+                  {dispute.resolution !== null && <small>Support response: {dispute.resolution}</small>}
+                </article>
+              ))}
+            </div>
+          )}
+
+          {hasOpenDispute ? (
+            <p className="deal-support__notice">Your report is open. You can add more context after support reviews this one.</p>
+          ) : (
+            <form className="deal-support__form" action={submitDisputeAction}>
+              <input type="hidden" name="transactionId" value={id} />
+              <label htmlFor="dispute-reason">What went wrong?</label>
+              <select id="dispute-reason" name="reason" required defaultValue="">
+                <option value="" disabled>Select an issue</option>
+                {DISPUTE_REASONS.map((reason) => <option key={reason} value={reason}>{DISPUTE_REASON_LABELS[reason]}</option>)}
+              </select>
+              <label htmlFor="dispute-detail">Tell us what happened</label>
+              <textarea id="dispute-detail" name="detail" required minLength={10} maxLength={2000} rows={5} aria-describedby="dispute-detail-help" />
+              <p id="dispute-detail-help">Include the key facts, dates, and any agreed next step. 10 to 2,000 characters.</p>
+              <button type="submit">Submit dispute</button>
+            </form>
+          )}
+        </section>
       </div>
     </main>
   );

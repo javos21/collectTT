@@ -1,0 +1,1 @@
+-- Schema snapshot companion for 0033_restriction_lifecycle_audit.sql.

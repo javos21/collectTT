@@ -15,18 +15,18 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
+import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
 import { auth } from '@/lib/auth';
 import { requireStoreStaff, NotStoreStaffError } from '@/lib/store-session';
 import { storeBoard, type StoreBoardRow } from '@/services/custody';
 import {
   lookupByCodeAction,
   receiveByCodeAction,
-  releaseItemAction,
   returnToSellerAction,
 } from './actions';
 
@@ -37,13 +37,6 @@ const SETTLED_LABELS: Record<string, string> = {
   returned_to_seller: 'Returned to seller',
   voided: 'Never arrived — closed',
 };
-
-const COUNTER_MODES = ['receive', 'release'] as const;
-type CounterMode = (typeof COUNTER_MODES)[number];
-
-function isCounterMode(value: string | undefined): value is CounterMode {
-  return value !== undefined && COUNTER_MODES.includes(value as CounterMode);
-}
 
 function when(value: Date | null): string {
   return value === null ? '—' : value.toLocaleString('en-TT', { dateStyle: 'medium', timeStyle: 'short' });
@@ -100,45 +93,20 @@ function PaymentBadge({ paid }: { paid: boolean }) {
   );
 }
 
-function ResultAction({ row, mode, storeId }: { row: StoreBoardRow; mode: CounterMode; storeId: string }) {
+function ResultAction({ row, storeId }: { row: StoreBoardRow; storeId: string }) {
   if (row.state === 'awaiting_dropoff') {
-    return mode === 'receive' ? (
+    return (
       <form action={receiveByCodeAction}>
         <input type="hidden" name="storeId" value={storeId} />
         <input type="hidden" name="code" value={row.dropoffCode} />
         <input type="hidden" name="mode" value="receive" />
         <button className="store-counter-primary-action" type="submit">Receive item</button>
       </form>
-    ) : (
-      <p className="store-counter-action-note store-counter-action-note--neutral">
-        This item is waiting for the seller to drop it off. Switch to Receive to accept it.
-      </p>
     );
   }
 
   if (row.state === 'at_relay' || row.state === 'release_authorized') {
-    if (mode !== 'release') {
-      return <p className="store-counter-action-note store-counter-action-note--neutral">Already received. Switch to Release when the buyer arrives.</p>;
-    }
-
-    if (!row.paid) {
-      return (
-        <div className="store-counter-release-block">
-          <p className="store-counter-action-note store-counter-action-note--danger" role="alert">
-            Payment not confirmed — do not release this item.
-          </p>
-          <button className="store-counter-primary-action" type="button" disabled>Release item</button>
-        </div>
-      );
-    }
-
-    return (
-      <form action={releaseItemAction}>
-        <input type="hidden" name="storeId" value={storeId} />
-        <input type="hidden" name="holdingId" value={row.holdingId} />
-        <button className="store-counter-primary-action" type="submit">Release item</button>
-      </form>
-    );
+    return <p className="store-counter-action-note store-counter-action-note--success">Received. The buyer confirms collection from their deal.</p>;
   }
 
   if (row.state === 'picked_up') {
@@ -155,10 +123,9 @@ export default async function StoreBoardPage({
   params: Promise<{ storeId: string }>;
   searchParams: Promise<{ refuse?: string; error?: string; ok?: string; mode?: string; lookup?: string }>;
 }) {
+  if (!isLegacyFeatureAllowed('store_custody')) notFound();
   const { storeId } = await params;
   const flash = await searchParams;
-  const mode: CounterMode = isCounterMode(flash.mode) ? flash.mode : 'release';
-
   if ((await currentUser()) === null) redirect('/sign-in');
 
   let session;
@@ -186,7 +153,7 @@ export default async function StoreBoardPage({
         <div>
           <p className="store-counter-eyebrow">Store counter</p>
           <h1>{session.store.name}</h1>
-          <p className="store-counter-lede">Scan or enter a code to receive or release an item.</p>
+          <p className="store-counter-lede">Scan or enter a seller&apos;s code to receive an item.</p>
         </div>
         <time dateTime={new Date().toISOString()}>{today()}</time>
       </header>
@@ -201,20 +168,17 @@ export default async function StoreBoardPage({
 
       <div className="store-counter-layout">
         <div className="store-counter-main">
-          <section className="store-counter-panel store-counter-lookup" aria-label="Find an item to receive or release">
-            <nav className="store-counter-mode" aria-label="Counter action">
-              <Link className={mode === 'receive' ? 'is-active' : ''} href={`/store/${storeId}?mode=receive`} aria-current={mode === 'receive' ? 'page' : undefined}>
+          <section className="store-counter-panel store-counter-lookup" aria-label="Find an item to receive">
+            <div className="store-counter-mode" aria-label="Counter action">
+              <div className="is-active">
                 <Package size={22} aria-hidden="true" /><span><strong>Receive item</strong><small>Item from seller to Store</small></span>
-              </Link>
-              <Link className={mode === 'release' ? 'is-active' : ''} href={`/store/${storeId}?mode=release`} aria-current={mode === 'release' ? 'page' : undefined}>
-                <Inbox size={22} aria-hidden="true" /><span><strong>Release item</strong><small>Item from Store to buyer</small></span>
-              </Link>
-            </nav>
+              </div>
+            </div>
 
             <form className="store-counter-lookup__form" action={lookupByCodeAction}>
               <input type="hidden" name="storeId" value={storeId} />
-              <input type="hidden" name="mode" value={mode} />
-              <label htmlFor="counter-code">{mode === 'receive' ? 'Drop-off code' : 'Buyer collection code'}</label>
+              <input type="hidden" name="mode" value="receive" />
+              <label htmlFor="counter-code">Drop-off code</label>
               <div className="store-counter-code-entry">
                 <ScanLine size={24} aria-hidden="true" />
                 <input id="counter-code" name="code" type="text" autoComplete="off" autoCapitalize="characters" placeholder="e.g. CT-K4M9" autoFocus required />
@@ -251,14 +215,14 @@ export default async function StoreBoardPage({
                 <div className="store-counter-result__action">
                   <div>
                     {matched.state === 'at_relay' || matched.state === 'release_authorized' ? (
-                      <p>Verify the buyer&apos;s name, then hand over the item.</p>
+                      <p>Hand the item to the named buyer. They will confirm collection in their deal.</p>
                     ) : matched.state === 'awaiting_dropoff' ? (
                       <p>Check the seller&apos;s item against this record before receiving it.</p>
                     ) : (
                       <p>{SETTLED_LABELS[matched.state] ?? 'No action needed.'}</p>
                     )}
                   </div>
-                  <ResultAction row={matched} mode={mode} storeId={storeId} />
+                  <ResultAction row={matched} storeId={storeId} />
                 </div>
               </>
             )}
@@ -288,7 +252,7 @@ export default async function StoreBoardPage({
                 <div className="store-counter-list-row__copy"><h3>{row.listingTitle}</h3><p>{row.buyerName ?? 'Buyer not assigned'} · {heldFor(row)}</p></div>
                 <PaymentBadge paid={row.paid} />
                 <div className="store-counter-list-row__actions">
-                  {row.paid ? <form action={releaseItemAction}><input type="hidden" name="storeId" value={storeId} /><input type="hidden" name="holdingId" value={row.holdingId} /><button type="submit">Release</button></form> : <span className="store-counter-list-row__hold">Keep on shelf</span>}
+                  <span className="store-counter-list-row__hold">Buyer confirms collection</span>
                   <form action={returnToSellerAction}><input type="hidden" name="storeId" value={storeId} /><input type="hidden" name="holdingId" value={row.holdingId} /><input type="hidden" name="view" value="overview" /><button className="store-counter-quiet-action" type="submit">Return</button></form>
                 </div>
               </article>
@@ -304,7 +268,7 @@ export default async function StoreBoardPage({
 
       <section id="history" className="store-counter-history" aria-labelledby="history-title">
         <div className="store-counter-list-heading"><div><p className="store-counter-section-kicker">Audit trail</p><h2 id="history-title">History</h2></div><span className="store-counter-muted">Newest first</span></div>
-        {settled.length === 0 ? <p className="store-counter-muted">Completed releases and returns will appear here.</p> : <div className="store-counter-history__table-wrap"><table><thead><tr><th>Item</th><th>Outcome</th><th>When</th></tr></thead><tbody>{settled.map((row) => <tr key={row.holdingId}><td>{row.listingTitle}</td><td>{SETTLED_LABELS[row.state] ?? row.state.replace(/_/g, ' ')}</td><td>{when(row.updatedAt)}</td></tr>)}</tbody></table></div>}
+        {settled.length === 0 ? <p className="store-counter-muted">Completed collections and returns will appear here.</p> : <div className="store-counter-history__table-wrap"><table><thead><tr><th>Item</th><th>Outcome</th><th>When</th></tr></thead><tbody>{settled.map((row) => <tr key={row.holdingId}><td>{row.listingTitle}</td><td>{SETTLED_LABELS[row.state] ?? row.state.replace(/_/g, ' ')}</td><td>{when(row.updatedAt)}</td></tr>)}</tbody></table></div>}
       </section>
 
       <form className="store-counter-signout" action={signOut}><button type="submit"><LogOut size={16} aria-hidden="true" /> Log out</button></form>

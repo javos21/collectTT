@@ -7,7 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { catalogValues } from '@/db/schema/catalog';
 import { categories } from '@/db/schema/listings';
-import { requireAdmin } from '@/lib/admin';
+import { requireAdminAction } from '@/lib/admin';
 
 function text(formData: FormData, field: string): string {
   return String(formData.get(field) ?? '').trim();
@@ -23,7 +23,7 @@ function finish(message: string): never {
 }
 
 export async function saveCategoryAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireAdminAction();
   const originalKey = text(formData, 'originalKey');
   const label = text(formData, 'label');
   const key = safeKey(text(formData, 'key') || label);
@@ -43,7 +43,7 @@ export async function saveCategoryAction(formData: FormData): Promise<void> {
 }
 
 export async function removeCategoryAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireAdminAction();
   const key = text(formData, 'key');
   const label = text(formData, 'label') || key;
   const sortOrder = Number(text(formData, 'sortOrder') || 0);
@@ -55,7 +55,7 @@ export async function removeCategoryAction(formData: FormData): Promise<void> {
 }
 
 export async function saveCatalogValueAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireAdminAction();
   const id = text(formData, 'id');
   const kind = text(formData, 'kind');
   const label = text(formData, 'label');
@@ -76,7 +76,7 @@ export async function saveCatalogValueAction(formData: FormData): Promise<void> 
 }
 
 export async function removeCatalogValueAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireAdminAction();
   const id = text(formData, 'id');
   const kind = text(formData, 'kind');
   const key = text(formData, 'key');

@@ -80,16 +80,16 @@ export default async function BrowsePage({
     params.saleType === 'straight_sale' || params.saleType === 'auction'
       ? params.saleType
       : undefined;
-  // A search launched from the homepage should search the complete catalog. Keep
-  // straight sales as the default only for an unfiltered visit to /listings.
-  const saleType = requestedSaleType ?? (query === '' ? 'straight_sale' : undefined);
+  // The general marketplace always includes both sale types unless a tab is chosen.
+  const saleType = requestedSaleType;
   const deliveryIds = new Set(availableDeliveryOptions.map((option) => option.id));
   const paymentKeys = new Set(availablePaymentOptions.map((option) => option.key));
   const delivery = stringValues(params.delivery).filter((value) => deliveryIds.has(value));
   const payment = stringValues(params.payment).filter((value) => paymentKeys.has(value));
   const sort = BROWSE_SORTS.includes(params.sort as BrowseSort)
     ? (params.sort as BrowseSort)
-    : 'newest';
+    : saleType === 'auction' ? 'ending_soon' : 'newest';
+  const location = typeof params.location === 'string' ? params.location.trim() : '';
   const minPriceInput = typeof params.minPrice === 'string' ? params.minPrice : '';
   const maxPriceInput = typeof params.maxPrice === 'string' ? params.maxPrice : '';
   const minPriceCents = Number.isFinite(Number(minPriceInput)) && Number(minPriceInput) > 0
@@ -99,6 +99,7 @@ export default async function BrowsePage({
     ? Math.round(Number(maxPriceInput) * 100)
     : undefined;
   const page = Math.max(1, Number.parseInt(String(params.page ?? '1'), 10) || 1);
+  const cursor = typeof params.cursor === 'string' ? params.cursor : undefined;
 
   // Only attributes the category declares as filterable are honoured (a query string
   // cannot smuggle arbitrary JSONB predicates in), and each value is coerced to the
@@ -113,7 +114,7 @@ export default async function BrowsePage({
   const attributes =
     activeCategoryDefinition !== undefined ? coerceFiltersForDefinition(activeCategoryDefinition, raw) : {};
 
-  const { rows, total, pageSize } = await browseListings({
+  const { rows, total, pageSize, nextCursor } = await browseListings({
     ...(query !== '' ? { query } : {}),
     ...(selectedCategories.length > 0 ? { categories: selectedCategories } : {}),
     ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
@@ -122,8 +123,9 @@ export default async function BrowsePage({
     ...(payment.length > 0 ? { settlementMethods: payment } : {}),
     ...(minPriceCents !== undefined ? { minPriceCents } : {}),
     ...(maxPriceCents !== undefined ? { maxPriceCents } : {}),
+    ...(location !== '' ? { location } : {}),
     sort,
-    page,
+    ...(cursor !== undefined ? { cursor } : { page }),
   });
   const sellerSnapshots = await trustSnapshotsForMembers(db, rows.map((row) => row.sellerId));
 
@@ -137,7 +139,9 @@ export default async function BrowsePage({
     payment?: readonly string[] | null;
     minPrice?: string | null;
     maxPrice?: string | null;
+    location?: string | null;
     page?: number;
+    cursor?: string | null;
   } = {}) => {
     const qs = new URLSearchParams();
     if (query !== '') qs.set('q', query);
@@ -154,10 +158,14 @@ export default async function BrowsePage({
     if (nextMinPrice) qs.set('minPrice', nextMinPrice);
     const nextMaxPrice = 'maxPrice' in overrides ? overrides.maxPrice : maxPriceInput;
     if (nextMaxPrice) qs.set('maxPrice', nextMaxPrice);
+    const nextLocation = 'location' in overrides ? overrides.location : location;
+    if (nextLocation) qs.set('location', nextLocation);
     for (const [key, value] of Object.entries(raw)) {
       if (value !== undefined) qs.set(`attr_${key}`, value);
     }
     if ((overrides.page ?? 1) > 1) qs.set('page', String(overrides.page));
+    const nextCursor = 'cursor' in overrides ? overrides.cursor : undefined;
+    if (nextCursor) qs.set('cursor', nextCursor);
     const s = qs.toString();
     return s === '' ? '/listings' : `/listings?${s}`;
   };
@@ -166,7 +174,7 @@ export default async function BrowsePage({
   const activeFilters = activeCategoryDefinition !== undefined ? filtersForDefinition(activeCategoryDefinition) : [];
 
   const hasActiveFilters =
-    query !== '' || selectedCategories.length > 0 || delivery.length > 0 || payment.length > 0 ||
+    query !== '' || selectedCategories.length > 0 || delivery.length > 0 || payment.length > 0 || location !== '' ||
     minPriceCents !== undefined || maxPriceCents !== undefined || Object.keys(attributes).length > 0;
 
   return (
@@ -177,6 +185,7 @@ export default async function BrowsePage({
         </div>
         <form className="catalog-search" action="/listings" method="get" role="search">
           {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
+          {location !== '' && <input type="hidden" name="location" value={location} />}
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2" stroke="currentColor" strokeWidth="1.8" /><path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
           <label className="sr-only" htmlFor="catalog-query">Search listings</label>
           <input id="catalog-query" name="q" type="search" defaultValue={query} placeholder="Search listings" />
@@ -199,6 +208,10 @@ export default async function BrowsePage({
           <form method="get" className="filter-form" aria-label="Listing filters">
             {query !== '' && <input type="hidden" name="q" value={query} />}
             {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
+            <div className="form-field form-field--compact">
+              <label htmlFor="location">Location</label>
+              <input id="location" name="location" type="search" placeholder="Area or meetup" defaultValue={location} />
+            </div>
             <fieldset className="filter-checklist">
               <legend>Category</legend>
               {availableCategories.map((c) => (
@@ -259,6 +272,7 @@ export default async function BrowsePage({
         {/* -------------------------------------------------- results */}
         <div className="catalog-results">
           <nav className="browse-type-tabs" aria-label="Browse by sale type">
+            <Link className={saleType === undefined ? 'is-active' : ''} href={browseHref({ saleType: null, page: 1 })}>All listings</Link>
             <Link className={saleType === 'straight_sale' ? 'is-active' : ''} href={browseHref({ saleType: 'straight_sale', page: 1 })}>Straight Sales</Link>
             <Link className={saleType === 'auction' ? 'is-active' : ''} href={browseHref({ saleType: 'auction', page: 1 })}>Auctions</Link>
           </nav>
@@ -277,6 +291,7 @@ export default async function BrowsePage({
               {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
               {delivery.map((value) => <input key={value} type="hidden" name="delivery" value={value} />)}
               {payment.map((value) => <input key={value} type="hidden" name="payment" value={value} />)}
+              {location !== '' && <input type="hidden" name="location" value={location} />}
               {minPriceCents !== undefined && <input type="hidden" name="minPrice" value={minPriceInput} />}
               {maxPriceCents !== undefined && <input type="hidden" name="maxPrice" value={maxPriceInput} />}
               {Object.entries(raw).map(([key, value]) => value !== undefined && <input key={key} type="hidden" name={`attr_${key}`} value={value} />)}
@@ -368,15 +383,19 @@ export default async function BrowsePage({
                 })}
               </div>
 
-              {totalPages > 1 && (
+              {(nextCursor !== undefined || totalPages > 1) && (
                 <nav className="pager" aria-label="Pagination">
-                  {page > 1 ? (
+                  {cursor !== undefined ? (
+                    <Link className="pager__link" href={browseHref({ cursor: null, page: 1 })} rel="prev">← Restart</Link>
+                  ) : page > 1 ? (
                     <Link className="pager__link" href={pageHref(page - 1)} rel="prev">← Previous</Link>
                   ) : (
                     <span className="pager__link is-disabled" aria-disabled="true">← Previous</span>
                   )}
-                  <span className="pager__status num">Page {page} of {totalPages}</span>
-                  {page < totalPages ? (
+                  <span className="pager__status num">{cursor !== undefined ? 'More listings' : `Page ${page} of ${totalPages}`}</span>
+                  {nextCursor !== undefined ? (
+                    <Link className="pager__link" href={browseHref({ cursor: nextCursor, page: 1 })} rel="next">Next →</Link>
+                  ) : page < totalPages ? (
                     <Link className="pager__link" href={pageHref(page + 1)} rel="next">Next →</Link>
                   ) : (
                     <span className="pager__link is-disabled" aria-disabled="true">Next →</span>

@@ -40,7 +40,7 @@ describe('shared active-deal summary', () => {
     );
 
     expect(summary.role).toBe('selling');
-    expect(summary.needsAttention).toBe(false);
+    expect(summary.needsAttention).toBe(true);
     expect(summary.nextStep).toBe('Drop off item');
     expect(summary.physicalTask).toBe('to_drop_off');
     expect(summary.deadlineAt).toBe(baseDeal.sellerDropoffDeadlineAt?.toISOString());
@@ -60,10 +60,27 @@ describe('shared active-deal summary', () => {
     );
 
     expect(summary.physicalTask).toBe('to_collect');
+    expect(summary.needsAttention).toBe(true);
     expect(summary.currentState).toBe('Ready for pickup');
     expect(summary.nextStep).toBe('Collect item');
     expect(summary.canShowCode).toBe(true);
     expect(summary.deadlineAt).toBe('2026-09-14T12:00:00.000Z');
+  });
+
+  it('lets the buyer collect as soon as a paid item is on the shelf', () => {
+    const summary = summarizeActiveDeal(
+      {
+        ...baseDeal,
+        paymentState: 'confirmed' as const,
+        custodyState: 'at_relay' as const,
+        custodyExpiresAt: new Date('2026-09-12T12:00:00.000Z'),
+      },
+      'buyer-1',
+    );
+
+    expect(summary.needsAttention).toBe(true);
+    expect(summary.physicalTask).toBe('to_collect');
+    expect(summary.nextStep).toBe('Collect item');
   });
 
   it('keeps a shelf item visible as waiting rather than presenting it as actionable', () => {

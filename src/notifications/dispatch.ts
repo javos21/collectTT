@@ -3,8 +3,8 @@
  *
  * Call sites never name a channel. They say "this happened, tell this person", and the
  * dispatcher fans out to whichever adapters are registered and enabled for that member.
- * Adding WhatsApp later is: implement the adapter, register it here. Zero call-site
- * changes anywhere in the codebase — that is the seam the plan asked for.
+ * Channel selection stays centralized here so event producers do not need to know
+ * how in-app and email delivery are dispatched.
  *
  * ★ `notify()` takes an open DB transaction and writes the delivery rows inside it, so
  *   a state change and the notifications about it commit or roll back together.
@@ -13,11 +13,12 @@
 import { randomUUID } from 'node:crypto';
 
 import type { DbOrTx } from '../db/client';
-import { notificationDeliveries, notifications } from '../db/schema/notifications';
+import { notificationDeliveries, notificationPreferences, notifications } from '../db/schema/notifications';
 import { enqueue } from '../jobs/enqueue';
-import { EVENTS, type EventType } from './events';
+import { EVENTS, isEssentialEvent, type EventType } from './events';
+import { and, eq } from 'drizzle-orm';
 
-export const NOTIFICATION_CHANNELS = ['in_app', 'email', 'whatsapp', 'sms'] as const;
+export const NOTIFICATION_CHANNELS = ['in_app', 'email', 'sms'] as const;
 
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
@@ -101,6 +102,23 @@ export async function notify(input: NotifyInput): Promise<void> {
   const eventId = randomUUID();
   const baseKey = input.idempotencyKey ?? eventId;
 
+  // Preferences are deliberately checked while writing the event, not later in the
+  // worker. That makes the user's choice part of the same transaction as the domain
+  // transition and prevents a queued email from being sent after an opt-out.
+  const preferenceRows = isEssentialEvent(input.event)
+    ? []
+    : await input.tx
+      .select({ channel: notificationPreferences.channel, enabled: notificationPreferences.enabled })
+      .from(notificationPreferences)
+      .where(and(
+        eq(notificationPreferences.userId, input.userId),
+        eq(notificationPreferences.eventType, def.type),
+      ));
+  const disabledChannels = new Set(
+    preferenceRows.filter((row) => !row.enabled).map((row) => row.channel),
+  );
+  const channelEnabled = (channel: NotificationChannel): boolean => !disabledChannels.has(channel);
+
   const message: RenderedMessage = {
     title: def.title(data),
     body: def.body(data),
@@ -108,7 +126,7 @@ export async function notify(input: NotifyInput): Promise<void> {
   };
 
   // The in-app inbox row is written directly — it IS the in-app channel's delivery.
-  if (def.channels.includes('in_app')) {
+  if (def.channels.includes('in_app') && channelEnabled('in_app')) {
     await input.tx
       .insert(notifications)
       .values({
@@ -124,17 +142,20 @@ export async function notify(input: NotifyInput): Promise<void> {
 
   const rows = def.channels
     // Channels with no registered adapter are recorded as skipped rather than silently
-    // dropped, so "WhatsApp was not built yet" is visible in the data.
+    // dropped, so a future channel misconfiguration remains visible in the data.
     .map((channel) => ({
       eventId,
       userId: input.userId,
       eventType: def.type,
       channel,
-      status: (channel === 'in_app'
+      status: (!channelEnabled(channel)
+        ? 'skipped'
+        : channel === 'in_app'
         ? 'sent'
         : adapters.has(channel)
           ? 'pending'
           : 'skipped') as 'sent' | 'pending' | 'skipped',
+      ...(channelEnabled(channel) ? {} : { lastError: 'disabled by member preference' }),
       payload: { message, data },
       dedupeKey: `${baseKey}:${input.userId}:${channel}`,
       ...(channel === 'in_app' ? { sentAt: new Date() } : {}),

@@ -89,6 +89,7 @@ function scheduledCrontab(): string {
   const wanted: Array<[schedule: string, task: string]> = [
     ['0 3 * * *', 'reputation:recompute'],
     ['30 3 * * *', 'consistency:check'],
+    ['45 3 * * *', 'security:rate_limit_cleanup'],
   ];
   return wanted
     .filter(([, task]) => IMPLEMENTED_TASKS.includes(task))

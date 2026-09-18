@@ -3,7 +3,7 @@
  *
  *   draft ──publish──► active ──┬── claim (straight sale) ────► claimed
  *                               ├── auction closes w/ bid ────► ended_won
- *                               ├── auction closes no bid ────► ended_no_sale
+ *                               ├── auction closes no bid ────► expired (v1)
  *                               ├── seller cancels ───────────► cancelled
  *                               └── ends_at passes ───────────► expired
  *
@@ -30,6 +30,7 @@ export const LISTING_STATUSES = [
   'ended_no_sale',
   'cancelled',
   'expired',
+  'sold_outside',
 ] as const;
 
 export type ListingStatus = (typeof LISTING_STATUSES)[number];
@@ -39,20 +40,22 @@ export const TERMINAL_LISTING_STATUSES = [
   'ended_no_sale',
   'cancelled',
   'expired',
+  'sold_outside',
 ] as const satisfies readonly ListingStatus[];
 
 export const LISTING_TRANSITIONS = {
   draft: ['active', 'cancelled'],
   // 'claimed' covers both a straight-sale claim and an auction that resolved to a
   // winner but has not completed yet.
-  active: ['claimed', 'ended_won', 'ended_no_sale', 'cancelled', 'expired'],
+  active: ['claimed', 'ended_won', 'ended_no_sale', 'cancelled', 'expired', 'sold_outside'],
   // A failed auction attempt with bids left keeps the listing here; with none left it
   // either returns to the shelf or gives up. Fixed-price failures have no next claimant.
   claimed: ['active', 'ended_won', 'ended_no_sale', 'cancelled'],
   ended_won: [],
-  ended_no_sale: ['active'], // seller may relist
+  ended_no_sale: [], // v1 relist creates a distinct draft; legacy rows remain readable
   cancelled: [],
-  expired: ['active'], // seller may relist
+  expired: [], // v1 relist creates a distinct draft
+  sold_outside: [],
 } as const satisfies Record<ListingStatus, readonly ListingStatus[]>;
 
 export type NextListingStatus<S extends ListingStatus> = (typeof LISTING_TRANSITIONS)[S][number];
@@ -65,12 +68,11 @@ export const LISTING_TRANSITION_ACTORS: Record<string, readonly ActorRole[]> = {
   'active->ended_no_sale': ['system'],
   'active->cancelled': ['seller', 'admin'],
   'active->expired': ['system'],
+  'active->sold_outside': ['seller'],
   'claimed->active': ['system'],
   'claimed->ended_won': ['system'],
   'claimed->ended_no_sale': ['system'],
   'claimed->cancelled': ['admin'],
-  'ended_no_sale->active': ['seller', 'admin'],
-  'expired->active': ['seller', 'admin'],
 };
 
 /** COMPILE-TIME guard — see the equivalent in ./payment.ts. */

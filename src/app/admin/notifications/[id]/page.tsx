@@ -11,7 +11,7 @@ import { requireAdmin } from '@/lib/admin';
 import { AdminFrame } from '../../admin-frame';
 import { RetryDeliveryForm } from '../retry-delivery-form';
 
-const CHANNELS = ['in_app', 'email', 'whatsapp', 'sms'] as const;
+const CHANNELS = ['in_app', 'email', 'sms'] as const;
 
 function dateTime(value: Date | null): string {
   return value === null ? '—' : value.toLocaleString('en-TT', { dateStyle: 'medium', timeStyle: 'short' });

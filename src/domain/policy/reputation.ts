@@ -30,8 +30,12 @@ export type ReputationEventType = (typeof REPUTATION_EVENT_TYPES)[number];
 export const RESTRICTION_TYPES = [
   'prepay_required', // must pay before the seller commits anything
   'meetup_only', // cannot use the relay or delivery rails
-  'claim_blocked',
+  // v1 keeps reserve, bid, and publish scopes independent. The legacy names below
+  // remain in the enum so historical rows can still be read and lifted safely.
+  'reserve_blocked',
   'bid_blocked',
+  'publish_blocked',
+  'claim_blocked',
   'listing_cap',
 ] as const;
 
@@ -52,16 +56,22 @@ export const THRESHOLDS = {
   buyer: {
     /** Reneges in the trailing 90 days that trigger "you must prepay". */
     prepayRequiredAt: 2,
+    /** Reneges in the trailing window that pause auction bidding. */
+    bidBlockedAt: 2,
     /** Reneges in the trailing 90 days that block claiming entirely. */
     claimBlockedAt: 4,
+    /** Reneges in the trailing window that pause new reservations. */
+    reserveBlockedAt: 4,
   },
   seller: {
     /** Failed drop-offs / no-shows in 90 days that force meetup-only. */
     meetupOnlyAt: 2,
     /** Failed drop-offs / no-shows in 90 days that block new listings. */
     listingCapAt: 4,
+    /** Failed sales in the trailing window that pause publishing. */
+    publishBlockedAt: 4,
   },
-  /** Below this many completed deals a member counts as "new" for seller policies. */
+  /** Below this many completed purchases a member counts as a new buyer. */
   newMemberCompletedDeals: 3,
   /** Rolling window all `_90d` counters use. */
   rollingWindowDays: 90,
@@ -80,23 +90,39 @@ export interface SellerCounters {
 
 /** Which restrictions a buyer's objective record currently earns them. */
 export function buyerRestrictions(c: BuyerCounters): RestrictionType[] {
+  return buyerRestrictionsWithThresholds(c, THRESHOLDS.buyer);
+}
+
+export function buyerRestrictionsWithThresholds(
+  c: BuyerCounters,
+  thresholds: { prepayRequiredAt: number; bidBlockedAt: number; reserveBlockedAt: number },
+): RestrictionType[] {
   const out: RestrictionType[] = [];
-  if (c.buyRenegedIn90d >= THRESHOLDS.buyer.claimBlockedAt) out.push('claim_blocked');
-  else if (c.buyRenegedIn90d >= THRESHOLDS.buyer.prepayRequiredAt) out.push('prepay_required');
+  // `prepay_required` is a legacy/manual label. Automatic v1 enforcement is scoped
+  // to bid and reserve actions; the prepay threshold is used for a warning event.
+  if (c.buyRenegedIn90d >= thresholds.bidBlockedAt) out.push('bid_blocked');
+  if (c.buyRenegedIn90d >= thresholds.reserveBlockedAt) out.push('reserve_blocked');
   return out;
 }
 
 /** Which restrictions a seller's objective record currently earns them. */
 export function sellerRestrictions(c: SellerCounters): RestrictionType[] {
+  return sellerRestrictionsWithThresholds(c, THRESHOLDS.seller);
+}
+
+export function sellerRestrictionsWithThresholds(
+  c: SellerCounters,
+  thresholds: { meetupOnlyAt: number; publishBlockedAt: number },
+): RestrictionType[] {
   const out: RestrictionType[] = [];
   const failures = c.sellRenegedIn90d + c.sellNoShows;
-  if (failures >= THRESHOLDS.seller.listingCapAt) out.push('listing_cap');
-  else if (failures >= THRESHOLDS.seller.meetupOnlyAt) out.push('meetup_only');
+  if (failures >= thresholds.meetupOnlyAt) out.push('meetup_only');
+  if (failures >= thresholds.publishBlockedAt) out.push('publish_blocked');
   return out;
 }
 
-export function isNewMember(completedDeals: number): boolean {
-  return completedDeals < THRESHOLDS.newMemberCompletedDeals;
+export function isNewMember(completedPurchases: number): boolean {
+  return completedPurchases < THRESHOLDS.newMemberCompletedDeals;
 }
 
 /**

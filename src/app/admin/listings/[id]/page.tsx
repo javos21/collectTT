@@ -13,6 +13,7 @@ import { transactions } from '@/db/schema/transactions';
 import { formatMoney } from '@/domain/money';
 import { requireAdmin } from '@/lib/admin';
 import { AdminFrame } from '../../admin-frame';
+import { invalidateAuctionBidAction, removeListingAction, reactivateListingAction } from '../../actions';
 
 function dateTime(value: Date | null): string {
   return value === null ? '—' : value.toLocaleString('en-TT', { dateStyle: 'medium', timeStyle: 'short' });
@@ -40,8 +41,9 @@ function fileSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default async function AdminListingDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AdminListingDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ adminSuccess?: string; adminError?: string }> }) {
   const { id } = await params;
+  const feedback = await searchParams;
   await requireAdmin(`/admin/listings/${encodeURIComponent(id)}`);
 
   const listingRows = await db
@@ -206,6 +208,33 @@ export default async function AdminListingDetailPage({ params }: { params: Promi
           </section>
         </div>
 
+        <section className="admin-panel admin-detail-section" aria-labelledby="listing-moderation-title">
+          <div className="admin-panel__heading"><div><h2 id="listing-moderation-title">Guided moderation</h2><p className="admin-panel__subcopy">State-guarded listing removal and eligible reactivation. Each action notifies the seller and writes both listing and admin audit events.</p></div><ClipboardList size={19} aria-hidden="true" /></div>
+          {feedback.adminSuccess !== undefined && <p className="admin-form-success" role="status">{feedback.adminSuccess}</p>}
+          {feedback.adminError !== undefined && <p className="admin-form-error" role="alert">{feedback.adminError}</p>}
+          <div className="admin-action-grid">
+            {(listing.status === 'active' || listing.status === 'draft') && (
+              <form className="admin-action-card" action={removeListingAction}>
+                <input type="hidden" name="listingId" value={listing.id} />
+                <h3>Remove listing</h3>
+                <label htmlFor="remove-listing-reason">Reason</label>
+                <textarea id="remove-listing-reason" name="reason" minLength={10} maxLength={500} rows={3} required />
+                <button className="admin-button admin-button--danger" type="submit">Remove listing</button>
+              </form>
+            )}
+            {(listing.status === 'expired' || listing.status === 'ended_no_sale') && listing.saleType === 'straight_sale' && (
+              <form className="admin-action-card" action={reactivateListingAction}>
+                <input type="hidden" name="listingId" value={listing.id} />
+                <h3>Reactivate listing</h3>
+                <label htmlFor="reactivate-listing-reason">Reason</label>
+                <textarea id="reactivate-listing-reason" name="reason" minLength={10} maxLength={500} rows={3} required />
+                <button className="admin-button" type="submit">Reactivate listing</button>
+              </form>
+            )}
+            {listing.status !== 'active' && listing.status !== 'draft' && !(listing.status === 'expired' || listing.status === 'ended_no_sale') && <p className="admin-action-note">This listing is not eligible for a guided moderation transition.</p>}
+          </div>
+        </section>
+
         <section className="admin-panel admin-detail-section" aria-labelledby="listing-description-title">
           <div className="admin-panel__heading"><div><h2 id="listing-description-title">Description and attributes</h2><p className="admin-panel__subcopy">Seller-provided listing content, preserved for moderation context.</p></div><Tags size={19} aria-hidden="true" /></div>
           {listing.description !== null && <p className="admin-detail-note">{listing.description}</p>}
@@ -224,7 +253,7 @@ export default async function AdminListingDetailPage({ params }: { params: Promi
 
         <section className="admin-panel admin-detail-section" aria-labelledby="listing-bids-title">
           <div className="admin-panel__heading"><div><h2 id="listing-bids-title">Bids</h2><p className="admin-panel__subcopy">Auction ladder with bidder and outcome context.</p></div><Gavel size={19} aria-hidden="true" /></div>
-          {bidRows.length === 0 ? <p className="admin-empty-copy">No bids recorded.</p> : <div className="admin-table-wrap"><table className="admin-detail-table"><caption className="sr-only">Listing bids</caption><thead><tr><th scope="col">Bidder</th><th scope="col">Amount</th><th scope="col">State</th><th scope="col">Type</th><th scope="col">Placed</th></tr></thead><tbody>{bidRows.map((bid) => <tr key={bid.id}><th scope="row"><Link className="admin-row-link" href={`/admin/members/${encodeURIComponent(bid.bidderId)}`}>{bid.bidderName}</Link><small>@{bid.bidderHandle}</small></th><td>{money(bid.amountCents, listing.currency)}</td><td><span className={`admin-status admin-status--${statusTone(bid.status)}`}>{label(bid.status)}</span></td><td>{bid.isBuyout ? 'Buyout' : 'Standard bid'}</td><td>{dateTime(bid.placedAt)}</td></tr>)}</tbody></table></div>}
+          {bidRows.length === 0 ? <p className="admin-empty-copy">No bids recorded.</p> : <div className="admin-table-wrap"><table className="admin-detail-table"><caption className="sr-only">Listing bids</caption><thead><tr><th scope="col">Bidder</th><th scope="col">Amount</th><th scope="col">State</th><th scope="col">Type</th><th scope="col">Placed</th><th scope="col">Admin action</th></tr></thead><tbody>{bidRows.map((bid) => <tr key={bid.id}><th scope="row"><Link className="admin-row-link" href={`/admin/members/${encodeURIComponent(bid.bidderId)}`}>{bid.bidderName}</Link><small>@{bid.bidderHandle}</small></th><td>{money(bid.amountCents, listing.currency)}</td><td><span className={`admin-status admin-status--${statusTone(bid.status)}`}>{label(bid.status)}</span></td><td>{bid.isBuyout ? 'Buyout' : 'Standard bid'}</td><td>{dateTime(bid.placedAt)}</td><td>{bid.status === 'void' || bid.status === 'retracted' ? <span className="muted">No action</span> : <form action={invalidateAuctionBidAction}><input type="hidden" name="listingId" value={listing.id} /><input type="hidden" name="bidId" value={bid.id} /><input name="reason" minLength={10} maxLength={500} placeholder="Reason (required)" required /><button className="secondary" type="submit">Invalidate</button></form>}</td></tr>)}</tbody></table></div>}
         </section>
 
         <section className="admin-panel admin-detail-section" aria-labelledby="listing-offers-title">

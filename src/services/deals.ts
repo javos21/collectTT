@@ -7,17 +7,21 @@ import { transactions } from '@/db/schema/transactions';
 import { usesCustodyTrack, type FulfillmentPath } from '@/domain/states/transaction';
 import type { CustodyState } from '@/domain/states/custody';
 import type { PaymentState } from '@/domain/states/payment';
+import type { HandoffState } from '@/domain/states/handoff';
 
-type DealAttentionState = Pick<typeof transactions.$inferSelect, 'state' | 'buyerId' | 'sellerId' | 'paymentState'>;
+type DealAttentionState = Pick<typeof transactions.$inferSelect, 'state' | 'buyerId' | 'sellerId' | 'paymentState' | 'custodyState'> & { handoffState?: HandoffState; disputeState?: 'none' | 'open' | 'resolved' };
 
 /** Whether this deal is currently waiting for an action from the signed-in user. */
 export function dealNeedsAttentionForUser(deal: DealAttentionState, userId: string): boolean {
   const isBuyer = deal.buyerId === userId;
   if (!isBuyer && deal.sellerId !== userId) return false;
 
-  return deal.state === 'open' && (
+  return deal.state === 'open' && deal.disputeState !== 'open' && (
     (isBuyer && deal.paymentState === 'pending') ||
-    (!isBuyer && deal.paymentState === 'buyer_marked_paid')
+    (!isBuyer && deal.paymentState === 'confirmed' && deal.custodyState === 'awaiting_dropoff') ||
+    (isBuyer && deal.paymentState === 'confirmed' && (deal.custodyState === 'at_relay' || deal.custodyState === 'release_authorized')) ||
+    (isBuyer && deal.handoffState === 'seller_handed_over') ||
+    (!isBuyer && deal.handoffState === 'awaiting_handoff' && deal.paymentState === 'confirmed')
   );
 }
 
@@ -29,9 +33,14 @@ export async function countDealsNeedingAttention(executor: DbOrTx, userId: strin
     .where(
       and(
         eq(transactions.state, 'open'),
+        eq(transactions.disputeState, 'none'),
         or(
           and(eq(transactions.buyerId, userId), eq(transactions.paymentState, 'pending')),
-          and(eq(transactions.sellerId, userId), eq(transactions.paymentState, 'buyer_marked_paid')),
+          and(eq(transactions.sellerId, userId), eq(transactions.paymentState, 'confirmed'), eq(transactions.custodyState, 'awaiting_dropoff')),
+          and(eq(transactions.buyerId, userId), eq(transactions.paymentState, 'confirmed'), eq(transactions.custodyState, 'at_relay')),
+          and(eq(transactions.buyerId, userId), eq(transactions.paymentState, 'confirmed'), eq(transactions.custodyState, 'release_authorized')),
+          and(eq(transactions.buyerId, userId), eq(transactions.handoffState, 'seller_handed_over')),
+          and(eq(transactions.sellerId, userId), eq(transactions.handoffState, 'awaiting_handoff'), eq(transactions.paymentState, 'confirmed')),
         ),
       ),
     );
@@ -55,7 +64,7 @@ export interface ActiveDealSummary {
   listingId: string;
   title: string;
   role: ActiveDealRole;
-  /** Whether this viewer currently has the next payment action. */
+  /** Whether this viewer currently has the next required action. */
   needsAttention: boolean;
   amountCents: number;
   fulfillmentPath: FulfillmentPath;
@@ -102,6 +111,9 @@ type ActiveDealInput = Pick<
   | 'sellerDropoffDeadlineAt'
   | 'custodyState'
 > & {
+  handoffState?: HandoffState;
+  receiptDeadlineAt?: Date | null;
+  disputeState?: 'none' | 'open' | 'resolved';
   title: string;
   custodyExpiresAt: Date | null;
   storeName: string | null;
@@ -119,6 +131,7 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
   const hasCustody = usesCustodyTrack(deal.fulfillmentPath);
   const custodyState = deal.custodyState as CustodyState;
   const paymentState = deal.paymentState as PaymentState;
+  const handoffState = deal.handoffState as HandoffState | undefined;
 
   let currentState = 'In progress';
   let nextStep = 'View full deal';
@@ -129,7 +142,7 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
     nextStep = isBuyer ? 'Pay the seller' : 'Waiting for buyer payment';
   } else if (paymentState === 'buyer_marked_paid') {
     currentState = 'Payment marked';
-    nextStep = isBuyer ? 'Waiting for seller confirmation' : 'Confirm payment';
+    nextStep = isBuyer ? 'Continue deal' : 'No action needed';
   } else if (paymentState === 'confirmed') {
     currentState = 'Payment confirmed';
     if (custodyState === 'awaiting_dropoff') {
@@ -137,15 +150,24 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
       deadline = deal.sellerDropoffDeadlineAt ?? deal.paymentDeadlineAt;
     } else if (custodyState === 'at_relay') {
       currentState = 'At pickup store';
-      nextStep = isBuyer ? 'Waiting for store release' : 'Waiting for buyer pickup';
+      nextStep = isBuyer ? 'Collect item' : 'Waiting for buyer pickup';
       deadline = deal.custodyExpiresAt ?? deal.paymentDeadlineAt;
     } else if (custodyState === 'release_authorized') {
       currentState = 'Ready for pickup';
       nextStep = isBuyer ? 'Collect item' : 'Waiting for buyer pickup';
       deadline = deal.custodyExpiresAt ?? deal.paymentDeadlineAt;
     } else if (!hasCustody) {
-      currentState = 'Payment confirmed';
-      nextStep = 'Complete the hand-off';
+      if (handoffState === 'awaiting_handoff') {
+        currentState = 'Payment confirmed';
+        nextStep = isBuyer ? 'Meet seller for hand-off' : 'Mark item handed over';
+      } else if (handoffState === 'seller_handed_over') {
+        currentState = 'Item handed over';
+        nextStep = isBuyer ? 'Confirm item received' : 'Waiting for buyer receipt';
+        deadline = deal.receiptDeadlineAt ?? deal.paymentDeadlineAt;
+      } else {
+        currentState = 'Payment confirmed';
+        nextStep = 'Complete the hand-off';
+      }
     }
   }
 
@@ -153,7 +175,7 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
     ? null
     : custodyState === 'awaiting_dropoff' && !isBuyer
       ? 'to_drop_off'
-      : custodyState === 'release_authorized' && isBuyer
+      : (custodyState === 'at_relay' || custodyState === 'release_authorized') && isBuyer
         ? 'to_collect'
         : custodyState === 'at_relay'
           ? 'at_store'
@@ -173,7 +195,7 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
     fulfillmentPath: deal.fulfillmentPath,
     paymentState,
     paymentStatus: PAYMENT_STATUS_LABELS[paymentState],
-    deliveryStatus: DELIVERY_STATUS_LABELS[custodyState],
+    deliveryStatus: handoffState === 'awaiting_handoff' ? 'Awaiting hand-off' : handoffState === 'seller_handed_over' ? 'Seller handed over' : handoffState === 'buyer_received' ? 'Buyer received' : DELIVERY_STATUS_LABELS[custodyState],
     currentState,
     nextStep,
     deadlineAt: deadline.toISOString(),

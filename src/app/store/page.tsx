@@ -3,10 +3,13 @@ import { redirect } from 'next/navigation';
 
 import { currentUser } from '@/lib/session';
 import { staffStores } from '@/lib/store-session';
+import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
+import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
 export default async function StoreEntryPage() {
+  if (!isLegacyFeatureAllowed('store_custody')) notFound();
   const viewer = await currentUser();
   if (viewer === null) redirect('/sign-in');
 

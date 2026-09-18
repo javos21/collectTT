@@ -1,39 +1,46 @@
 'use client';
 
-import type { ReactNode, SyntheticEvent } from 'react';
-import { useLayoutEffect, useState } from 'react';
+import type { MouseEvent, ReactNode, SyntheticEvent } from 'react';
+import { useEffect, useState } from 'react';
 
 type FilterPanelProps = {
   children: ReactNode;
 };
 
 export function FilterPanel({ children }: FilterPanelProps) {
-  const [open, setOpen] = useState(true);
+  const [desktop, setDesktop] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  useLayoutEffect(() => {
-    const media = window.matchMedia('(max-width: 820px)');
-    let wasMobile = media.matches;
-
-    const syncToViewport = () => {
-      const isMobile = media.matches;
-      if (isMobile !== wasMobile) {
-        setOpen(!isMobile);
-        wasMobile = isMobile;
-      }
-    };
-
-    if (media.matches) setOpen(false);
-    media.addEventListener('change', syncToViewport);
-    return () => media.removeEventListener('change', syncToViewport);
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)');
+    const update = () => setDesktop(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
   }, []);
 
   const handleToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
-    const isMobile = window.matchMedia('(max-width: 820px)').matches;
-    setOpen(isMobile ? event.currentTarget.open : true);
+    if (!desktop) setMobileOpen(event.currentTarget.open);
+  };
+
+  const preventDesktopCollapse = (event: MouseEvent<HTMLDetailsElement>) => {
+    const target = event.target;
+    if (
+      desktop
+      && target instanceof Element
+      && target.closest('summary')?.parentElement === event.currentTarget
+    ) {
+      event.preventDefault();
+    }
   };
 
   return (
-    <details className="filter-panel" open={open} onToggle={handleToggle}>
+    <details
+      className="filter-panel"
+      open={desktop || mobileOpen}
+      onClick={preventDesktopCollapse}
+      onToggle={handleToggle}
+    >
       {children}
     </details>
   );

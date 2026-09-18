@@ -18,6 +18,7 @@ import {
   listingFulfillmentTerms,
   categories,
 } from '../db/schema/listings';
+import { sellerMeetupLocations, sellerMarketplacePreferences } from '../db/schema/seller-settings';
 import { listingRelayStores, relayStores } from '../db/schema/custody';
 import { images } from '../db/schema/images';
 import { profiles, reputationCounters } from '../db/schema/profiles';
@@ -28,11 +29,14 @@ import { CATEGORY_LIST } from '../domain/categories/definitions';
 import { FULFILLMENT_PATHS, type FulfillmentPath } from '../domain/states/transaction';
 import { type ListingStatus } from '../domain/states/listing';
 import { assertListingTransition } from '../domain/states/listing';
-import { WINDOWS } from '../domain/policy/windows';
+import { AUCTION_DURATION_HOURS, WINDOWS } from '../domain/policy/windows';
 import { enqueue } from '../jobs/enqueue';
-import { getFullServiceDeliveryDays, UnavailableMarketplaceOptionError } from './platform-settings';
+import { getFullServiceDeliveryDays, getListingExpiryDays, UnavailableMarketplaceOptionError } from './platform-settings';
+import { assertMarketplaceEligible } from './marketplace-eligibility';
+import { assertV1ListingTerms, V1_PAYMENT_WINDOW_HOURS, isV1Launch } from '@/lib/launch-scope';
 
 import { SETTLEMENT_METHODS } from '../domain/policy/settlement';
+import { recordAnalyticsEvent } from './analytics';
 
 export { SETTLEMENT_METHODS };
 
@@ -68,6 +72,7 @@ export const listingInputSchema = z
     relayStoreIds: z.array(z.string().uuid()).default([]),
     deliveryEstimates: z.record(z.string(), z.number().int().min(1).max(60)).default({}),
     attributes: z.record(z.unknown()).default({}),
+    meetupLocationId: z.string().uuid().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.deliveryOptionIds.length === 0 && value.fulfillmentPaths.length === 0) {
@@ -85,6 +90,8 @@ export const listingInputSchema = z
       }
       if (value.durationHours === undefined) {
         ctx.addIssue({ code: 'custom', path: ['durationHours'], message: 'A duration is required' });
+      } else if (!(AUCTION_DURATION_HOURS as readonly number[]).includes(value.durationHours)) {
+        ctx.addIssue({ code: 'custom', path: ['durationHours'], message: 'Choose one of the available auction lengths' });
       }
       if (
         value.buyoutCents !== undefined &&
@@ -107,9 +114,26 @@ export async function createListing(
   raw: unknown,
   opts: { publish?: boolean } = {},
 ): Promise<{ id: string }> {
-  const input = listingInputSchema.parse(raw);
-  const requestedDeliveryIds = [...new Set(input.deliveryOptionIds)];
-  const requestedPaymentKeys = [...new Set(input.paymentOptionKeys)];
+  const rawRecord = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const [sellerDefaults, meetupLocations] = await Promise.all([
+    sellerMarketplacePreferencesFor(sellerId),
+    sellerMeetupLocationsFor(sellerId),
+  ]);
+  const rawDelivery = Array.isArray(rawRecord.deliveryOptionIds) ? rawRecord.deliveryOptionIds : [];
+  const rawPayments = Array.isArray(rawRecord.paymentOptionKeys) ? rawRecord.paymentOptionKeys : [];
+  const rawMeetup = typeof rawRecord.meetupLocationId === 'string' && rawRecord.meetupLocationId !== '' ? rawRecord.meetupLocationId : undefined;
+  const parsedInput = listingInputSchema.parse({
+    ...rawRecord,
+    ...(rawDelivery.length === 0 && (!Array.isArray(rawRecord.fulfillmentPaths) || rawRecord.fulfillmentPaths.length === 0)
+      ? { deliveryOptionIds: sellerDefaults.defaultDeliveryOptionIds }
+      : {}),
+    ...(rawPayments.length === 0 && (!Array.isArray(rawRecord.settlementMethods) || rawRecord.settlementMethods.length === 0)
+      ? { paymentOptionKeys: sellerDefaults.defaultPaymentMethods }
+      : {}),
+    ...(rawMeetup !== undefined ? { meetupLocationId: rawMeetup } : {}),
+  });
+  const requestedDeliveryIds = [...new Set(parsedInput.deliveryOptionIds)];
+  const requestedPaymentKeys = [...new Set(parsedInput.paymentOptionKeys)];
   const [selectedDeliveryOptions, selectedPaymentOptions] = await Promise.all([
     requestedDeliveryIds.length === 0
       ? Promise.resolve([])
@@ -135,11 +159,28 @@ export async function createListing(
 
   const fulfillmentPaths = requestedDeliveryIds.length > 0
     ? [...new Set(selectedDeliveryOptions.map((option) => option.fulfillmentPath).filter((path): path is FulfillmentPath => path !== null))]
-    : input.fulfillmentPaths;
+    : parsedInput.fulfillmentPaths;
+  const input = {
+    ...parsedInput,
+    meetupLocationId: fulfillmentPaths.includes('cash_meetup')
+      ? parsedInput.meetupLocationId ?? (meetupLocations.filter((location) => location.active).length === 1
+        ? meetupLocations.find((location) => location.active)?.id
+        : undefined)
+      : undefined,
+  };
   const settlementMethods = requestedPaymentKeys.length > 0 ? requestedPaymentKeys : input.settlementMethods;
+  const relayStoreIds = input.relayStoreIds.length > 0 ? input.relayStoreIds : sellerDefaults.defaultRelayStoreIds;
   if (fulfillmentPaths.length === 0) throw new UnavailableMarketplaceOptionError('delivery');
   if (settlementMethods.length === 0) throw new UnavailableMarketplaceOptionError('payment');
-  if ((selectedDeliveryOptions.some((option) => option.requiresStore) || fulfillmentPaths.includes('relay')) && input.relayStoreIds.length === 0) {
+  assertV1ListingTerms({
+    fulfillmentPaths,
+    settlementMethods,
+    acceptsOffers: input.acceptsOffers,
+    reserveCents: input.reserveCents,
+    buyoutCents: input.buyoutCents,
+    paymentWindowHours: input.paymentWindowHours,
+  });
+  if ((selectedDeliveryOptions.some((option) => option.requiresStore) || fulfillmentPaths.includes('relay')) && relayStoreIds.length === 0) {
     throw new Error('Nominate at least one relay pickup store for store delivery');
   }
 
@@ -149,7 +190,20 @@ export async function createListing(
   const { attributes, version } = await parseAttributesWithCatalogValues(input.category, input.attributes);
 
   return db.transaction(async (tx) => {
-    const selectedRelayStoreIds = [...new Set(input.relayStoreIds)];
+    await assertMarketplaceEligible(tx, sellerId, 'persist_listing');
+    if (input.meetupLocationId !== undefined) {
+      const location = await tx
+        .select({ id: sellerMeetupLocations.id })
+        .from(sellerMeetupLocations)
+        .where(and(
+          eq(sellerMeetupLocations.id, input.meetupLocationId),
+          eq(sellerMeetupLocations.sellerId, sellerId),
+          eq(sellerMeetupLocations.active, true),
+        ))
+        .limit(1);
+      if (location[0] === undefined) throw new Error('Choose one of your active meetup locations.');
+    }
+    const selectedRelayStoreIds = [...new Set(relayStoreIds)];
     if (selectedDeliveryOptions.some((option) => option.requiresStore) || fulfillmentPaths.includes('relay')) {
       const selectedStores = await tx
         .select({ id: relayStores.id, active: relayStores.active })
@@ -177,7 +231,9 @@ export async function createListing(
         status: opts.publish === true ? 'active' : 'draft',
         priceCents: input.saleType === 'straight_sale' ? (input.priceCents ?? null) : null,
         acceptsOffers: input.saleType === 'straight_sale' ? input.acceptsOffers : false,
-        paymentWindowHours: input.paymentWindowHours,
+        // v1 uses a platform policy window. Seller-authored windows remain readable
+        // on legacy rows but cannot be written onto a new v1 listing.
+        paymentWindowHours: isV1Launch() ? V1_PAYMENT_WINDOW_HOURS : input.paymentWindowHours,
         startBidCents: input.saleType === 'auction' ? (input.startBidCents ?? null) : null,
         reserveCents: input.saleType === 'auction' ? (input.reserveCents ?? null) : null,
         buyoutCents: input.saleType === 'auction' ? (input.buyoutCents ?? null) : null,
@@ -193,12 +249,36 @@ export async function createListing(
         fulfillmentPaths,
         settlementMethods,
         autoRelistOnRenege: input.autoRelistOnRenege,
+        meetupLocationId: input.meetupLocationId ?? null,
+        expiresAt:
+          input.saleType === 'straight_sale' && opts.publish === true
+            ? sql`now() + (${await getListingExpiryDays(tx)} || ' days')::interval`
+            : null,
         publishedAt: opts.publish === true ? sql`now()` : null,
       })
       .returning({ id: listings.id, endsAt: listings.endsAt });
 
     const listing = inserted[0];
     if (listing === undefined) throw new Error('Failed to create listing');
+
+    await recordAnalyticsEvent(tx, {
+      eventName: 'listing_created',
+      userId: sellerId,
+      subjectType: 'listing',
+      subjectId: listing.id,
+      metadata: { saleType: input.saleType, published: opts.publish === true },
+      idempotencyKey: `listing-created:${listing.id}`,
+    });
+    if (opts.publish === true) {
+      await recordAnalyticsEvent(tx, {
+        eventName: 'listing_published',
+        userId: sellerId,
+        subjectType: 'listing',
+        subjectId: listing.id,
+        metadata: { saleType: input.saleType },
+        idempotencyKey: `listing-published:${listing.id}`,
+      });
+    }
 
     await attachImages(tx, listing.id, sellerId, input.imageIds);
 
@@ -230,7 +310,7 @@ export async function createListing(
       metadata: { status: opts.publish === true ? 'active' : 'draft' },
     });
 
-    if (input.relayStoreIds.length > 0) {
+    if (fulfillmentPaths.includes('relay') && relayStoreIds.length > 0) {
       await tx.insert(listingRelayStores).values(
         selectedRelayStoreIds.map((storeId) => ({ listingId: listing.id, storeId })),
       );
@@ -239,6 +319,14 @@ export async function createListing(
     // ★ The close job is enqueued in the SAME transaction that created the auction, so
     //   an auction cannot exist without something scheduled to resolve it. The job
     //   re-reads ends_at when it fires, so anti-snipe extensions are handled there.
+    if (input.saleType === 'straight_sale' && opts.publish === true && listing.id !== undefined) {
+      const expiryRows = await tx.select({ expiresAt: listings.expiresAt }).from(listings).where(eq(listings.id, listing.id)).limit(1);
+      const expiresAt = expiryRows[0]?.expiresAt;
+      if (expiresAt !== undefined && expiresAt !== null) {
+        await enqueue(tx, 'listing:expire', { listingId: listing.id }, { jobKey: `listing_expire:${listing.id}`, runAt: expiresAt });
+      }
+    }
+
     if (input.saleType === 'auction' && opts.publish === true && listing.endsAt !== null) {
       await enqueue(
         tx,
@@ -250,6 +338,21 @@ export async function createListing(
 
     return { id: listing.id };
   });
+}
+
+async function assertPublishableListing(tx: DbOrTx, listingId: string): Promise<void> {
+  const rows = await tx
+    .select({ description: listings.description, saleType: listings.saleType, priceCents: listings.priceCents, startBidCents: listings.startBidCents, endsAt: listings.endsAt })
+    .from(listings)
+    .where(eq(listings.id, listingId))
+    .limit(1);
+  const row = rows[0];
+  if (row === undefined) throw new Error('Listing not found');
+  if (row.description === null || row.description.trim() === '') throw new Error('A description is required before publishing.');
+  if (row.saleType === 'straight_sale' && row.priceCents === null) throw new Error('A price is required before publishing.');
+  if (row.saleType === 'auction' && (row.startBidCents === null || row.endsAt === null)) throw new Error('Starting bid and duration are required before publishing.');
+  const imagesForListing = await tx.select({ id: listingImages.imageId }).from(listingImages).where(eq(listingImages.listingId, listingId)).limit(1);
+  if (imagesForListing.length === 0) throw new Error('Add at least one image before publishing.');
 }
 
 async function attachImages(tx: DbOrTx, listingId: string, ownerUserId: string, imageIds: string[]): Promise<void> {
@@ -267,21 +370,60 @@ async function attachImages(tx: DbOrTx, listingId: string, ownerUserId: string, 
 }
 
 export async function publishListing(sellerId: string, listingId: string): Promise<void> {
-  const current = await db
-    .select({ status: listings.status })
-    .from(listings)
-    .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)))
-    .limit(1);
+  await db.transaction(async (tx) => {
+    await assertMarketplaceEligible(tx, sellerId, 'publish_listing');
+    const current = await tx
+      .select({
+        status: listings.status,
+        fulfillmentPaths: listings.fulfillmentPaths,
+        settlementMethods: listings.settlementMethods,
+        acceptsOffers: listings.acceptsOffers,
+        reserveCents: listings.reserveCents,
+        buyoutCents: listings.buyoutCents,
+        paymentWindowHours: listings.paymentWindowHours,
+        description: listings.description,
+        saleType: listings.saleType,
+        priceCents: listings.priceCents,
+        startBidCents: listings.startBidCents,
+        endsAt: listings.endsAt,
+      })
+      .from(listings)
+      .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)))
+      .limit(1);
 
-  const row = current[0];
-  if (row === undefined) throw new Error('Listing not found');
-  // Compile-time-checked machine, asserted again at runtime for a DB-read value.
-  assertListingTransition(row.status, 'active');
+    const row = current[0];
+    if (row === undefined) throw new Error('Listing not found');
+    await assertPublishableListing(tx, listingId);
+    assertV1ListingTerms(row);
+    // Compile-time-checked machine, asserted again at runtime for a DB-read value.
+    assertListingTransition(row.status, 'active');
 
-  await db
-    .update(listings)
-    .set({ status: 'active', publishedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId), eq(listings.status, 'draft')));
+    const expiryDays = row.saleType === 'straight_sale' ? await getListingExpiryDays(tx) : null;
+    await tx
+      .update(listings)
+      .set({
+        status: 'active',
+        publishedAt: sql`now()`,
+        expiresAt: expiryDays === null ? null : sql`coalesce(${listings.expiresAt}, now() + (${expiryDays} || ' days')::interval)`,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId), eq(listings.status, 'draft')));
+
+    await recordAnalyticsEvent(tx, {
+      eventName: 'listing_published',
+      userId: sellerId,
+      subjectType: 'listing',
+      subjectId: listingId,
+      metadata: { saleType: row.saleType },
+      idempotencyKey: `listing-published:${listingId}`,
+    });
+
+    if (expiryDays !== null) {
+      const expiryRows = await tx.select({ expiresAt: listings.expiresAt }).from(listings).where(eq(listings.id, listingId)).limit(1);
+      const expiresAt = expiryRows[0]?.expiresAt;
+      if (expiresAt !== undefined && expiresAt !== null) await enqueue(tx, 'listing:expire', { listingId }, { jobKey: `listing_expire:${listingId}`, runAt: expiresAt });
+    }
+  });
 }
 
 const listingEditSchema = z.object({
@@ -293,6 +435,7 @@ const listingEditSchema = z.object({
   deliveryEstimates: z.record(z.string(), z.number().int().min(1).max(60)).optional(),
   deliveryOptionEstimates: z.record(z.string().uuid(), z.number().int().min(1).max(60)).optional(),
   imageIds: z.array(z.string().uuid()).max(8).default([]),
+  meetupLocationId: z.string().uuid().nullable().optional(),
 });
 
 export class ListingLockedError extends Error {
@@ -369,7 +512,7 @@ export async function updateListingBasics(
 
   await db.transaction(async (tx) => {
     const currentRows = await tx.execute(sql`
-      select title, description, sale_type, status, price_cents, accepts_offers, payment_window_hours, fulfillment_paths
+      select title, description, sale_type, status, price_cents, accepts_offers, payment_window_hours, fulfillment_paths, meetup_location_id
       from listings
       where id = ${listingId} and seller_id = ${sellerId}
       for update
@@ -378,17 +521,28 @@ export async function updateListingBasics(
       title: string;
       description: string | null;
       sale_type: 'straight_sale' | 'auction';
-      status: 'draft' | 'active' | 'claimed' | 'ended_won' | 'ended_no_sale' | 'cancelled' | 'expired';
+      status: 'draft' | 'active' | 'claimed' | 'ended_won' | 'ended_no_sale' | 'cancelled' | 'expired' | 'sold_outside';
       price_cents: string | number | null;
       accepts_offers: boolean;
       payment_window_hours: number;
       fulfillment_paths: FulfillmentPath[];
+      meetup_location_id: string | null;
     } | undefined;
     if (current === undefined) throw new Error('Listing not found');
     if (current.status !== 'active' && current.status !== 'draft') {
       throw new Error('Only active or draft listings can be edited.');
     }
     await assertListingUnlocked(tx, listingId);
+    if (input.meetupLocationId !== undefined && input.meetupLocationId !== null) {
+      const location = await tx.select({ id: sellerMeetupLocations.id }).from(sellerMeetupLocations).where(and(eq(sellerMeetupLocations.id, input.meetupLocationId), eq(sellerMeetupLocations.sellerId, sellerId), eq(sellerMeetupLocations.active, true))).limit(1);
+      if (location[0] === undefined) throw new Error('Choose one of your active meetup locations.');
+    }
+    assertV1ListingTerms({
+      fulfillmentPaths: current.fulfillment_paths,
+      settlementMethods: [],
+      acceptsOffers: input.acceptsOffers,
+      paymentWindowHours: input.paymentWindowHours,
+    });
     if (current.sale_type === 'straight_sale' && input.priceCents === undefined) {
       throw new Error('A price is required for a fixed-price listing.');
     }
@@ -406,6 +560,9 @@ export async function updateListingBasics(
     }
     if (input.paymentWindowHours !== undefined && input.paymentWindowHours !== current.payment_window_hours) {
       changes.paymentWindowHours = { from: current.payment_window_hours, to: input.paymentWindowHours };
+    }
+    if (input.meetupLocationId !== undefined && input.meetupLocationId !== current.meetup_location_id) {
+      changes.meetupLocationId = { from: current.meetup_location_id, to: input.meetupLocationId };
     }
     if (input.deliveryEstimates !== undefined) {
       const previousTerms = await tx
@@ -447,6 +604,7 @@ export async function updateListingBasics(
         ...(current.sale_type === 'straight_sale' ? { priceCents: input.priceCents ?? Number(current.price_cents) } : {}),
         ...(current.sale_type === 'straight_sale' && input.acceptsOffers !== undefined ? { acceptsOffers: input.acceptsOffers } : {}),
         ...(input.paymentWindowHours !== undefined ? { paymentWindowHours: input.paymentWindowHours } : {}),
+        ...(input.meetupLocationId !== undefined ? { meetupLocationId: input.meetupLocationId } : {}),
         updatedAt: sql`now()`,
       })
       .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)));
@@ -545,6 +703,150 @@ export async function cancelListing(sellerId: string, listingId: string): Promis
   });
 }
 
+/** Close an active listing because the seller completed the sale elsewhere. */
+export async function markListingSoldOutside(sellerId: string, listingId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({ status: listings.status, saleType: listings.saleType })
+      .from(listings)
+      .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)))
+      .for('update');
+    const current = rows[0];
+    if (current === undefined) throw new Error('Listing not found');
+    if (current.status !== 'active') throw new Error('Only an active listing can be marked sold outside CollectTT.');
+    await assertListingUnlocked(tx, listingId);
+    assertListingTransition(current.status, 'sold_outside');
+    await tx.update(listings).set({ status: 'sold_outside', resolvedAt: sql`now()`, updatedAt: sql`now()` }).where(eq(listings.id, listingId));
+    await tx.insert(listingAuditEvents).values({
+      listingId,
+      actorUserId: sellerId,
+      eventType: 'sold_outside',
+      metadata: { fromStatus: current.status, toStatus: 'sold_outside', saleType: current.saleType },
+    });
+  });
+}
+
+/** Seller-managed reusable meetup locations. */
+export async function sellerMeetupLocationsFor(sellerId: string) {
+  return db.select().from(sellerMeetupLocations).where(eq(sellerMeetupLocations.sellerId, sellerId)).orderBy(desc(sellerMeetupLocations.updatedAt));
+}
+
+export async function saveSellerMeetupLocation(
+  sellerId: string,
+  input: { id?: string; label: string; area: string; instructions?: string | null; active?: boolean },
+): Promise<string> {
+  const label = input.label.trim();
+  const area = input.area.trim();
+  if (label.length < 2 || label.length > 120 || area.length < 2 || area.length > 120) throw new Error('Meetup name and area are required.');
+  if (input.id !== undefined) {
+    const updated = await db.update(sellerMeetupLocations).set({ label, area, instructions: input.instructions?.trim() || null, active: input.active ?? true, updatedAt: sql`now()` }).where(and(eq(sellerMeetupLocations.id, input.id), eq(sellerMeetupLocations.sellerId, sellerId))).returning({ id: sellerMeetupLocations.id });
+    if (updated[0] === undefined) throw new Error('Meetup location not found.');
+    return updated[0].id;
+  }
+  const inserted = await db.insert(sellerMeetupLocations).values({ sellerId, label, area, instructions: input.instructions?.trim() || null }).returning({ id: sellerMeetupLocations.id });
+  return inserted[0]!.id;
+}
+
+export async function sellerMarketplacePreferencesFor(sellerId: string) {
+  const rows = await db.select().from(sellerMarketplacePreferences).where(eq(sellerMarketplacePreferences.sellerId, sellerId)).limit(1);
+  return rows[0] ?? { sellerId, defaultDeliveryOptionIds: [], defaultRelayStoreIds: [], defaultPaymentMethods: ['cash'], updatedAt: new Date() };
+}
+
+export async function saveSellerMarketplacePreferences(
+  sellerId: string,
+  input: { defaultDeliveryOptionIds: string[]; defaultRelayStoreIds: string[]; defaultPaymentMethods: string[] },
+): Promise<void> {
+  const deliveryOptionIds = [...new Set(input.defaultDeliveryOptionIds)].filter((id) => id !== '');
+  if (deliveryOptionIds.length === 0) throw new Error('Choose at least one default delivery method.');
+  const deliveryOptions = await db.select({ id: marketplaceOptions.id }).from(marketplaceOptions).where(and(
+    eq(marketplaceOptions.kind, 'delivery'),
+    eq(marketplaceOptions.active, true),
+    inArray(marketplaceOptions.id, deliveryOptionIds),
+  ));
+  if (deliveryOptions.length !== deliveryOptionIds.length) throw new Error('Choose only active delivery methods.');
+  const relayStoreIds = [...new Set(input.defaultRelayStoreIds)].filter((id) => id !== '');
+  if (relayStoreIds.length > 0) {
+    const stores = await db.select({ id: relayStores.id }).from(relayStores).where(and(
+      eq(relayStores.active, true),
+      inArray(relayStores.id, relayStoreIds),
+    ));
+    if (stores.length !== relayStoreIds.length) throw new Error('Choose only active pickup stores.');
+  }
+  const methods = [...new Set(input.defaultPaymentMethods)].filter((method) => ['cash', 'bank_transfer'].includes(method));
+  if (methods.length === 0) throw new Error('Choose at least one default payment method.');
+  await db.insert(sellerMarketplacePreferences).values({ sellerId, defaultDeliveryOptionIds: deliveryOptionIds, defaultRelayStoreIds: relayStoreIds, defaultPaymentMethods: methods }).onConflictDoUpdate({ target: sellerMarketplacePreferences.sellerId, set: { defaultDeliveryOptionIds: deliveryOptionIds, defaultRelayStoreIds: relayStoreIds, defaultPaymentMethods: methods, updatedAt: sql`now()` } });
+}
+
+/** Copy a listing into a distinct editable draft, preserving immutable media refs. */
+export async function duplicateListingToDraft(sellerId: string, sourceListingId: string): Promise<{ id: string }> {
+  return db.transaction(async (tx) => {
+    await assertMarketplaceEligible(tx, sellerId, 'persist_listing');
+    const sourceRows = await tx.select().from(listings).where(and(eq(listings.id, sourceListingId), eq(listings.sellerId, sellerId))).limit(1);
+    const source = sourceRows[0];
+    if (source === undefined) throw new Error('Listing not found');
+    if (source.status === 'sold_outside' || source.status === 'expired' || source.status === 'ended_no_sale' || source.status === 'cancelled' || source.status === 'ended_won' || source.status === 'active') {
+      // Active duplication is useful for a seller who wants a second similar item;
+      // all other statuses are relist history. Reserved/claimed rows are intentionally
+      // excluded so a live buyer cannot be copied into a new sale.
+    } else {
+      throw new Error('This listing cannot be duplicated while a buyer transaction is active.');
+    }
+    if (source.status === 'active') await assertListingUnlocked(tx, sourceListingId);
+    const inserted = await tx.insert(listings).values({
+      sellerId,
+      category: source.category,
+      attributes: source.attributes,
+      attributesVersion: source.attributesVersion,
+      title: source.title,
+      description: source.description,
+      saleType: source.saleType,
+      status: 'draft',
+      currency: source.currency,
+      priceCents: source.priceCents,
+      acceptsOffers: source.acceptsOffers,
+      paymentWindowHours: source.paymentWindowHours,
+      startBidCents: source.startBidCents,
+      reserveCents: source.reserveCents,
+      buyoutCents: source.buyoutCents,
+      currentBidCents: null,
+      currentBidId: null,
+      bidCount: 0,
+      endsAt: source.saleType === 'auction' ? sql`now() + interval '48 hours'` : null,
+      antisnipeWindowS: source.antisnipeWindowS,
+      antisnipeExtendS: source.antisnipeExtendS,
+      maxExtensions: source.maxExtensions,
+      fulfillmentPaths: source.fulfillmentPaths,
+      settlementMethods: source.settlementMethods,
+      autoRelistOnRenege: source.autoRelistOnRenege,
+      meetupLocationId: source.meetupLocationId,
+      expiresAt: null,
+      activeTransactionId: null,
+      publishedAt: null,
+      resolvedAt: null,
+    }).returning({ id: listings.id });
+    const copy = inserted[0];
+    if (copy === undefined) throw new Error('Could not create draft');
+
+    const sourceImages = await tx.select().from(listingImages).where(eq(listingImages.listingId, sourceListingId));
+    if (sourceImages.length > 0) await tx.insert(listingImages).values(sourceImages.map((image) => ({ listingId: copy.id, imageId: image.imageId, position: image.position })));
+    const sourceTerms = await tx.select().from(listingFulfillmentTerms).where(eq(listingFulfillmentTerms.listingId, sourceListingId));
+    if (sourceTerms.length > 0) await tx.insert(listingFulfillmentTerms).values(sourceTerms.map((term) => ({ listingId: copy.id, fulfillmentPath: term.fulfillmentPath, expectedDeliveryDays: term.expectedDeliveryDays })));
+    const sourceOptions = await tx.select().from(listingDeliveryOptions).where(eq(listingDeliveryOptions.listingId, sourceListingId));
+    if (sourceOptions.length > 0) await tx.insert(listingDeliveryOptions).values(sourceOptions.map((option) => ({ listingId: copy.id, optionId: option.optionId, expectedDeliveryDays: option.expectedDeliveryDays })));
+    const sourceStores = await tx.select().from(listingRelayStores).where(eq(listingRelayStores.listingId, sourceListingId));
+    if (sourceStores.length > 0) await tx.insert(listingRelayStores).values(sourceStores.map((store) => ({ listingId: copy.id, storeId: store.storeId })));
+    await tx.insert(listingAuditEvents).values({ listingId: copy.id, actorUserId: sellerId, eventType: 'duplicated', metadata: { duplicatedFrom: sourceListingId, sourceStatus: source.status } });
+    return { id: copy.id };
+  });
+}
+
+export async function relistListing(sellerId: string, sourceListingId: string): Promise<{ id: string }> {
+  const source = await db.select({ status: listings.status, sellerId: listings.sellerId }).from(listings).where(eq(listings.id, sourceListingId)).limit(1);
+  if (source[0]?.sellerId !== sellerId) throw new Error('Listing not found');
+  if (source[0].status !== 'expired' && source[0].status !== 'sold_outside' && source[0].status !== 'ended_no_sale') throw new Error('Only expired or sold-outside listings can be relisted.');
+  return duplicateListingToDraft(sellerId, sourceListingId);
+}
+
 export async function listingAuditForSeller(listingId: string, sellerId: string) {
   return db
     .select({
@@ -587,6 +889,8 @@ export interface BrowseFilters {
   settlementMethod?: string;
   /** Match listings that accept any selected payment method. */
   settlementMethods?: readonly string[];
+  /** Case-insensitive public meetup area/name filter. */
+  location?: string;
   /** Price filters apply to fixed prices and the current/start bid for auctions. */
   minPriceCents?: number;
   maxPriceCents?: number;
@@ -596,6 +900,8 @@ export interface BrowseFilters {
   /** 1-based page number. */
   page?: number;
   pageSize?: number;
+  /** Opaque keyset cursor returned by the previous page. */
+  cursor?: string;
 }
 
 export interface BrowsePage {
@@ -604,6 +910,53 @@ export interface BrowsePage {
   total: number;
   page: number;
   pageSize: number;
+  nextCursor?: string;
+}
+
+type BrowseCursor = {
+  sort: BrowseSort;
+  id: string;
+  createdAt?: string;
+  publishedAt?: string | null;
+  endsAt?: string | null;
+  priceCents?: number | null;
+};
+
+function encodeBrowseCursor(cursor: BrowseCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeBrowseCursor(value: string | undefined): BrowseCursor | null {
+  if (!value) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as BrowseCursor;
+    if (typeof decoded.id !== 'string' || !BROWSE_SORTS.includes(decoded.sort)) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+function browseCursorCondition(cursor: BrowseCursor): ReturnType<typeof sql> {
+  const createdAt = cursor.createdAt ? new Date(cursor.createdAt) : null;
+  const publishedAt = cursor.publishedAt ? new Date(cursor.publishedAt) : null;
+  const endsAt = cursor.endsAt ? new Date(cursor.endsAt) : null;
+  const price = cursor.priceCents ?? null;
+  switch (cursor.sort) {
+    case 'newest':
+      return createdAt === null ? sql`true` : sql`(${listings.createdAt} < ${createdAt} or (${listings.createdAt} = ${createdAt} and ${listings.id} < ${cursor.id}))`;
+    case 'ending_soon':
+      if (endsAt === null) return sql`${listings.endsAt} is null and ${listings.id} < ${cursor.id}`;
+      return sql`(${listings.endsAt} > ${endsAt} or (${listings.endsAt} = ${endsAt} and ${listings.publishedAt} < ${publishedAt}) or (${listings.endsAt} = ${endsAt} and ${listings.publishedAt} = ${publishedAt} and ${listings.id} < ${cursor.id}) or ${listings.endsAt} is null)`;
+    case 'price_low':
+      return price === null ? sql`true` : sql`(${browsePriceExpression()} > ${price} or (${browsePriceExpression()} = ${price} and ${listings.publishedAt} < ${publishedAt}) or (${browsePriceExpression()} = ${price} and ${listings.publishedAt} = ${publishedAt} and ${listings.id} < ${cursor.id}))`;
+    case 'price_high':
+      return price === null ? sql`true` : sql`(${browsePriceExpression()} < ${price} or (${browsePriceExpression()} = ${price} and ${listings.publishedAt} < ${publishedAt}) or (${browsePriceExpression()} = ${price} and ${listings.publishedAt} = ${publishedAt} and ${listings.id} < ${cursor.id}))`;
+  }
+}
+
+function browsePriceExpression() {
+  return sql`coalesce(${listings.priceCents}, ${listings.currentBidCents}, ${listings.startBidCents})`;
 }
 
 function browseConditions(filters: BrowseFilters) {
@@ -669,6 +1022,16 @@ function browseConditions(filters: BrowseFilters) {
       )}]::text[]`,
     );
   }
+  const location = filters.location?.trim();
+  if (location) {
+    const pattern = `%${location}%`;
+    conditions.push(sql`exists (
+      select 1 from seller_meetup_locations sml
+      where sml.id = ${listings.meetupLocationId}
+        and sml.active = true
+        and (sml.area ilike ${pattern} or sml.label ilike ${pattern})
+    ) or ${profiles.area} ilike ${pattern}`);
+  }
   const browsePrice = sql`coalesce(${listings.priceCents}, ${listings.currentBidCents}, ${listings.startBidCents})`;
   if (filters.minPriceCents !== undefined) {
     conditions.push(sql`${browsePrice} >= ${filters.minPriceCents}`);
@@ -716,11 +1079,19 @@ function selectBrowseRows(
       bidCount: listings.bidCount,
       endsAt: listings.endsAt,
       publishedAt: listings.publishedAt,
+      createdAt: listings.createdAt,
       sellerName: profiles.displayName,
       sellerId: profiles.userId,
       sellerCompletedSales: reputationCounters.sellCompleted,
       fulfillmentPaths: listings.fulfillmentPaths,
       settlementMethods: listings.settlementMethods,
+      meetupLocation: sql<string | null>`(
+        select concat(sml.label, ' — ', sml.area)
+        from seller_meetup_locations sml
+        where sml.id = ${listings.meetupLocationId}
+          and sml.active = true
+        limit 1
+      )`,
       deliveryOptionLabels: sql<string[]>`coalesce(
         (
           select array_agg(mo.label order by mo.sort_order, mo.label)
@@ -790,14 +1161,17 @@ function selectBrowseRows(
  * listing's declared arrays.
  */
 export async function browseListings(filters: BrowseFilters = {}): Promise<BrowsePage> {
-  const where = and(...browseConditions(filters));
+  const baseConditions = browseConditions(filters);
+  const cursor = decodeBrowseCursor(filters.cursor);
+  const where = and(...baseConditions, ...(cursor !== null ? [browseCursorCondition(cursor)] : []));
 
   const pageSize = filters.pageSize ?? BROWSE_PAGE_SIZE;
   const page = Math.max(1, filters.page ?? 1);
-  const offset = (page - 1) * pageSize;
+  const offset = cursor === null ? (page - 1) * pageSize : 0;
+  const sort = filters.sort ?? 'newest';
 
   const [rows, totalRows] = await Promise.all([
-    selectBrowseRows(where, pageSize, offset, filters.sort ?? 'newest'),
+    selectBrowseRows(where, pageSize + 1, offset, sort),
     db
       .select({ n: sql<number>`count(*)::int` })
       .from(listings)
@@ -805,7 +1179,20 @@ export async function browseListings(filters: BrowseFilters = {}): Promise<Brows
       .where(where),
   ]);
 
-  return { rows, total: totalRows[0]?.n ?? 0, page, pageSize };
+  const hasMore = rows.length > pageSize;
+  const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+  const last = pageRows.at(-1);
+  const nextCursor = hasMore && last !== undefined
+    ? encodeBrowseCursor({
+        sort,
+        id: last.id,
+        createdAt: last.createdAt.toISOString(),
+        publishedAt: last.publishedAt?.toISOString() ?? null,
+        endsAt: last.endsAt?.toISOString() ?? null,
+        priceCents: last.priceCents ?? last.currentBidCents ?? last.startBidCents,
+      })
+    : undefined;
+  return { rows: pageRows, total: totalRows[0]?.n ?? 0, page, pageSize, ...(nextCursor !== undefined ? { nextCursor } : {}) };
 }
 
 /**
@@ -843,7 +1230,7 @@ export async function recentlyClaimedListings(limit = 16) {
     .limit(limit);
 }
 
-export async function getListing(id: string) {
+export async function getListing(id: string, viewerId?: string) {
   const rows = await db
     .select({
       listing: listings,
@@ -858,6 +1245,9 @@ export async function getListing(id: string) {
 
   const row = rows[0];
   if (row === undefined) return null;
+  // Drafts are private seller workspaces. Public callers must not be able to infer
+  // title, price, images, or seller details before publication.
+  if (row.listing.status === 'draft' && row.listing.sellerId !== viewerId) return null;
 
   const imageRows = await db
     .select({
@@ -931,7 +1321,16 @@ export async function getListing(id: string) {
     description: paymentByKey.get(key)?.description ?? null,
   }));
 
-  return { ...row, images: imageRows, fulfillmentTerms, deliveryOptions, paymentOptions };
+  const listingStoreRows = await db
+    .select({ storeId: listingRelayStores.storeId })
+    .from(listingRelayStores)
+    .where(eq(listingRelayStores.listingId, id));
+
+  const meetupRows = row.listing.meetupLocationId === null
+    ? []
+    : await db.select({ id: sellerMeetupLocations.id, label: sellerMeetupLocations.label, area: sellerMeetupLocations.area, instructions: sellerMeetupLocations.instructions }).from(sellerMeetupLocations).where(eq(sellerMeetupLocations.id, row.listing.meetupLocationId)).limit(1);
+
+  return { ...row, images: imageRows, fulfillmentTerms, deliveryOptions, paymentOptions, relayStoreIds: listingStoreRows.map((store) => store.storeId), meetupLocation: meetupRows[0] ?? null };
 }
 
 export async function listingsBySeller(sellerId: string) {

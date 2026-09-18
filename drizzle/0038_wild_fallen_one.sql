@@ -1,0 +1,1 @@
+ALTER TABLE "seller_marketplace_preferences" ADD COLUMN "default_relay_store_ids" uuid[] DEFAULT ARRAY[]::uuid[] NOT NULL;

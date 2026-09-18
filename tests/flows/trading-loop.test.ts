@@ -6,7 +6,7 @@
  *
  *   · N simultaneous claims resolve to exactly one winner and reject every loser
  *   · N simultaneous bids produce a total order with no lost updates
- *   · a lapsed auction payment window reneges, records the fact, and promotes the runner-up
+ *   · a lapsed auction payment window reneges, records the fact, and creates a fallback offer
  *   · a late bid extends the auction, and the close job reschedules rather than closing
  *   · a reneged auction winner hands off to the runner-up AT THEIR OWN BID
  *
@@ -14,24 +14,30 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 
 import { db, pool } from '../../src/db/client';
 import { users } from '../../src/db/schema/auth';
 import { profiles, reputationCounters, reputationEvents } from '../../src/db/schema/profiles';
+import { sellerMeetupLocations } from '../../src/db/schema/seller-settings';
 import { listings, claims, bids } from '../../src/db/schema/listings';
+import { auctionFallbackOffers } from '../../src/db/schema/auction-fallback-offers';
 import { offers } from '../../src/db/schema/offers';
-import { transactions } from '../../src/db/schema/transactions';
+import { transactions, transactionEvents } from '../../src/db/schema/transactions';
 import { notificationDeliveries } from '../../src/db/schema/notifications';
 import { claimListing } from '../../src/db/atomic/claim-listing';
 import { placeBid } from '../../src/db/atomic/place-bid';
-import { markPaid, confirmPayment, disputePayment } from '../../src/services/transactions';
+import { markPaid, confirmPayment, disputePayment, markItemHandedOver, confirmItemReceived, acceptAuctionFallbackOffer, rescheduleTransactionDeadlineJobs } from '../../src/services/transactions';
+import { submitDispute } from '../../src/services/disputes';
 import { acceptOffer, rejectOffer, submitOffer } from '../../src/services/offers';
+import { assertMarketplaceEligible } from '../../src/services/marketplace-eligibility';
+import { counterpartyContact } from '../../src/services/private-disclosure';
 import { auctionClose } from '../../src/jobs/tasks/auction-close';
 import {
   paymentWindowExpired,
   promoteNext,
+  receiptWindowExpired,
 } from '../../src/jobs/tasks/transaction-windows';
 
 // Graphile Worker passes a Helpers object; the handlers only use `logger`.
@@ -42,12 +48,24 @@ const helpers = {
 const SUFFIX = randomUUID().slice(0, 8);
 const seller = `t_seller_${SUFFIX}`;
 const buyers = Array.from({ length: 6 }, (_, i) => `t_buyer${i}_${SUFFIX}`);
-const everyone = [seller, ...buyers];
+const newBuyer = `t_newbuyer_${SUFFIX}`;
+const missingPhoneBuyer = `t_missing_phone_${SUFFIX}`;
+const everyone = [seller, ...buyers, newBuyer, missingPhoneBuyer];
+
+function phoneFor(id: string): string {
+  const digits = BigInt(`0x${createHash('sha256').update(id).digest('hex').slice(0, 12)}`) % 10_000_000_000n;
+  return `+1${digits.toString().padStart(10, '0')}`;
+}
 
 async function createUser(id: string): Promise<void> {
   await db.insert(users).values({ id, name: id, email: `${id}@test.local`, emailVerified: true });
-  await db.insert(profiles).values({ userId: id, displayName: id, handle: id });
-  await db.insert(reputationCounters).values({ userId: id });
+  await db.insert(profiles).values({
+    userId: id,
+    displayName: id,
+    handle: id,
+    ...(id === missingPhoneBuyer ? {} : { phoneE164: phoneFor(id) }),
+  });
+  await db.insert(reputationCounters).values({ userId: id, buyCompleted: id === newBuyer ? 0 : 3 });
 }
 
 async function makeListing(over: Partial<typeof listings.$inferInsert> = {}): Promise<string> {
@@ -62,7 +80,7 @@ async function makeListing(over: Partial<typeof listings.$inferInsert> = {}): Pr
       saleType: 'straight_sale',
       status: 'active',
       priceCents: 10_000,
-      fulfillmentPaths: ['cash_meetup', 'remote_ship'],
+      fulfillmentPaths: ['cash_meetup'],
       settlementMethods: ['cash'],
       publishedAt: new Date(),
       ...over,
@@ -79,6 +97,17 @@ async function expirePaymentWindow(transactionId: string): Promise<void> {
     .update(transactions)
     .set({ paymentDeadlineAt: sql`now() - interval '1 hour'` })
     .where(eq(transactions.id, transactionId));
+}
+
+async function withLegacyScope<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = process.env.COLLECTTT_LAUNCH_SCOPE;
+  process.env.COLLECTTT_LAUNCH_SCOPE = 'legacy';
+  try {
+    return await operation();
+  } finally {
+    if (previous === undefined) delete process.env.COLLECTTT_LAUNCH_SCOPE;
+    else process.env.COLLECTTT_LAUNCH_SCOPE = previous;
+  }
 }
 
 async function openTransactionFor(listingId: string) {
@@ -109,10 +138,12 @@ afterAll(async () => {
   if (listingIds.length > 0) {
     const sub = `(select id from transactions where listing_id = any($1))`;
     await q(`delete from transaction_events where transaction_id in ${sub}`, [listingIds]);
+    await q(`delete from disputes where transaction_id in ${sub}`, [listingIds]);
     await q(`update listings set active_transaction_id = null where id = any($1)`, [listingIds]);
     await q(`delete from reputation_events where transaction_id in ${sub}`, [listingIds]);
     await q(`delete from transactions where listing_id = any($1)`, [listingIds]);
     await q(`delete from claims where listing_id = any($1)`, [listingIds]);
+    await q(`delete from auction_fallback_offers where listing_id = any($1)`, [listingIds]);
     await q(`delete from bids where listing_id = any($1)`, [listingIds]);
     await q(`delete from listings where id = any($1)`, [listingIds]);
   }
@@ -121,6 +152,7 @@ afterAll(async () => {
   await q(`delete from notifications where user_id = any($1)`, [everyone]);
   await q(`delete from reputation_events where user_id = any($1)`, [everyone]);
   await q(`delete from restrictions where user_id = any($1)`, [everyone]);
+  await q(`delete from support_cases where reporter_user_id = any($1) or assigned_to = any($1) or resolved_by = any($1)`, [everyone]);
   await q(`delete from reputation_counters where user_id = any($1)`, [everyone]);
   await q(`delete from profiles where user_id = any($1)`, [everyone]);
   await q(`delete from "user" where id = any($1)`, [everyone]);
@@ -130,6 +162,43 @@ afterAll(async () => {
 // ════════════════════════════════════════════════════════ atomic claim
 
 describe('★ atomic straight-sale claim', () => {
+  it('requires an explicit purchase commitment acknowledgement', async () => {
+    const listingId = await makeListing();
+
+    await expect(
+      claimListing({
+        listingId,
+        claimantId: buyers[0]!,
+        fulfillmentPath: 'cash_meetup',
+        commitmentAcknowledged: false,
+      }),
+    ).rejects.toMatchObject({ code: 'commitment_confirmation_required' });
+
+    const listing = (await db.select({ status: listings.status }).from(listings).where(eq(listings.id, listingId)))[0];
+    expect(listing?.status).toBe('active');
+  });
+
+  it('persists the selected meetup location on the claim and transaction', async () => {
+    const location = await db.insert(sellerMeetupLocations).values({
+      sellerId: seller,
+      label: `M3 meetup ${SUFFIX}`,
+      area: 'San Fernando',
+    }).returning({ id: sellerMeetupLocations.id });
+    const listingId = await makeListing({ meetupLocationId: location[0]!.id });
+
+    const result = await claimListing({
+      listingId,
+      claimantId: buyers[0]!,
+      fulfillmentPath: 'cash_meetup',
+      commitmentAcknowledged: true,
+    });
+    const claim = (await db.select({ meetupLocationId: claims.meetupLocationId }).from(claims).where(eq(claims.listingId, listingId)))[0];
+    const transaction = (await db.select({ meetupLocationId: transactions.meetupLocationId }).from(transactions).where(eq(transactions.id, result.transactionId)))[0];
+
+    expect(claim?.meetupLocationId).toBe(location[0]!.id);
+    expect(transaction?.meetupLocationId).toBe(location[0]!.id);
+  });
+
   it('resolves 6 SIMULTANEOUS claims to exactly one winner with no backup rows', async () => {
     const listingId = await makeListing();
 
@@ -168,6 +237,37 @@ describe('★ atomic straight-sale claim', () => {
     expect(open).toHaveLength(1);
   });
 
+  it('allows at most one concurrent active commitment for a new buyer', async () => {
+    const firstListingId = await makeListing();
+    const secondListingId = await makeListing();
+    const results = await Promise.allSettled([
+      claimListing({ listingId: firstListingId, claimantId: newBuyer, fulfillmentPath: 'cash_meetup' }),
+      claimListing({ listingId: secondListingId, claimantId: newBuyer, fulfillmentPath: 'cash_meetup' }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const open = await db.select({ id: transactions.id }).from(transactions)
+      .where(and(eq(transactions.buyerId, newBuyer), eq(transactions.state, 'open')));
+    expect(open).toHaveLength(1);
+  });
+
+  it('blocks marketplace writes when a legacy account has no phone number', async () => {
+    await expect(assertMarketplaceEligible(db, missingPhoneBuyer, 'persist_listing')).rejects.toThrow(/add your mobile number/i);
+    await expect(assertMarketplaceEligible(db, missingPhoneBuyer, 'publish_listing')).rejects.toThrow(/add your mobile number/i);
+    await expect(assertMarketplaceEligible(db, missingPhoneBuyer, 'reserve')).rejects.toThrow(/add your mobile number/i);
+    await expect(assertMarketplaceEligible(db, missingPhoneBuyer, 'bid')).rejects.toThrow(/add your mobile number/i);
+  });
+
+  it('reveals phone numbers only to the transaction parties', async () => {
+    const listingId = await makeListing();
+    const result = await claimListing({ listingId, claimantId: buyers[1]!, fulfillmentPath: 'cash_meetup' });
+
+    await expect(counterpartyContact(db, buyers[1]!, result.transactionId)).resolves.toMatchObject({ phoneE164: phoneFor(seller) });
+    await expect(counterpartyContact(db, seller, result.transactionId)).resolves.toMatchObject({ phoneE164: phoneFor(buyers[1]!) });
+    await expect(counterpartyContact(db, buyers[2]!, result.transactionId)).rejects.toThrow();
+  });
+
   it('refuses a seller claiming their own listing', async () => {
     const listingId = await makeListing();
     await expect(
@@ -199,7 +299,13 @@ describe('★ atomic straight-sale claim', () => {
   });
 });
 
-describe('★ fixed-price offers', () => {
+describe('★ fixed-price offers (legacy compatibility)', () => {
+  const previousLaunchScope = process.env.COLLECTTT_LAUNCH_SCOPE;
+  beforeAll(() => { process.env.COLLECTTT_LAUNCH_SCOPE = 'legacy'; });
+  afterAll(() => {
+    if (previousLaunchScope === undefined) delete process.env.COLLECTTT_LAUNCH_SCOPE;
+    else process.env.COLLECTTT_LAUNCH_SCOPE = previousLaunchScope;
+  });
   it('records one pending offer without reserving the listing', async () => {
     const listingId = await makeListing({ priceCents: 10_000, acceptsOffers: true });
 
@@ -396,6 +502,161 @@ describe('★ fixed-price offers', () => {
 // ════════════════════════════════════════════════════════ handshake
 
 describe('★ mark-paid / confirm-received handshake', () => {
+  it('requires seller hand-off and buyer receipt for an acknowledged v1 meetup', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[4]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+
+    await db.transaction(async (tx) => markPaid(tx, txId, buyers[4]!));
+    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
+    expect((await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0]).toMatchObject({ state: 'open', handoff: 'awaiting_handoff' });
+
+    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
+    expect((await db.select({ handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0]?.handoff).toBe('seller_handed_over');
+    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
+    await db.transaction(async (tx) => confirmItemReceived(tx, txId, buyers[4]!));
+    await db.transaction(async (tx) => confirmItemReceived(tx, txId, buyers[4]!));
+    expect((await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0]).toMatchObject({ state: 'completed', handoff: 'buyer_received' });
+    expect((await db.select().from(transactionEvents).where(and(eq(transactionEvents.transactionId, txId), eq(transactionEvents.fromState, 'seller_handed_over'))))).toHaveLength(1);
+  });
+
+  it('moves a reported problem into the paused dispute track', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[5]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+    await db.transaction(async (tx) => submitDispute({ tx, transactionId: txId, raisedBy: buyers[5]!, reason: 'item_not_received', detail: 'The seller did not arrive at the agreed meetup location.' }));
+    const row = (await db.select({ state: transactions.state, disputeState: transactions.disputeState }).from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(row).toMatchObject({ state: 'open', disputeState: 'open' });
+    await expect(db.transaction(async (tx) => markPaid(tx, txId, buyers[5]!))).rejects.toThrow(/no longer actionable/i);
+  });
+
+  it('does not terminate after a concurrent dispute commits', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[0]!, fulfillmentPath: 'cash_meetup' });
+    const txId = claim.transactionId!;
+    await expirePaymentWindow(txId);
+
+    let disputeLocked!: () => void;
+    const disputeReady = new Promise<void>((resolve) => { disputeLocked = resolve; });
+    const disputing = db.transaction(async (tx) => {
+      await tx.execute(sql`select id from transactions where id = ${txId} for update`);
+      await submitDispute({
+        tx,
+        transactionId: txId,
+        raisedBy: buyers[0]!,
+        reason: 'item_not_received',
+        detail: 'The seller did not arrive at the agreed meetup location.',
+      });
+      disputeLocked();
+      await tx.execute(sql`select pg_sleep(1)`);
+    });
+
+    await disputeReady;
+    const expiring = paymentWindowExpired({ transactionId: txId }, helpers);
+    await Promise.all([disputing, expiring]);
+
+    const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
+    expect(row.state).toBe('open');
+    expect(row.disputeState).toBe('open');
+  });
+
+  it('does not terminate after a concurrent payment confirmation commits', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[1]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+    await db.transaction(async (tx) => markPaid(tx, txId, buyers[1]!));
+    await expirePaymentWindow(txId);
+
+    let confirmationLocked!: () => void;
+    const confirmationReady = new Promise<void>((resolve) => { confirmationLocked = resolve; });
+    const confirming = db.transaction(async (tx) => {
+      await tx.execute(sql`select id from transactions where id = ${txId} for update`);
+      await confirmPayment(tx, txId, seller);
+      confirmationLocked();
+      await tx.execute(sql`select pg_sleep(1)`);
+    });
+
+    await confirmationReady;
+    const expiring = paymentWindowExpired({ transactionId: txId }, helpers);
+    await Promise.all([confirming, expiring]);
+
+    const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
+    expect(row.state).toBe('open');
+    expect(row.paymentState).toBe('confirmed');
+  });
+
+  it('keeps a future-deadline deal open when an old payment job runs', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[3]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+
+    await paymentWindowExpired({ transactionId: txId }, helpers);
+
+    const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
+    expect(row.paymentDeadlineAt.getTime()).toBeGreaterThan(Date.now());
+    expect(row.state).toBe('open');
+  });
+
+  it('does not complete a receipt window before its current deadline', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[4]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+    await db.transaction(async (tx) => markPaid(tx, txId, buyers[4]!));
+    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
+    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
+
+    await receiptWindowExpired({ transactionId: txId }, helpers);
+
+    const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
+    expect(row.receiptDeadlineAt!.getTime()).toBeGreaterThan(Date.now());
+    expect(row.state).toBe('open');
+    expect(row.handoffState).toBe('seller_handed_over');
+  });
+
+  it('auto-completes after the receipt window when no problem is reported', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[3]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+    await db.transaction(async (tx) => markPaid(tx, txId, buyers[3]!));
+    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
+    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
+    await db.update(transactions).set({ receiptDeadlineAt: sql`now() - interval '1 hour'` }).where(eq(transactions.id, txId));
+    await receiptWindowExpired({ transactionId: txId }, helpers);
+    const row = (await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(row).toMatchObject({ state: 'completed', handoff: 'buyer_received' });
+  });
+
+  it('resumes receipt progression after a dispute is resolved', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[2]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+    await db.transaction(async (tx) => markPaid(tx, txId, buyers[2]!));
+    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
+    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
+    await db.update(transactions).set({
+      disputeState: 'resolved',
+      receiptDeadlineAt: sql`now() - interval '1 hour'`,
+    }).where(eq(transactions.id, txId));
+
+    const receiptJobKey = `receipt_window:${txId}`;
+    await pool.query('select graphile_worker.remove_job($1::text)', [receiptJobKey]);
+    const resumed = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
+    await db.transaction(async (tx) => rescheduleTransactionDeadlineJobs(tx, resumed));
+    const queued = await pool.query<{ task_identifier: string; run_at: Date }>(
+      'select task_identifier, run_at from graphile_worker.jobs where key = $1',
+      [receiptJobKey],
+    );
+    expect(queued.rows).toHaveLength(1);
+    expect(queued.rows[0]?.task_identifier).toBe('transaction:receipt_window');
+    expect(queued.rows[0]?.run_at.getTime()).toBeLessThan(Date.now());
+
+    await receiptWindowExpired({ transactionId: txId }, helpers);
+    await pool.query('select graphile_worker.remove_job($1::text)', [receiptJobKey]);
+
+    const row = (await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(row).toMatchObject({ state: 'completed', handoff: 'buyer_received' });
+  });
+
   it('completes a deal and records the objective facts for both sides', async () => {
     const listingId = await makeListing();
     const claim = await claimListing({
@@ -418,8 +679,8 @@ describe('★ mark-paid / confirm-received handshake', () => {
 
     await db.transaction(async (tx) => markPaid(tx, txId, buyers[0]!));
     let row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
-    expect(row?.paymentState).toBe('buyer_marked_paid');
-    expect(row?.state).toBe('open'); // not complete on the buyer's say-so alone
+    expect(row?.paymentState).toBe('confirmed');
+    expect(row?.state).toBe('completed');
 
     await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
     row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
@@ -460,7 +721,7 @@ describe('★ mark-paid / confirm-received handshake', () => {
     ).rejects.toThrow(/only the seller/i);
   });
 
-  it('★ a dispute returns the deal to pending WITHOUT extending the deadline', async () => {
+  it('does not let a seller reverse the buyer payment confirmation', async () => {
     const listingId = await makeListing();
     const claim = await claimListing({
       listingId,
@@ -469,18 +730,12 @@ describe('★ mark-paid / confirm-received handshake', () => {
     });
     const txId = claim.transactionId!;
 
-    const before = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
-    const originalDeadline = before!.paymentDeadlineAt.getTime();
-
     await db.transaction(async (tx) => markPaid(tx, txId, buyers[2]!));
-    await db.transaction(async (tx) => disputePayment(tx, txId, seller));
+    await expect(db.transaction(async (tx) => disputePayment(tx, txId, seller))).rejects.toThrow();
 
     const after = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
-    expect(after?.paymentState).toBe('pending');
-    expect(after?.markedPaidAt).toBeNull();
-    expect(after?.paymentDisputedAt).not.toBeNull();
-    // ★ The clock did not move. A seller cannot run out a buyer's window with disputes.
-    expect(after!.paymentDeadlineAt.getTime()).toBe(originalDeadline);
+    expect(after?.paymentState).toBe('confirmed');
+    expect(after?.markedPaidAt).not.toBeNull();
   });
 });
 
@@ -705,7 +960,7 @@ describe('★ auctions: bidding, anti-snipe, close', () => {
     expect(tx?.source).toBe('auction_win');
   });
 
-  it('closes with no sale when the reserve is not met', async () => {
+  it('closes with no sale when the reserve is not met (legacy compatibility)', async () => withLegacyScope(async () => {
     const listingId = await auctionListing({
       endsAt: new Date(Date.now() + 60 * 60 * 1000),
       reserveCents: 50_000,
@@ -721,9 +976,9 @@ describe('★ auctions: bidding, anti-snipe, close', () => {
     const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
     expect(listing?.status).toBe('ended_no_sale');
     expect(await openTransactionFor(listingId)).toBeUndefined();
-  });
+  }));
 
-  it('a buyout ends the auction immediately', async () => {
+  it('a buyout ends the auction immediately (legacy compatibility)', async () => withLegacyScope(async () => {
     const listingId = await auctionListing({
       endsAt: new Date(Date.now() + 60 * 60 * 1000),
       buyoutCents: 40_000,
@@ -734,7 +989,7 @@ describe('★ auctions: bidding, anti-snipe, close', () => {
 
     const listing = (await db.select().from(listings).where(eq(listings.id, listingId)))[0];
     expect(listing?.status).toBe('ended_won');
-  });
+  }));
 
   it('★ a reneged winner hands off to the runner-up AT THEIR OWN BID', async () => {
     const listingId = await auctionListing({ endsAt: new Date(Date.now() + 60 * 60 * 1000) });
@@ -755,6 +1010,18 @@ describe('★ auctions: bidding, anti-snipe, close', () => {
     await expirePaymentWindow(winnerTx!.id);
     await paymentWindowExpired({ transactionId: winnerTx!.id }, helpers);
     await promoteNext({ listingId, failedTransactionId: winnerTx!.id }, helpers);
+
+    const fallback = (await db.select().from(auctionFallbackOffers).where(and(
+      eq(auctionFallbackOffers.listingId, listingId),
+      eq(auctionFallbackOffers.status, 'pending'),
+    )).limit(1))[0];
+    expect(fallback?.buyerId).toBe(buyers[0]!);
+    expect(fallback?.amountCents).toBe(6_000);
+    expect(await openTransactionFor(listingId)).toBeUndefined();
+
+    await db.transaction(async (tx) => {
+      await acceptAuctionFallbackOffer(tx, fallback!.id, buyers[0]!);
+    });
 
     const runnerUpTx = await openTransactionFor(listingId);
     expect(runnerUpTx?.buyerId).toBe(buyers[0]!);

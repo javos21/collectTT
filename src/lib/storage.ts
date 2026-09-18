@@ -42,6 +42,11 @@ export function bucket(): string {
   return env().STORAGE_BUCKET;
 }
 
+/** Private bucket reserved for transaction evidence. Never use publicUrl() for it. */
+export function evidenceBucket(): string {
+  return env().STORAGE_EVIDENCE_BUCKET;
+}
+
 /** Public URL for a stored object. MinIO locally, the R2 CDN domain in production. */
 export function publicUrl(key: string): string {
   return `${env().STORAGE_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
@@ -55,9 +60,10 @@ export async function presignUpload(opts: {
   key: string;
   contentType: string;
   expiresInSeconds?: number;
+  bucketName?: string;
 }): Promise<string> {
   const command = new PutObjectCommand({
-    Bucket: bucket(),
+    Bucket: opts.bucketName ?? bucket(),
     Key: opts.key,
     ContentType: opts.contentType,
   });
@@ -65,19 +71,26 @@ export async function presignUpload(opts: {
 }
 
 /** Generate a short-lived read URL so image objects may remain private in R2. */
-export async function presignDownload(key: string, expiresInSeconds = 3600): Promise<string> {
-  const command = new GetObjectCommand({ Bucket: bucket(), Key: key });
+export async function presignDownload(
+  key: string,
+  expiresInSeconds = 3600,
+  bucketName = bucket(),
+): Promise<string> {
+  const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
   return getSignedUrl(storage(), command, { expiresIn: expiresInSeconds });
 }
 
 /** Allow the browser to use presigned upload URLs from the configured app origins. */
-export async function configureStorageCors(origins: readonly string[]): Promise<void> {
+export async function configureStorageCors(
+  origins: readonly string[],
+  bucketName = bucket(),
+): Promise<void> {
   const allowedOrigins = [...new Set(origins.map((origin) => origin.trim()).filter(Boolean))];
   if (allowedOrigins.length === 0) throw new Error('At least one storage CORS origin is required.');
 
   await storage().send(
     new PutBucketCorsCommand({
-      Bucket: bucket(),
+      Bucket: bucketName,
       CORSConfiguration: {
         CORSRules: [
           {
@@ -97,10 +110,11 @@ export async function putObject(opts: {
   key: string;
   body: Buffer;
   contentType: string;
+  bucketName?: string;
 }): Promise<void> {
   await storage().send(
     new PutObjectCommand({
-      Bucket: bucket(),
+      Bucket: opts.bucketName ?? bucket(),
       Key: opts.key,
       Body: opts.body,
       ContentType: opts.contentType,
@@ -108,19 +122,19 @@ export async function putObject(opts: {
   );
 }
 
-export async function headObject(key: string): Promise<{
+export async function headObject(key: string, bucketName = bucket()): Promise<{
   contentLength: number | undefined;
   contentType: string | undefined;
 }> {
-  const result = await storage().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
+  const result = await storage().send(new HeadObjectCommand({ Bucket: bucketName, Key: key }));
   return {
     contentLength: result.ContentLength,
     contentType: result.ContentType,
   };
 }
 
-export async function getObject(key: string): Promise<Buffer> {
-  const result = await storage().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
+export async function getObject(key: string, bucketName = bucket()): Promise<Buffer> {
+  const result = await storage().send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
   if (result.Body === undefined) throw new Error(`Object not found: ${key}`);
   const chunks: Uint8Array[] = [];
   // @ts-expect-error - Body is a Node Readable stream in the Node runtime
@@ -130,17 +144,17 @@ export async function getObject(key: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-export async function deleteObject(key: string): Promise<void> {
-  await storage().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+export async function deleteObject(key: string, bucketName = bucket()): Promise<void> {
+  await storage().send(new DeleteObjectCommand({ Bucket: bucketName, Key: key }));
 }
 
-export async function deleteObjects(keys: string[]): Promise<void> {
+export async function deleteObjects(keys: string[], bucketName = bucket()): Promise<void> {
   const uniqueKeys = [...new Set(keys)].filter((key) => key !== '');
   if (uniqueKeys.length === 0) return;
 
   await storage().send(
     new DeleteObjectsCommand({
-      Bucket: bucket(),
+      Bucket: bucketName,
       Delete: { Objects: uniqueKeys.map((Key) => ({ Key })) },
     }),
   );

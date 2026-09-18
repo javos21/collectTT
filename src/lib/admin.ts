@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { db } from '@/db/client';
 import { profiles } from '@/db/schema/profiles';
+import { enforceUserAndIpRateLimit, RATE_LIMITS, RateLimitExceeded } from '@/lib/rate-limit';
 import { currentUser, type CurrentUser } from '@/lib/session';
 
 export interface AdminAccess {
@@ -32,4 +33,19 @@ export async function requireAdmin(callbackURL = '/admin'): Promise<CurrentUser>
   }
   if (!access.isAdmin) redirect('/admin');
   return access.viewer;
+}
+
+/** Server-side guard for every administrator mutation. */
+export async function requireAdminAction(callbackURL = '/admin'): Promise<CurrentUser> {
+  const viewer = await requireAdmin(callbackURL);
+  try {
+    await enforceUserAndIpRateLimit('admin:mutation', viewer.userId, RATE_LIMITS.adminMutation);
+  } catch (error) {
+    if (error instanceof RateLimitExceeded) {
+      const separator = callbackURL.includes('?') ? '&' : '?';
+      redirect(`${callbackURL}${separator}adminError=${encodeURIComponent(error.message)}`);
+    }
+    throw error;
+  }
+  return viewer;
 }

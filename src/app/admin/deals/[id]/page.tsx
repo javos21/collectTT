@@ -13,6 +13,8 @@ import { users } from '@/db/schema/auth';
 import { formatMoney } from '@/domain/money';
 import { requireAdmin } from '@/lib/admin';
 import { AdminFrame } from '../../admin-frame';
+import { DisputeAdminActions } from './dispute-actions';
+import { cancelDealAction, extendDealDeadlineAction } from '@/app/admin/actions';
 
 function dateTime(value: Date | null): string {
   return value === null ? '—' : value.toLocaleString('en-TT', { dateStyle: 'medium', timeStyle: 'short' });
@@ -24,7 +26,7 @@ function label(value: string | null): string {
 
 function statusTone(status: string): string {
   if (status === 'open') return 'active';
-  if (status === 'completed' || status === 'confirmed' || status === 'picked_up' || status === 'sent') return 'confirmed';
+  if (status === 'completed' || status === 'confirmed' || status === 'picked_up' || status === 'sent' || status === 'resolved') return 'confirmed';
   if (status === 'failed' || status === 'declined' || status === 'reneged_buyer' || status === 'reneged_seller' || status === 'cancelled' || status === 'expired') return 'declined';
   if (status === 'pending' || status === 'buyer_marked_paid' || status === 'awaiting_dropoff' || status === 'at_relay' || status === 'release_authorized') return 'pending';
   return 'ended';
@@ -38,8 +40,15 @@ function isOverdue(value: Date | null, state: string, now: Date): boolean {
   return state === 'open' && value !== null && value < now;
 }
 
-export default async function AdminDealDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AdminDealDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ adminSuccess?: string; adminError?: string }>;
+}) {
   const { id } = await params;
+  const feedback = await searchParams;
   await requireAdmin(`/admin/deals/${encodeURIComponent(id)}`);
 
   const dealRows = await db
@@ -153,12 +162,15 @@ export default async function AdminDealDetailPage({ params }: { params: Promise<
             <h1>{row.listing.title}</h1>
             <p>{row.categoryLabel} · Attempt {transaction.attemptNumber} · {label(transaction.source)} · Started {dateTime(transaction.createdAt)}</p>
           </div>
-          <span className={`admin-status admin-status--${statusTone(transaction.state)}`}>{label(transaction.state)}</span>
+          <span className={`admin-status admin-status--${transaction.disputeState === 'open' ? 'pending' : statusTone(transaction.state)}`}>{transaction.disputeState === 'open' ? 'Under review' : label(transaction.state)}</span>
         </div>
+
+        {feedback.adminSuccess !== undefined && <p className="admin-form-success" role="status">{feedback.adminSuccess}</p>}
+        {feedback.adminError !== undefined && <p className="admin-form-error" role="alert">{feedback.adminError}</p>}
 
         <section className="admin-stats admin-deal-stats" aria-label="Deal summary">
           <article className="admin-stat admin-stat--purple"><div className="admin-stat__icon"><CircleDollarSign size={19} aria-hidden="true" /></div><div><strong>{money(transaction.amountCents, transaction.currency)}</strong><span>Agreed amount</span></div></article>
-          <article className="admin-stat admin-stat--blue"><div className="admin-stat__icon"><Activity size={19} aria-hidden="true" /></div><div><strong>{label(transaction.state)}</strong><span>Deal state</span></div></article>
+          <article className="admin-stat admin-stat--blue"><div className="admin-stat__icon"><Activity size={19} aria-hidden="true" /></div><div><strong>{transaction.disputeState === 'open' ? 'Under review' : label(transaction.state)}</strong><span>Deal state</span></div></article>
           <article className="admin-stat admin-stat--green"><div className="admin-stat__icon"><CircleDollarSign size={19} aria-hidden="true" /></div><div><strong>{label(transaction.paymentState)}</strong><span>Payment track</span></div></article>
           <article className="admin-stat admin-stat--amber"><div className="admin-stat__icon"><PackageCheck size={19} aria-hidden="true" /></div><div><strong>{label(transaction.custodyState)}</strong><span>Custody track</span></div></article>
         </section>
@@ -185,12 +197,39 @@ export default async function AdminDealDetailPage({ params }: { params: Promise<
         </div>
 
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-tracks-title">
-          <div className="admin-panel__heading"><div><h2 id="deal-tracks-title">State tracks and deadlines</h2><p className="admin-panel__subcopy">Payment and item custody advance independently; completion requires both tracks to settle.</p></div><Clock3 size={19} aria-hidden="true" /></div>
+          <div className="admin-panel__heading"><div><h2 id="deal-tracks-title">State tracks and deadlines</h2><p className="admin-panel__subcopy">Payment, item custody, and v1 meetup hand-off advance independently; completion requires every applicable track to settle.</p></div><Clock3 size={19} aria-hidden="true" /></div>
           <div className="admin-track-grid">
             <article className={`admin-track-card admin-track-card--${statusTone(transaction.paymentState)}`}><div className="admin-track-card__heading"><div><span>Payment track</span><h3>{label(transaction.paymentState)}</h3></div><CircleDollarSign size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Deadline</dt><dd className={paymentOverdue ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{dateTime(transaction.paymentDeadlineAt)}{paymentOverdue && <small>Overdue</small>}</dd></div><div><dt>Marked paid</dt><dd>{dateTime(transaction.markedPaidAt)}</dd></div><div><dt>Confirmed</dt><dd>{dateTime(transaction.paymentConfirmedAt)}</dd></div><div><dt>Disputed</dt><dd>{dateTime(transaction.paymentDisputedAt)}</dd></div></dl></article>
             <article className={`admin-track-card admin-track-card--${statusTone(transaction.custodyState)}`}><div className="admin-track-card__heading"><div><span>Custody track</span><h3>{label(transaction.custodyState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Seller drop-off due</dt><dd className={dropoffOverdue ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{dateTime(transaction.sellerDropoffDeadlineAt)}{dropoffOverdue && <small>Overdue</small>}</dd></div><div><dt>Completed</dt><dd>{dateTime(transaction.completedAt)}</dd></div><div><dt>Terminated</dt><dd>{dateTime(transaction.terminatedAt)}<small>{label(transaction.terminatedReason)}</small></dd></div><div><dt>Fulfillment path</dt><dd>{label(transaction.fulfillmentPath)}</dd></div></dl></article>
+            <article className={`admin-track-card admin-track-card--${statusTone(transaction.handoffState)}`}><div className="admin-track-card__heading"><div><span>Meetup hand-off</span><h3>{label(transaction.handoffState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Handed over</dt><dd>{dateTime(transaction.handedOverAt)}</dd></div><div><dt>Received</dt><dd>{dateTime(transaction.receivedAt)}</dd></div><div><dt>Receipt deadline</dt><dd>{dateTime(transaction.receiptDeadlineAt)}</dd></div><div><dt>Dispute track</dt><dd>{label(transaction.disputeState)}</dd></div></dl></article>
           </div>
         </section>
+
+        {transaction.state === 'open' && (
+          <section className="admin-panel admin-detail-section" aria-labelledby="deal-deadline-action-title">
+            <div className="admin-panel__heading"><div><h2 id="deal-deadline-action-title">Extend payment deadline</h2><p className="admin-panel__subcopy">Support-only override. Every extension is recorded in the transaction timeline and audit log.</p></div><Clock3 size={19} aria-hidden="true" /></div>
+            <form action={extendDealDeadlineAction} className="admin-dispute-action__form">
+              <input type="hidden" name="transactionId" value={transaction.id} />
+              <label htmlFor="deadline-hours">Additional hours</label>
+              <input id="deadline-hours" name="hours" type="number" min="1" max="168" defaultValue="24" required />
+              <label htmlFor="deadline-reason">Reason</label>
+              <textarea id="deadline-reason" name="reason" minLength={10} maxLength={500} rows={3} required placeholder="Explain why support is extending this deadline." />
+              <button className="admin-button" type="submit">Extend deadline</button>
+            </form>
+          </section>
+        )}
+
+        {transaction.state === 'open' && (
+          <section className="admin-panel admin-detail-section" aria-labelledby="deal-cancel-action-title">
+            <div className="admin-panel__heading"><div><h2 id="deal-cancel-action-title">Cancel transaction</h2><p className="admin-panel__subcopy">Use only for a support-approved intervention. Open disputes must be resolved first; the cancellation is state-guarded and audited.</p></div><AlertTriangle size={19} aria-hidden="true" /></div>
+            <form action={cancelDealAction} className="admin-dispute-action__form">
+              <input type="hidden" name="transactionId" value={transaction.id} />
+              <label htmlFor="cancel-deal-reason">Reason</label>
+              <textarea id="cancel-deal-reason" name="reason" minLength={10} maxLength={500} rows={3} required placeholder="Explain the support decision." />
+              <button className="admin-button admin-button--danger" type="submit">Cancel transaction</button>
+            </form>
+          </section>
+        )}
 
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-custody-title">
           <div className="admin-panel__heading"><div><h2 id="deal-custody-title">Retained custody record</h2><p className="admin-panel__subcopy">Admin-visible operational record only; no store-staff actions are exposed here.</p></div><PackageCheck size={19} aria-hidden="true" /></div>
@@ -198,8 +237,23 @@ export default async function AdminDealDetailPage({ params }: { params: Promise<
         </section>
 
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-disputes-title">
-          <div className="admin-panel__heading"><div><h2 id="deal-disputes-title">Disputes and support context</h2><p className="admin-panel__subcopy">Recorded dispute history is visible; guided support actions come later.</p></div><AlertTriangle size={19} aria-hidden="true" /></div>
+          <div className="admin-panel__heading"><div><h2 id="deal-disputes-title">Disputes and support context</h2><p className="admin-panel__subcopy">Review the member report, record a decision, and keep the deal state unchanged unless a separate guided action is defined.</p></div><AlertTriangle size={19} aria-hidden="true" /></div>
           {disputeRows.length === 0 ? <p className="admin-empty-copy">No disputes recorded for this deal.</p> : <div className="admin-table-wrap"><table className="admin-detail-table"><caption className="sr-only">Deal disputes</caption><thead><tr><th scope="col">Reason</th><th scope="col">Raised by</th><th scope="col">Status</th><th scope="col">Detail</th><th scope="col">Resolution</th><th scope="col">Created</th></tr></thead><tbody>{disputeRows.map((dispute) => <tr key={dispute.id}><th scope="row">{label(dispute.reason)}<small>{dispute.id}</small></th><td>{dispute.raisedByName}<small>{dispute.raisedBy}</small></td><td><span className={`admin-status admin-status--${statusTone(dispute.status)}`}>{label(dispute.status)}</span></td><td>{dispute.detail}</td><td>{dispute.resolution ?? '—'}<small>{dispute.resolvedByName === null ? '' : `Resolved by ${dispute.resolvedByName}`}</small></td><td>{dateTime(dispute.createdAt)}</td></tr>)}</tbody></table></div>}
+          {disputeRows.some((dispute) => dispute.status === 'open') && (
+            <div className="admin-dispute-actions" aria-label="Open dispute actions">
+              <h3>Open dispute actions</h3>
+              <p>These decisions close the support work item and notify both participants. They do not rewrite payment or custody state.</p>
+              {disputeRows.filter((dispute) => dispute.status === 'open').map((dispute) => (
+                <DisputeAdminActions
+                  key={dispute.id}
+                  disputeId={dispute.id}
+                  transactionId={transaction.id}
+                  reason={label(dispute.reason)}
+                  detail={dispute.detail}
+                />
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-events-title">

@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import { CheckCircle2, ClipboardCheck } from 'lucide-react';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 import { currentUser } from '@/lib/session';
 import { latestStoreApplicationFor } from '@/services/store-applications';
 import { StoreApplicationForm } from './store-application-form';
+import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,7 @@ export default async function StoreApplyPage({
 }: {
   searchParams: Promise<{ error?: string; submitted?: string }>;
 }) {
+  if (!isLegacyFeatureAllowed('store_custody')) notFound();
   const viewer = await currentUser();
   if (viewer === null) redirect('/sign-in?returnTo=/store/apply');
   const [application, params] = await Promise.all([

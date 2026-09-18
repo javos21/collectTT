@@ -3,17 +3,14 @@
  *
  * One of the two independent tracks a transaction advances along. This track is
  * purely about money changing hands between buyer and seller — the platform never
- * touches it, we only record the assertions both sides make about it.
+ * touches it, we only record the buyer's assertion that payment was sent.
  *
- *   pending ──buyer marks paid──► buyer_marked_paid ──seller confirms──► confirmed ✓
- *      ▲                                 │
- *      └────seller disputes the claim────┘   (the deadline is NEVER extended)
+ *   pending ──buyer marks paid──► confirmed ✓
  *
  *   pending | buyer_marked_paid ──window lapses / tx terminates──► failed ✗
  *
- * The dispute reversal is the only loop in the machine. It is safe precisely because
- * `payment_deadline_at` never moves on reversal: a seller cannot run out a buyer's
- * clock with repeated disputes, and a buyer cannot buy time with a false mark-paid.
+ * `buyer_marked_paid` remains readable for historical rows created by the previous
+ * two-party handshake, but new deals move directly from pending to confirmed.
  */
 
 import type { ActorRole } from './actors';
@@ -32,7 +29,7 @@ export type TerminalPaymentState = (typeof TERMINAL_PAYMENT_STATES)[number];
  * Imported by both the web process and the worker process.
  */
 export const PAYMENT_TRANSITIONS = {
-  pending: ['buyer_marked_paid', 'failed'],
+  pending: ['buyer_marked_paid', 'confirmed', 'failed'],
   buyer_marked_paid: ['confirmed', 'pending', 'failed'],
   confirmed: [],
   failed: [],
@@ -47,8 +44,9 @@ export type NextPaymentState<S extends PaymentState> = (typeof PAYMENT_TRANSITIO
  */
 export const PAYMENT_TRANSITION_ACTORS: Record<string, readonly ActorRole[]> = {
   'pending->buyer_marked_paid': ['buyer'],
+  'pending->confirmed': ['buyer'],
   'pending->failed': ['system', 'admin'],
-  'buyer_marked_paid->confirmed': ['seller', 'admin'],
+  'buyer_marked_paid->confirmed': ['buyer', 'seller', 'admin'],
   'buyer_marked_paid->pending': ['seller', 'admin'],
   'buyer_marked_paid->failed': ['system', 'admin'],
 };

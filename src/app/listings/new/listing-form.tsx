@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useCallback, useRef, useState } from 'react';
 
 import type { CategoryDefinition } from '@/domain/categories/types';
 import { AttributeFields } from './attribute-fields';
@@ -9,8 +9,10 @@ import { ImageUploader } from './image-uploader';
 import { SaleTypeFields, type SaleType } from './sale-type-fields';
 
 type RelayStore = { id: string; name: string; area: string };
-type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; defaultDays: number };
+type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; fulfillmentPath: string; defaultDays: number };
 type PaymentOption = { key: string; label: string };
+type MeetupLocation = { id: string; label: string; area: string };
+type InitialImage = { id: string; previewUrl: string; alt?: string };
 type ServerAction = (formData: FormData) => Promise<void>;
 type ErrorTarget = 'photos' | 'delivery' | 'payment';
 type StepError = { message: string; target: ErrorTarget };
@@ -28,21 +30,65 @@ export function ListingForm({
   deliveryOptions,
   paymentOptions,
   categories,
+  meetupLocations,
+  defaultDeliveryOptionIds,
+  defaultRelayStoreIds,
+  initialMeetupLocationId,
+  defaultPaymentMethods,
+  initialTitle = '',
+  initialDescription = '',
+  initialCategoryKey,
+  initialAttributes = {},
+  initialSaleType = 'straight_sale',
+  initialPrice,
+  initialStartBid,
+  initialBuyout,
+  initialDurationHours,
+  initialAcceptsOffers = false,
+  initialAutoRelistOnRenege = true,
+  initialImages = [],
+  duplicateMode = false,
   error,
+  v1 = false,
 }: {
   action: ServerAction;
   relayStoreOptions: RelayStore[];
   deliveryOptions: readonly DeliveryOption[];
   paymentOptions: readonly PaymentOption[];
   categories: readonly CategoryDefinition[];
+  meetupLocations: readonly MeetupLocation[];
+  defaultDeliveryOptionIds: readonly string[];
+  defaultRelayStoreIds: readonly string[];
+  initialMeetupLocationId: string | null;
+  defaultPaymentMethods: readonly string[];
+  initialTitle?: string;
+  initialDescription?: string;
+  initialCategoryKey?: string;
+  initialAttributes?: Record<string, unknown>;
+  initialSaleType?: SaleType;
+  initialPrice?: string;
+  initialStartBid?: string;
+  initialBuyout?: string;
+  initialDurationHours?: number;
+  initialAcceptsOffers?: boolean;
+  initialAutoRelistOnRenege?: boolean;
+  initialImages?: readonly InitialImage[];
+  duplicateMode?: boolean;
   error?: string;
+  v1?: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [step, setStep] = useState(1);
   const [stepError, setStepError] = useState<StepError | null>(null);
-  const [saleType, setSaleType] = useState<SaleType>('straight_sale');
-  const [imageIds, setImageIds] = useState<string[]>([]);
+  const [saleType, setSaleType] = useState<SaleType>(initialSaleType);
+  const [imageIds, setImageIds] = useState<string[]>(initialImages.map((image) => image.id));
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
+  const [selectedDeliveryOptionIds, setSelectedDeliveryOptionIds] = useState<string[]>([]);
+  const steps = STEPS;
+  const handleDeliverySelectionChange = useCallback((ids: string[]) => {
+    setSelectedDeliveryOptionIds(ids);
+  }, []);
+  const hasMeetupDelivery = deliveryOptions.some((option) => option.fulfillmentPath === 'cash_meetup' && selectedDeliveryOptionIds.includes(option.id));
 
   function validateStep(stepToValidate: number): boolean {
     const form = formRef.current;
@@ -69,6 +115,14 @@ export function ListingForm({
 
     if (stepToValidate === 3 && form.querySelector('input[name="deliveryOptionIds"]:checked') === null) {
       setStepError({ message: 'Choose a delivery option.', target: 'delivery' });
+      return false;
+    }
+    if (
+      stepToValidate === 3 &&
+      form.querySelector('input[name="deliveryOptionIds"][data-requires-store="true"]:checked') !== null &&
+      form.querySelector('input[name="relayStoreIds"]:checked') === null
+    ) {
+      setStepError({ message: 'Choose at least one pickup store.', target: 'delivery' });
       return false;
     }
     if (stepToValidate === 4 && form.querySelector('input[name="paymentOptionKeys"]:checked') === null) {
@@ -127,8 +181,10 @@ export function ListingForm({
     <form ref={formRef} action={action} className="create-listing-form" noValidate onSubmit={submit}>
       {error !== undefined && <div className="create-error" role="alert"><strong>Check your listing</strong><span>{error}</span></div>}
 
+      {duplicateMode && <div className="create-copy-notice" role="status"><strong>Starting from a copy</strong><span>Delivery, payment, and item details are prefilled. Review anything that changed, then save the new listing as a draft or publish it.</span></div>}
+
       <ol className="create-progress" aria-label="Listing creation steps">
-        {STEPS.map((item) => (
+        {steps.map((item) => (
           <li className={item.number === step ? 'is-current' : item.number < step ? 'is-complete' : ''} key={item.number}>
             <span>{item.number}</span><strong>{item.label}</strong>
           </li>
@@ -139,25 +195,34 @@ export function ListingForm({
         <legend>Item</legend>
         <div className="form-field">
           <label className="sr-only" htmlFor="title">Title</label>
-          <input id="title" name="title" type="text" required minLength={3} maxLength={160} placeholder="Title" />
+          <input id="title" name="title" type="text" defaultValue={initialTitle} required minLength={3} maxLength={160} placeholder="Title" />
         </div>
         <div className="form-field">
           <label className="sr-only" htmlFor="description">Description</label>
-          <textarea id="description" name="description" required maxLength={4000} rows={5} placeholder="Description" />
+          <textarea id="description" name="description" defaultValue={initialDescription} required maxLength={4000} rows={5} placeholder="Description" />
         </div>
         <div className="create-item-details">
           <h2>Item details</h2>
-        <AttributeFields categories={[...categories]} />
+        <AttributeFields categories={[...categories]} initialCategoryKey={initialCategoryKey} initialAttributes={initialAttributes} />
         </div>
         {stepError?.target === 'photos' && <div className="create-error" role="alert">{stepError.message}</div>}
-        <ImageUploader onReadyImageIdsChange={setImageIds} onUploadErrorChange={setHasImageUploadError} />
+        <ImageUploader initialImages={initialImages} onReadyImageIdsChange={setImageIds} onUploadErrorChange={setHasImageUploadError} />
       </fieldset>
 
       <fieldset className="create-section create-step" data-step="2" hidden={step !== 2}>
         <legend>Sale</legend>
-        <SaleTypeFields saleType={saleType} onSaleTypeChange={setSaleType} />
+        <SaleTypeFields
+          saleType={saleType}
+          onSaleTypeChange={setSaleType}
+          initialPrice={initialPrice}
+          initialStartBid={initialStartBid}
+          initialBuyout={initialBuyout}
+          initialDurationHours={initialDurationHours}
+          initialAcceptsOffers={initialAcceptsOffers}
+          v1={v1}
+        />
         <label className="auto-relist" htmlFor="autoRelist">
-          <input id="autoRelist" type="checkbox" name="autoRelistOnRenege" defaultChecked />
+          <input id="autoRelist" type="checkbox" name="autoRelistOnRenege" defaultChecked={initialAutoRelistOnRenege} />
           <span><strong>Auto-relist</strong><small>Put it back up if payment falls through.</small></span>
         </label>
       </fieldset>
@@ -165,7 +230,17 @@ export function ListingForm({
       <fieldset className="create-section create-step" data-step="3" hidden={step !== 3}>
         <legend>Delivery</legend>
         {stepError?.target === 'delivery' && <div className="create-error" role="alert">{stepError.message}</div>}
-        <DeliveryFields deliveryOptions={deliveryOptions} relayStoreOptions={relayStoreOptions} />
+        <DeliveryFields deliveryOptions={deliveryOptions} relayStoreOptions={relayStoreOptions} defaultDeliveryOptionIds={defaultDeliveryOptionIds} defaultRelayStoreIds={defaultRelayStoreIds} onSelectionChange={handleDeliverySelectionChange} />
+        {hasMeetupDelivery && meetupLocations.length > 0 && (
+          <div className="form-field form-field--compact">
+            <label htmlFor="meetupLocationId">Meetup location</label>
+            <select id="meetupLocationId" name="meetupLocationId" defaultValue={initialMeetupLocationId ?? ''}>
+              <option value="">Choose a saved meetup location</option>
+              {meetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
+            </select>
+            <small>One saved location is preselected automatically. If you have multiple, choose the one for this listing.</small>
+          </div>
+        )}
       </fieldset>
 
       <fieldset className="create-section create-step" data-step="4" hidden={step !== 4}>
@@ -175,12 +250,12 @@ export function ListingForm({
         <div className="choice-grid choice-grid--payments">
           {paymentOptions.map((option) => (
             <label className="choice-card choice-card--compact" key={option.key} htmlFor={`pay_${option.key}`}>
-              <input id={`pay_${option.key}`} type="checkbox" name="paymentOptionKeys" value={option.key} />
+              <input id={`pay_${option.key}`} type="checkbox" name="paymentOptionKeys" value={option.key} defaultChecked={defaultPaymentMethods.includes(option.key)} />
               <span><strong>{option.label}</strong></span>
             </label>
           ))}
         </div>
-        <div className="payment-step__period">
+        {!v1 && <div className="payment-step__period">
           <label htmlFor="paymentWindowHours">Payment period</label>
           <p className="payment-step__hint payment-step__hint--period">This applies to every payment and fulfillment option on the listing.</p>
           <select id="paymentWindowHours" name="paymentWindowHours" defaultValue="72">
@@ -189,14 +264,19 @@ export function ListingForm({
             <option value="120">Within 5 days</option>
             <option value="168">Within 7 days</option>
           </select>
-        </div>
+        </div>}
       </fieldset>
 
       {imageIds.map((imageId) => <input key={imageId} type="hidden" name="imageIds" value={imageId} />)}
 
       <div className="create-step-actions">
         {step > 1 ? <button className="secondary" type="button" onClick={previous}>Back</button> : <span />}
-        {step < 4 ? <button type="button" onClick={next}>Continue</button> : <button type="button" onClick={publish}>Publish listing</button>}
+        {step < 4 ? <button type="button" onClick={next}>Continue</button> : (
+          <>
+            <button className="secondary" type="submit" name="intent" value="draft">Save draft</button>
+            <button type="button" onClick={publish}>Publish listing</button>
+          </>
+        )}
       </div>
     </form>
   );

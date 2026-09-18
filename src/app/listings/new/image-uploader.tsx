@@ -12,7 +12,9 @@ type UploadItem = {
   id?: string;
   name: string;
   previewUrl: string;
+  alt?: string;
   state: UploadState;
+  deleteOnRemove?: boolean;
   error?: string;
 };
 
@@ -22,11 +24,21 @@ const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/
 export function ImageUploader({
   onReadyImageIdsChange,
   onUploadErrorChange,
+  initialImages = [],
 }: {
   onReadyImageIdsChange: (imageIds: string[]) => void;
   onUploadErrorChange: (hasError: boolean) => void;
+  initialImages?: readonly { id: string; previewUrl: string; alt?: string }[];
 }) {
-  const [items, setItems] = useState<UploadItem[]>([]);
+  const [items, setItems] = useState<UploadItem[]>(() => initialImages.map((image) => ({
+    localId: `existing-${image.id}`,
+    id: image.id,
+    name: image.alt ?? 'Existing photo',
+    previewUrl: image.previewUrl,
+    alt: image.alt,
+    state: 'ready',
+    deleteOnRemove: false,
+  })));
   const itemsRef = useRef<UploadItem[]>([]);
 
   useEffect(() => {
@@ -57,6 +69,7 @@ export function ImageUploader({
       name: file.name,
       previewUrl: URL.createObjectURL(file),
       state: 'compressing',
+      deleteOnRemove: true,
     }));
 
     setItems((current) => [...current, ...nextItems]);
@@ -121,7 +134,7 @@ export function ImageUploader({
     setItems((current) => {
       const item = current[index];
       if (item !== undefined) URL.revokeObjectURL(item.previewUrl);
-      if (item?.id !== undefined) {
+      if (item?.id !== undefined && item.deleteOnRemove !== false) {
         void fetch(`/api/images/${item.id}`, { method: 'DELETE' }).catch(() => undefined);
       }
       return current.filter((_, currentIndex) => currentIndex !== index);
@@ -157,7 +170,7 @@ export function ImageUploader({
           {items.map((item, index) => (
             <div className="image-uploader__item" key={`${item.previewUrl}-${index}`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={item.previewUrl} alt="" />
+              <img src={item.previewUrl} alt={item.alt ?? ''} />
               <div className="image-uploader__status">
                 <span aria-live="polite">
                   {item.state === 'compressing'

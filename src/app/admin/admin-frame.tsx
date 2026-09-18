@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { Activity, Bell, ClipboardList, FileClock, LayoutDashboard, LibraryBig, ShieldCheck, Store, Users } from 'lucide-react';
+import { Activity, BarChart3, Bell, ClipboardList, FileClock, LayoutDashboard, LibraryBig, MessageSquareWarning, ShieldCheck, Store, Users } from 'lucide-react';
 
-export type AdminNav = 'overview' | 'listings' | 'members' | 'deals' | 'notifications' | 'audit' | 'stores' | 'catalog' | 'settings';
+export type AdminNav = 'overview' | 'listings' | 'members' | 'deals' | 'support' | 'notifications' | 'analytics' | 'audit' | 'stores' | 'catalog' | 'settings';
 
 export function AdminFrame({ activeNav, children }: { activeNav: AdminNav; children: React.ReactNode }) {
   return (
@@ -15,9 +15,11 @@ export function AdminFrame({ activeNav, children }: { activeNav: AdminNav; child
             <Link aria-current={activeNav === 'listings' ? 'page' : undefined} className={activeNav === 'listings' ? 'is-active' : ''} href="/admin/listings"><ClipboardList size={17} aria-hidden="true" />Listings</Link>
             <Link aria-current={activeNav === 'members' ? 'page' : undefined} className={activeNav === 'members' ? 'is-active' : ''} href="/admin/members"><Users size={17} aria-hidden="true" />Members</Link>
             <Link aria-current={activeNav === 'deals' ? 'page' : undefined} className={activeNav === 'deals' ? 'is-active' : ''} href="/admin/deals"><Activity size={17} aria-hidden="true" />Deals</Link>
+            <Link aria-current={activeNav === 'support' ? 'page' : undefined} className={activeNav === 'support' ? 'is-active' : ''} href="/admin/support"><MessageSquareWarning size={17} aria-hidden="true" />Support cases</Link>
             <Link aria-current={activeNav === 'notifications' ? 'page' : undefined} className={activeNav === 'notifications' ? 'is-active' : ''} href="/admin/notifications"><Bell size={17} aria-hidden="true" />Notifications</Link>
+            <Link aria-current={activeNav === 'analytics' ? 'page' : undefined} className={activeNav === 'analytics' ? 'is-active' : ''} href="/admin/analytics"><BarChart3 size={17} aria-hidden="true" />Analytics</Link>
             <Link aria-current={activeNav === 'audit' ? 'page' : undefined} className={activeNav === 'audit' ? 'is-active' : ''} href="/admin/audit"><FileClock size={17} aria-hidden="true" />Audit log</Link>
-            <Link aria-current={activeNav === 'stores' ? 'page' : undefined} className={activeNav === 'stores' ? 'is-active' : ''} href="/admin/stores"><Store size={17} aria-hidden="true" />Stores</Link>
+            <Link aria-current={activeNav === 'stores' ? 'page' : undefined} className={activeNav === 'stores' ? 'is-active' : ''} href="/admin/stores"><Store size={17} aria-hidden="true" />Legacy stores</Link>
             <Link aria-current={activeNav === 'catalog' ? 'page' : undefined} className={activeNav === 'catalog' ? 'is-active' : ''} href="/admin/catalog"><LibraryBig size={17} aria-hidden="true" />Catalog</Link>
             <Link aria-current={activeNav === 'settings' ? 'page' : undefined} className={activeNav === 'settings' ? 'is-active' : ''} href="/admin/settings"><ShieldCheck size={17} aria-hidden="true" />Settings</Link>
           </nav>

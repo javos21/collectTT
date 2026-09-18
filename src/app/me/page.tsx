@@ -3,6 +3,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { bids, claims, listings } from '@/db/schema/listings';
+import { users } from '@/db/schema/auth';
+import { profiles } from '@/db/schema/profiles';
 import { signOutAction } from '@/app/auth-actions';
 import { db } from '@/db/client';
 import { offers } from '@/db/schema/offers';
@@ -10,8 +12,13 @@ import { reputationCounters, reputationEvents } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
 import { formatMoney } from '@/domain/money';
 import { currentUser } from '@/lib/session';
-import { cancelListing, listingsBySeller } from '@/services/listings';
+import { cancelListing, listingsBySeller, saveSellerMarketplacePreferences, saveSellerMeetupLocation, sellerMarketplacePreferencesFor, sellerMeetupLocationsFor } from '@/services/listings';
+import { listMarketplaceOptions } from '@/services/platform-settings';
 import ProfilePage from './profile-page';
+import { updatePrivatePhoneNumber } from '@/services/account-profile';
+import { notificationPreferencesFor, saveNotificationPreferences } from '@/services/notification-preferences';
+import { OPTIONAL_NOTIFICATION_PREFERENCES } from '@/notifications/events';
+import { listRelayStores } from '@/services/relay-stores';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,17 +38,84 @@ async function deleteListingAction(formData: FormData): Promise<void> {
   redirect('/me');
 }
 
+async function savePhoneNumberAction(formData: FormData): Promise<void> {
+  'use server';
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+  try {
+    await updatePrivatePhoneNumber(user.userId, String(formData.get('phone') ?? ''));
+  } catch (error) {
+    redirect(`/me?tab=account&error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not save the mobile number.')}`);
+  }
+  revalidatePath('/me');
+  redirect('/me?tab=account&success=Mobile number saved.');
+}
+
+async function saveMeetupLocationAction(formData: FormData): Promise<void> {
+  'use server';
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+  try {
+    await saveSellerMeetupLocation(user.userId, {
+      id: String(formData.get('locationId') ?? '').trim() || undefined,
+      label: String(formData.get('label') ?? ''),
+      area: String(formData.get('area') ?? ''),
+      instructions: String(formData.get('instructions') ?? '') || null,
+      active: formData.get('active') !== 'false',
+    });
+  } catch (error) {
+    redirect(`/me?tab=account&error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not save meetup location.')}`);
+  }
+  revalidatePath('/me');
+  redirect('/me?tab=account&success=Meetup location saved.');
+}
+
+async function saveSellerDefaultsAction(formData: FormData): Promise<void> {
+  'use server';
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+  try {
+    await saveSellerMarketplacePreferences(user.userId, {
+      defaultDeliveryOptionIds: formData.getAll('defaultDeliveryOptionIds').map(String),
+      defaultRelayStoreIds: formData.getAll('defaultRelayStoreIds').map(String),
+      defaultPaymentMethods: formData.getAll('defaultPaymentMethods').map(String),
+    });
+  } catch (error) {
+    redirect(`/me?tab=account&error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not save seller defaults.')}`);
+  }
+  revalidatePath('/me');
+  redirect('/me?tab=account&success=Seller defaults saved.');
+}
+
+async function saveNotificationPreferencesAction(formData: FormData): Promise<void> {
+  'use server';
+  const user = await currentUser();
+  if (user === null) redirect('/sign-in');
+  try {
+    await saveNotificationPreferences(user.userId, OPTIONAL_NOTIFICATION_PREFERENCES.map(({ eventType }) => ({
+      eventType,
+      emailEnabled: formData.get(`email:${eventType}`) === 'on',
+    })));
+  } catch (error) {
+    redirect(`/me?tab=account&error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not save notification preferences.')}`);
+  }
+  revalidatePath('/me');
+  redirect('/me?tab=account&success=Notification preferences saved.');
+}
+
 function iso(date: Date | null): string | null {
   return date?.toISOString() ?? null;
 }
 
-export default async function MePage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+export default async function MePage({ searchParams }: { searchParams: Promise<{ tab?: string; error?: string; success?: string }> }) {
   const user = await currentUser();
   if (user === null) redirect('/sign-in');
   const params = await searchParams;
 
-  const [countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows, reputationEventRows] =
+  const [identityRows, countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows, reputationEventRows, meetupLocations, sellerPreferences, deliveryOptions, relayStores, notificationPreferences] =
     await Promise.all([
+      db.select({ accountName: users.name, displayName: profiles.displayName, phoneE164: profiles.phoneE164 })
+        .from(users).innerJoin(profiles, eq(profiles.userId, users.id)).where(eq(users.id, user.userId)).limit(1),
       db.select().from(reputationCounters).where(eq(reputationCounters.userId, user.userId)).limit(1),
       listingsBySeller(user.userId),
       db
@@ -86,9 +160,16 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         .where(eq(reputationEvents.userId, user.userId))
         .orderBy(desc(reputationEvents.occurredAt))
         .limit(30),
+      sellerMeetupLocationsFor(user.userId),
+      sellerMarketplacePreferencesFor(user.userId),
+      listMarketplaceOptions('delivery', { activeOnly: true }),
+      listRelayStores(db),
+      notificationPreferencesFor(user.userId),
     ]);
 
   const counters = countersRows[0];
+  const identity = identityRows[0];
+  if (identity === undefined) throw new Error('Account profile not found');
   return (
     <main className="profile-page">
       <ProfilePage
@@ -157,6 +238,22 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
           createdAt: transaction.createdAt.toISOString(),
           completedAt: iso(transaction.completedAt),
         }))}
+        identity={{
+          accountName: identity.accountName,
+          displayName: identity.displayName,
+          email: user.email,
+          phoneE164: identity.phoneE164,
+        }}
+        feedback={{ error: params.error, success: params.success }}
+        savePhoneNumberAction={savePhoneNumberAction}
+        deliveryOptions={deliveryOptions.map((option) => ({ id: option.id, key: option.key, label: option.label, description: option.description, requiresStore: option.requiresStore }))}
+        relayStores={relayStores.map((store) => ({ id: store.id, name: store.name, area: store.area }))}
+        meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area, instructions: location.instructions, active: location.active }))}
+        sellerPreferences={{ defaultDeliveryOptionIds: sellerPreferences.defaultDeliveryOptionIds, defaultRelayStoreIds: sellerPreferences.defaultRelayStoreIds, defaultPaymentMethods: sellerPreferences.defaultPaymentMethods }}
+        saveMeetupLocationAction={saveMeetupLocationAction}
+        saveSellerDefaultsAction={saveSellerDefaultsAction}
+        notificationPreferences={notificationPreferences}
+        saveNotificationPreferencesAction={saveNotificationPreferencesAction}
       />
     </main>
   );

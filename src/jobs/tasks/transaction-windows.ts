@@ -1,6 +1,6 @@
 /**
  * Deadline handlers: payment window, seller drop-off window, payment reminder,
- * candidate promotion.
+ * fallback-offer expiry, and candidate advancement.
  *
  * ★ Every one is IDEMPOTENT — the first thing each does is a conditional read or write
  *   that no-ops when the state has already moved. Graphile Worker guarantees
@@ -8,15 +8,17 @@
  *   defensive.
  */
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, lte, ne, sql } from 'drizzle-orm';
 import type { Helpers } from 'graphile-worker';
 
 import { db } from '../../db/client';
-import { transactions } from '../../db/schema/transactions';
+import { transactions, transactionEvents } from '../../db/schema/transactions';
 import { listings } from '../../db/schema/listings';
 import {
   terminateTransaction,
   promoteNextCandidate,
+  completeIfBothTracksDone,
+  expireAuctionFallbackOffer,
 } from '../../services/transactions';
 import { recomputeRollingWindows, evaluateRestrictions } from '../../services/reputation';
 import { notify } from '../../notifications/dispatch';
@@ -29,15 +31,20 @@ interface TxPayload {
 }
 
 /**
- * The buyer's payment window lapsed. Terminate, record the fact, promote the next
- * candidate. On a cash-meetup deal the same lapse means "never showed".
+ * The buyer's payment window lapsed. Terminate, record the fact, and advance an
+ * auction to its next explicit fallback offer. On a cash-meetup deal the same lapse
+ * means "never showed".
  */
 export async function paymentWindowExpired(payload: TxPayload, helpers: Helpers): Promise<void> {
   await db.transaction(async (tx) => {
     const rows = await tx
       .select()
       .from(transactions)
-      .where(and(eq(transactions.id, payload.transactionId), eq(transactions.state, 'open')))
+      .where(and(
+        eq(transactions.id, payload.transactionId),
+        eq(transactions.state, 'open'),
+        lte(transactions.paymentDeadlineAt, sql`now()`),
+      ))
       .limit(1);
 
     const row = rows[0];
@@ -60,6 +67,7 @@ export async function paymentWindowExpired(payload: TxPayload, helpers: Helpers)
       transactionId: payload.transactionId,
       reason,
       actorRole: 'system',
+      dueAt: 'payment',
     });
 
     helpers.logger.info(
@@ -80,7 +88,11 @@ export async function dropoffWindowExpired(payload: TxPayload, helpers: Helpers)
     const rows = await tx
       .select()
       .from(transactions)
-      .where(and(eq(transactions.id, payload.transactionId), eq(transactions.state, 'open')))
+      .where(and(
+        eq(transactions.id, payload.transactionId),
+        eq(transactions.state, 'open'),
+        lte(transactions.sellerDropoffDeadlineAt, sql`now()`),
+      ))
       .limit(1);
 
     const row = rows[0];
@@ -108,6 +120,7 @@ export async function dropoffWindowExpired(payload: TxPayload, helpers: Helpers)
       transactionId: payload.transactionId,
       reason: 'seller_no_dropoff',
       actorRole: 'system',
+      dueAt: 'seller_dropoff',
       // The seller failed, not the buyer — do not promote an auction runner-up when
       // there is no item on the shelf.
       promoteNext: false,
@@ -117,8 +130,8 @@ export async function dropoffWindowExpired(payload: TxPayload, helpers: Helpers)
   });
 }
 
-/** One terse nudge before the deadline. Not a drip campaign — WhatsApp bills per message. */
-export async function paymentReminder(payload: TxPayload, helpers: Helpers): Promise<void> {
+/** One terse nudge before the deadline. Not a drip campaign. */
+export async function paymentReminder(payload: TxPayload & { reminderKind?: 'halfway' | 'two_hours' | 'deadline' }, helpers: Helpers): Promise<void> {
   await db.transaction(async (tx) => {
     const rows = await tx
       .select()
@@ -140,16 +153,73 @@ export async function paymentReminder(payload: TxPayload, helpers: Helpers): Pro
     await notify({
       tx,
       userId: row.buyerId,
-      event: 'payment_reminder',
+      event: payload.reminderKind === 'two_hours' ? 'payment_deadline_soon' : 'payment_reminder',
       data: {
         listingTitle: titles[0]?.title ?? 'your deal',
         deadline: row.paymentDeadlineAt.toLocaleString('en-TT'),
       },
       linkUrl: `/deals/${row.id}`,
-      idempotencyKey: `payment_reminder:${row.id}`,
+      idempotencyKey: `payment_reminder:${payload.reminderKind ?? 'halfway'}:${row.id}`,
     });
 
     helpers.logger.info(`reminder sent for ${payload.transactionId}`);
+  });
+}
+
+/** Auto-complete a cash meetup after the receipt window if no problem was reported. */
+export async function receiptWindowExpired(payload: TxPayload, helpers: Helpers): Promise<void> {
+  await db.transaction(async (tx) => {
+    const rows = await tx.select().from(transactions).where(and(
+      eq(transactions.id, payload.transactionId),
+      eq(transactions.state, 'open'),
+      ne(transactions.disputeState, 'open'),
+      eq(transactions.fulfillmentPath, 'cash_meetup'),
+      eq(transactions.paymentState, 'confirmed'),
+      eq(transactions.handoffState, 'seller_handed_over'),
+      lte(transactions.receiptDeadlineAt, sql`now()`),
+    )).limit(1);
+    const row = rows[0];
+    if (row === undefined) return;
+    // A member-reported problem moves the rollup to disputed, so this conditional
+    // update cannot auto-complete while support is reviewing the deal.
+    const updated = await tx.update(transactions).set({
+      handoffState: 'buyer_received',
+      receivedAt: sql`now()`,
+      updatedAt: sql`now()`,
+    }).where(and(
+      eq(transactions.id, payload.transactionId),
+      eq(transactions.state, 'open'),
+      ne(transactions.disputeState, 'open'),
+      eq(transactions.paymentState, 'confirmed'),
+      eq(transactions.fulfillmentPath, 'cash_meetup'),
+      eq(transactions.handoffState, 'seller_handed_over'),
+      lte(transactions.receiptDeadlineAt, sql`now()`),
+    )).returning({ id: transactions.id });
+    if (updated.length === 0) return;
+    await tx.insert(transactionEvents).values({
+      transactionId: row.id,
+      track: 'overall',
+      fromState: 'seller_handed_over',
+      toState: 'buyer_received',
+      actorRole: 'system',
+      reason: 'receipt confirmation window elapsed without a reported problem',
+      metadata: {},
+    });
+    await completeIfBothTracksDone(tx, row.id);
+    helpers.logger.info(`transaction ${row.id} auto-completed after receipt window`);
+  });
+}
+
+// ---------------------------------------------------------------- auction fallback
+
+export async function fallbackOfferExpired(payload: { offerId: string }, helpers: Helpers): Promise<void> {
+  await db.transaction(async (tx) => {
+    const result = await expireAuctionFallbackOffer(tx, payload.offerId);
+    helpers.logger.info(
+      result.expired
+        ? `auction fallback offer ${payload.offerId} expired${result.nextOfferId === undefined ? '' : `; next offer ${result.nextOfferId}`}`
+        : `auction fallback offer ${payload.offerId} is already closed`,
+    );
   });
 }
 
@@ -166,7 +236,9 @@ export async function promoteNext(payload: PromotePayload, helpers: Helpers): Pr
     helpers.logger.info(
       result.promoted
         ? `listing ${payload.listingId} promoted to transaction ${result.transactionId}`
-        : `listing ${payload.listingId} had no remaining candidates`,
+        : result.fallbackOfferId === undefined
+          ? `listing ${payload.listingId} had no remaining candidates`
+          : `listing ${payload.listingId} sent fallback offer ${result.fallbackOfferId}`,
     );
   });
 }

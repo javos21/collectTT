@@ -98,8 +98,9 @@ describe('payment track', () => {
     expect(canActorTransitionPayment('buyer_marked_paid', 'pending', 'buyer')).toBe(false);
   });
 
-  it('a buyer cannot confirm their own payment', () => {
-    expect(canActorTransitionPayment('buyer_marked_paid', 'confirmed', 'buyer')).toBe(false);
+  it('the buyer settles payment with one confirmation', () => {
+    expect(canActorTransitionPayment('pending', 'confirmed', 'buyer')).toBe(true);
+    expect(canActorTransitionPayment('buyer_marked_paid', 'confirmed', 'buyer')).toBe(true);
     expect(canActorTransitionPayment('buyer_marked_paid', 'confirmed', 'seller')).toBe(true);
   });
 
@@ -109,11 +110,11 @@ describe('payment track', () => {
     );
   });
 
-  it('confirmed is unreachable without passing through buyer_marked_paid', () => {
+  it('confirmed is reachable directly and from legacy marked-paid rows', () => {
     const reaching = PAYMENT_STATES.filter((s) =>
       (PAYMENT_TRANSITIONS[s] as readonly string[]).includes('confirmed'),
     );
-    expect(reaching).toEqual(['buyer_marked_paid']);
+    expect(reaching).toEqual(['pending', 'buyer_marked_paid']);
   });
 });
 
@@ -169,11 +170,12 @@ describe('custody track', () => {
     expect(canTransitionCustody('release_authorized', 'returned_to_seller')).toBe(true);
   });
 
-  it('only the system, store staff, and admins move the custody track', () => {
+  it('the system clears paid items and the buyer confirms collection', () => {
     expect(canActorTransitionCustody('at_relay', 'release_authorized', 'store')).toBe(true);
     expect(canActorTransitionCustody('at_relay', 'release_authorized', 'system')).toBe(true);
     expect(canActorTransitionCustody('at_relay', 'release_authorized', 'buyer')).toBe(false);
     expect(canActorTransitionCustody('at_relay', 'release_authorized', 'seller')).toBe(false);
+    expect(canActorTransitionCustody('release_authorized', 'picked_up', 'buyer')).toBe(true);
   });
 });
 

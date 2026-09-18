@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { currentUser } from '@/lib/session';
+import { enforceUserAndIpRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 import { acceptOffer, rejectOffer } from '@/services/offers';
 
 function message(error: unknown): string {
@@ -19,6 +20,7 @@ export async function acceptReceivedOfferAction(formData: FormData): Promise<voi
   let transactionId: string;
 
   try {
+    await enforceUserAndIpRateLimit('deal:offer', user.userId, RATE_LIMITS.offer);
     transactionId = (await acceptOffer(offerId, user.userId)).transactionId;
   } catch (error) {
     redirect(`/deals?error=${encodeURIComponent(message(error))}`);
@@ -38,6 +40,7 @@ export async function rejectReceivedOfferAction(formData: FormData): Promise<voi
   const listingId = String(formData.get('listingId') ?? '');
 
   try {
+    await enforceUserAndIpRateLimit('deal:offer', user.userId, RATE_LIMITS.offer);
     await rejectOffer(offerId, user.userId);
   } catch (error) {
     redirect(`/deals?error=${encodeURIComponent(message(error))}`);

@@ -30,6 +30,9 @@ import { bidIncrement, formatMoney, minimumNextBid } from '../../domain/money';
 import { fallbackFulfillmentPath, type FulfillmentPath } from '../../domain/states/transaction';
 import type { SettlementMethod } from '../../domain/policy/settlement';
 import { getListingDeliveryOption } from '../../services/platform-settings';
+import { assertMarketplaceEligible } from '../../services/marketplace-eligibility';
+import { assertV1ListingTerms } from '../../lib/launch-scope';
+import { recordAnalyticsEvent } from '../../services/analytics';
 
 export interface BidResult {
   bidId: string;
@@ -56,9 +59,22 @@ export async function placeBid(opts: {
   settlementMethod?: SettlementMethod;
   /** Which relay store the bidder will collect from. Required when path === 'relay'. */
   relayStoreId?: string | null;
+  /** Explicit acknowledgement that a bid is a binding purchase commitment. */
+  commitmentAcknowledged?: boolean;
 }): Promise<BidResult> {
   return db.transaction(async (tx) => {
     const listing = await loadListing(tx, opts.listingId);
+    assertV1ListingTerms(listing);
+
+    // Internal callers and historical tests may omit this field, but an explicit
+    // negative acknowledgement must never be treated as consent. The web action
+    // always sends `true` after the member checks the commitment box.
+    if (opts.commitmentAcknowledged === false) {
+      throw new ConflictError(
+        'Confirm that this bid is a binding purchase commitment before bidding.',
+        'commitment_confirmation_required',
+      );
+    }
 
     if (listing.sellerId === opts.bidderId) {
       throw new ForbiddenError('You cannot bid on your own listing');
@@ -69,6 +85,9 @@ export async function placeBid(opts: {
     if (listing.status !== 'active') {
       throw new ConflictError('This auction has closed');
     }
+
+
+    await assertMarketplaceEligible(tx, opts.bidderId, 'bid');
 
     // Keep direct callers from creating an unqualified bid while retaining a safe
     // fallback for bids created by older jobs/tests before payment choices were stored.
@@ -146,6 +165,15 @@ export async function placeBid(opts: {
     const bid = insertedBid[0];
     if (bid === undefined) throw new Error('Failed to record bid');
 
+    await recordAnalyticsEvent(tx, {
+      eventName: 'bid_placed',
+      userId: opts.bidderId,
+      subjectType: 'bid',
+      subjectId: bid.id,
+      metadata: { listingId: opts.listingId, amountCents: opts.amountCents },
+      idempotencyKey: `bid-placed:${bid.id}`,
+    });
+
     const previousLeaderId = await currentLeader(tx, opts.listingId, bid.id);
 
     // ────────────────────────────────────────────────────────────────────────
@@ -201,6 +229,19 @@ export async function placeBid(opts: {
         { listingId: opts.listingId },
         { jobKey: `auction_close:${opts.listingId}`, runAt: new Date(row.ends_at) },
       );
+      for (const userId of new Set([opts.bidderId, row.seller_id])) {
+        await notify({
+          tx,
+          userId,
+          event: 'auction_extended',
+          data: {
+            listingTitle: row.title,
+            endsAt: new Date(row.ends_at).toLocaleString('en-TT'),
+          },
+          linkUrl: `/listings/${opts.listingId}`,
+          idempotencyKey: `auction_extended:${bid.id}:${userId}`,
+        });
+      }
     }
 
     // Demote the previous leader.
@@ -255,11 +296,13 @@ export async function placeBid(opts: {
         fulfillmentPath:
           fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
         deliveryOptionId: opts.deliveryOptionId ?? null,
+        meetupLocationId: listing.meetupLocationId,
         source: 'auction_win',
         winningBidId: bid.id,
         listingTitle: listing.title,
         paymentWindowHours: listing.paymentWindowHours,
         settlementMethod,
+        commitmentAcknowledged: true,
         relayStoreId: opts.relayStoreId ?? null,
       });
 

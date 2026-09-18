@@ -4,6 +4,7 @@ import { useFormStatus } from 'react-dom';
 
 import {
   addMemberRestrictionAction,
+  addTrustAdjustmentAction,
   liftMemberRestrictionAction,
   reactivateMemberAction,
   suspendMemberAction,
@@ -12,8 +13,10 @@ import {
 const RESTRICTIONS = [
   ['prepay_required', 'Prepay required'],
   ['meetup_only', 'Meetup only'],
+  ['reserve_blocked', 'Reserve blocked'],
   ['claim_blocked', 'Claim blocked'],
   ['bid_blocked', 'Bid blocked'],
+  ['publish_blocked', 'Publish blocked'],
   ['listing_cap', 'Listing cap'],
 ] as const;
 
@@ -49,6 +52,16 @@ export function MemberAdminActions({ memberId, status, role }: { memberId: strin
           </form>
         )}
         {!canSuspend && !canReactivate && <p className="admin-action-note">This account status is not eligible for a guided status change here. Administrator and banned accounts require a separate access-review process.</p>}
+      </article>
+
+      <article className="admin-action-card">
+        <div className="admin-action-card__heading"><div><h3>Trust correction</h3><p>Append a private correction note for an objective record. This does not alter public counters or expose the note to members.</p></div></div>
+        <form action={addTrustAdjustmentAction}>
+          <input type="hidden" name="memberId" value={memberId} />
+          <label htmlFor="trust-correction-reason">Correction note</label>
+          <textarea id="trust-correction-reason" name="reason" required minLength={10} maxLength={500} rows={3} />
+          <SubmitButton label="Record trust correction" pendingLabel="Recording…" />
+        </form>
       </article>
 
       <article className="admin-action-card">

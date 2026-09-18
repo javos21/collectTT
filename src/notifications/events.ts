@@ -1,10 +1,9 @@
 /**
  * The notification event catalogue.
  *
- * Every event names its default channels. In-app and email are live now; WhatsApp is
- * listed against the events that will eventually justify a paid message (won auction,
- * payment reminder, custody ready) so the routing decision is already recorded — the
- * adapter simply is not built yet.
+ * Every event names its default channels. The v1 catalogue uses in-app and email
+ * delivery; SMS is reserved for identity verification and is not a preference-driven
+ * marketplace channel.
  *
  * Keeping the catalogue as data rather than scattered `notify(...)` calls is what makes
  * "one dispatch job, pluggable adapters" true.
@@ -16,7 +15,6 @@ export interface EventDefinition {
   type: string;
   /** Channels attempted unless the member has opted out. */
   channels: readonly NotificationChannel[];
-  /** Terse by design — WhatsApp bills per message from Oct 2026. One message, not five. */
   title: (data: Record<string, unknown>) => string;
   body: (data: Record<string, unknown>) => string;
 }
@@ -31,15 +29,15 @@ export const EVENTS = {
   listing_claimed_seller: {
     type: 'listing_claimed_seller',
     channels: ['in_app', 'email'],
-    title: (d) => `${str(d, 'buyerName', 'Someone')} claimed "${str(d, 'listingTitle')}"`,
+    title: (d) => `${str(d, 'buyerName', 'Someone')} reserved "${str(d, 'listingTitle')}"`,
     body: (d) =>
-      `${str(d, 'buyerName', 'A buyer')} claimed your listing. They have until ${str(d, 'deadline')} to pay.`,
+      `${str(d, 'buyerName', 'A buyer')} reserved your listing. They have until ${str(d, 'deadline')} to pay.`,
   },
   claim_confirmed_buyer: {
     type: 'claim_confirmed_buyer',
     channels: ['in_app', 'email'],
-    title: (d) => `You claimed "${str(d, 'listingTitle')}"`,
-    body: (d) => `Pay the seller by ${str(d, 'deadline')}, then mark it paid in the app.`,
+    title: (d) => `You reserved "${str(d, 'listingTitle')}"`,
+    body: (d) => `Your purchase commitment is open. Pay the seller by ${str(d, 'deadline')}, then mark it paid in the app.`,
   },
   offer_received_seller: {
     type: 'offer_received_seller',
@@ -79,9 +77,33 @@ export const EVENTS = {
   },
   auction_runner_up_buyer: {
     type: 'auction_runner_up_buyer',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `You're up for "${str(d, 'listingTitle')}"`,
     body: (d) => `The previous auction buyer did not complete the deal. Pay by ${str(d, 'deadline')} to secure it.`,
+  },
+  auction_fallback_offer_buyer: {
+    type: 'auction_fallback_offer_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `A fallback offer is waiting for "${str(d, 'listingTitle')}"`,
+    body: (d) => `You are next in line at ${str(d, 'amount')}. Accept by ${str(d, 'expiresAt')} to open the deal.`,
+  },
+  auction_fallback_offer_seller: {
+    type: 'auction_fallback_offer_seller',
+    channels: ['in_app'],
+    title: (d) => `A fallback offer was sent for "${str(d, 'listingTitle')}"`,
+    body: (d) => `The next bidder has until ${str(d, 'expiresAt')} to accept at ${str(d, 'amount')}.`,
+  },
+  auction_fallback_offer_expired_buyer: {
+    type: 'auction_fallback_offer_expired_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `The fallback offer expired for "${str(d, 'listingTitle')}"`,
+    body: () => `The offer was not accepted in time, so the item moved to the next auction candidate.`,
+  },
+  auction_bid_invalidated_buyer: {
+    type: 'auction_bid_invalidated_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `Your bid was invalidated for "${str(d, 'listingTitle')}"`,
+    body: (d) => `An administrator reviewed the auction and invalidated your ${str(d, 'amount')} bid. Reason: ${str(d, 'reason')}`,
   },
 
   // ---------------------------------------------------------------- auctions
@@ -93,13 +115,13 @@ export const EVENTS = {
   },
   auction_extended: {
     type: 'auction_extended',
-    channels: ['in_app'],
+    channels: ['in_app', 'email'],
     title: (d) => `"${str(d, 'listingTitle')}" was extended`,
     body: (d) => `A late bid pushed the close out to ${str(d, 'endsAt')}.`,
   },
   auction_won: {
     type: 'auction_won',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `You won "${str(d, 'listingTitle')}"`,
     body: (d) => `Pay ${str(d, 'amount')} by ${str(d, 'deadline')}, then mark it paid.`,
   },
@@ -109,13 +131,19 @@ export const EVENTS = {
     title: (d) => `"${str(d, 'listingTitle')}" closed`,
     body: (d) => str(d, 'summary'),
   },
+  listing_expired_seller: {
+    type: 'listing_expired_seller',
+    channels: ['in_app', 'email'],
+    title: (d) => `"${str(d, 'listingTitle')}" expired`,
+    body: () => `Your listing expired after the platform listing lifetime. You can relist it as a new draft.`,
+  },
 
   // ---------------------------------------------------------------- payment track
   payment_marked_paid_seller: {
     type: 'payment_marked_paid_seller',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `${str(d, 'buyerName', 'The buyer')} marked "${str(d, 'listingTitle')}" as paid`,
-    body: () => `Confirm you received it, or dispute if you haven't.`,
+    body: () => `The payment step is complete. No confirmation is required from you.`,
   },
   payment_confirmed_buyer: {
     type: 'payment_confirmed_buyer',
@@ -125,15 +153,27 @@ export const EVENTS = {
   },
   payment_disputed_buyer: {
     type: 'payment_disputed_buyer',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `The seller hasn't received payment for "${str(d, 'listingTitle')}"`,
     body: (d) => `Your deadline is still ${str(d, 'deadline')} — it was not extended.`,
   },
   payment_reminder: {
     type: 'payment_reminder',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `Payment due for "${str(d, 'listingTitle')}"`,
     body: (d) => `You have until ${str(d, 'deadline')}. After that it goes to the next buyer.`,
+  },
+  payment_deadline_soon: {
+    type: 'payment_deadline_soon',
+    channels: ['in_app', 'email'],
+    title: (d) => `Payment due soon for "${str(d, 'listingTitle')}"`,
+    body: (d) => `Your payment deadline is ${str(d, 'deadline')}.`,
+  },
+  payment_deadline_extended: {
+    type: 'payment_deadline_extended',
+    channels: ['in_app', 'email'],
+    title: (d) => `Payment deadline updated for "${str(d, 'listingTitle')}"`,
+    body: (d) => `CollectTT support extended this deal's payment deadline to ${str(d, 'deadline')}.`,
   },
   payment_window_lapsed_buyer: {
     type: 'payment_window_lapsed_buyer',
@@ -141,11 +181,43 @@ export const EVENTS = {
     title: (d) => `You lost "${str(d, 'listingTitle')}"`,
     body: () => `The payment window closed. This is recorded on your account.`,
   },
+  payment_window_lapsed_seller: {
+    type: 'payment_window_lapsed_seller',
+    channels: ['in_app', 'email'],
+    title: (d) => `Payment deadline passed for "${str(d, 'listingTitle')}"`,
+    body: () => `The buyer did not confirm payment in time. The reservation was released.`,
+  },
+
+  // ---------------------------------------------------------------- disputes
+  dispute_submitted_member: {
+    type: 'dispute_submitted_member',
+    channels: ['in_app', 'email'],
+    title: (d) => `A dispute was opened for "${str(d, 'listingTitle')}"`,
+    body: (d) => `The reported issue is: ${str(d, 'reason', 'an issue')}. CollectTT support will review the deal.`,
+  },
+  dispute_reviewed_member: {
+    type: 'dispute_reviewed_member',
+    channels: ['in_app', 'email'],
+    title: (d) => `A dispute about "${str(d, 'listingTitle')}" was ${str(d, 'status', 'reviewed')}`,
+    body: (d) => str(d, 'resolution', 'CollectTT support reviewed the dispute.'),
+  },
+  item_handed_over_buyer: {
+    type: 'item_handed_over_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `Meetup hand-off recorded for "${str(d, 'listingTitle')}"`,
+    body: () => `Confirm that you received the item, or report a problem before the receipt window closes.`,
+  },
+  item_received_seller: {
+    type: 'item_received_seller',
+    channels: ['in_app', 'email'],
+    title: (d) => `Receipt confirmed for "${str(d, 'listingTitle')}"`,
+    body: () => `The buyer confirmed receipt. Your deal is complete.`,
+  },
 
   // ---------------------------------------------------------------- seller side
   seller_dropoff_reminder: {
     type: 'seller_dropoff_reminder',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `Drop off "${str(d, 'listingTitle')}" by ${str(d, 'deadline')}`,
     body: (d) => `Take it to ${str(d, 'storeName')} so the buyer can collect.`,
   },
@@ -157,7 +229,7 @@ export const EVENTS = {
   },
   buyer_told_to_hold_payment: {
     type: 'buyer_told_to_hold_payment',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `Do not pay for "${str(d, 'listingTitle')}"`,
     body: () =>
       `The seller did not deliver the item in time and the deal has been cancelled. ` +
@@ -167,13 +239,13 @@ export const EVENTS = {
   // ---------------------------------------------------------------- custody track
   custody_received_buyer: {
     type: 'custody_received_buyer',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `"${str(d, 'listingTitle')}" is at ${str(d, 'storeName')}`,
-    body: (d) => `Once your payment is confirmed you can collect it. Pay by ${str(d, 'deadline')}.`,
+    body: (d) => `Once you mark payment as sent you can collect it. Pay by ${str(d, 'deadline')}.`,
   },
   custody_return_to_seller: {
     type: 'custody_return_to_seller',
-    channels: ['in_app', 'email', 'whatsapp'],
+    channels: ['in_app', 'email'],
     title: (d) => `Collect "${str(d, 'listingTitle')}" from ${str(d, 'storeName')}`,
     body: () => `The buyer never paid, so the item is yours to reclaim.`,
   },
@@ -191,9 +263,97 @@ export const EVENTS = {
     title: () => `A restriction was applied to your account`,
     body: (d) => str(d, 'reason'),
   },
+  restriction_warning: {
+    type: 'restriction_warning',
+    channels: ['in_app', 'email'],
+    title: () => `Your account is approaching a marketplace restriction`,
+    body: (d) => str(d, 'reason'),
+  },
+  support_case_updated: {
+    type: 'support_case_updated',
+    channels: ['in_app', 'email'],
+    title: (d) => `Your support report was ${str(d, 'status', 'updated')}`,
+    body: (d) => str(d, 'resolution', 'CollectTT support updated your report.'),
+  },
+  listing_moderation_updated: {
+    type: 'listing_moderation_updated',
+    channels: ['in_app', 'email'],
+    title: (d) => `Your listing "${str(d, 'listingTitle')}" was updated by support`,
+    body: (d) => str(d, 'reason'),
+  },
+  transaction_admin_cancelled: {
+    type: 'transaction_admin_cancelled',
+    channels: ['in_app', 'email'],
+    title: (d) => `Your deal for "${str(d, 'listingTitle')}" was cancelled`,
+    body: (d) => str(d, 'reason'),
+  },
 } as const satisfies Record<string, EventDefinition>;
 
 export type EventType = keyof typeof EVENTS;
+
+/**
+ * These events are operationally important and cannot be muted by a member. They
+ * cover commitment, payment/deadline, dispute, security, and restriction changes.
+ * Preference rows only affect nonessential events; an absent row means enabled.
+ */
+const MANDATORY_EVENT_TYPES = new Set<EventType>([
+  'listing_claimed_seller',
+  'claim_confirmed_buyer',
+  'auction_won',
+  'auction_runner_up_buyer',
+  'auction_fallback_offer_buyer',
+  'payment_marked_paid_seller',
+  'payment_confirmed_buyer',
+  'payment_disputed_buyer',
+  'payment_reminder',
+  'payment_deadline_soon',
+  'payment_deadline_extended',
+  'payment_window_lapsed_buyer',
+  'payment_window_lapsed_seller',
+  'item_handed_over_buyer',
+  'item_received_seller',
+  'dispute_submitted_member',
+  'dispute_reviewed_member',
+  'transaction_completed',
+  'restriction_applied',
+  'restriction_warning',
+  'support_case_updated',
+  'transaction_admin_cancelled',
+  'listing_moderation_updated',
+  'auction_bid_invalidated_buyer',
+]);
+
+export function isEssentialEvent(type: EventType): boolean {
+  return MANDATORY_EVENT_TYPES.has(type);
+}
+
+/** Member-facing controls for optional email notifications. */
+export const OPTIONAL_NOTIFICATION_PREFERENCES = [
+  {
+    eventType: 'auction_outbid',
+    label: 'Auction outbid updates',
+    description: 'Email me when another bidder moves ahead of me.',
+  },
+  {
+    eventType: 'auction_extended',
+    label: 'Auction extension updates',
+    description: 'Email me when a late bid extends an auction.',
+  },
+  {
+    eventType: 'auction_ended_seller',
+    label: 'Auction close updates',
+    description: 'Email me when one of my auctions closes.',
+  },
+  {
+    eventType: 'listing_expired_seller',
+    label: 'Listing expiry updates',
+    description: 'Email me when one of my fixed-price listings expires.',
+  },
+] as const satisfies ReadonlyArray<{
+  eventType: EventType;
+  label: string;
+  description: string;
+}>;
 
 export function eventDefinition(type: EventType): EventDefinition {
   return EVENTS[type];

@@ -11,7 +11,7 @@
  * not yet paid", so the two tracks advance independently, in any interleaving, and the
  * rollup is the only thing that couples them:
  *
- *     state = 'completed'  ⟺  payment settled AND custody settled
+ *     state = 'completed'  ⟺  payment settled AND custody/handoff settled
  *
  * That equivalence is also a database CHECK constraint (`tx_completion_requires_both`).
  * It is asserted in two places on purpose: the constraint makes a bad row impossible to
@@ -21,6 +21,7 @@
 import type { ActorRole } from './actors';
 import { isPaymentSettled, type PaymentState } from './payment';
 import { isCustodySettled, type CustodyState } from './custody';
+import { isHandoffSettled, type HandoffState } from './handoff';
 
 // ---------------------------------------------------------------- fulfillment paths
 
@@ -201,8 +202,12 @@ export function isFailedTransactionState(state: TransactionState): boolean {
  * ★ THE completion rule. Both tracks, or it is not complete.
  * Mirrored by the `tx_completion_requires_both` CHECK constraint.
  */
-export function canComplete(payment: PaymentState, custody: CustodyState): boolean {
-  return isPaymentSettled(payment) && isCustodySettled(custody);
+export function canComplete(
+  payment: PaymentState,
+  custody: CustodyState,
+  handoff: HandoffState = 'not_applicable',
+): boolean {
+  return isPaymentSettled(payment) && isCustodySettled(custody) && isHandoffSettled(handoff);
 }
 
 /**
@@ -214,8 +219,9 @@ export function shouldAutoComplete(
   state: TransactionState,
   payment: PaymentState,
   custody: CustodyState,
+  handoff: HandoffState = 'not_applicable',
 ): boolean {
-  return state === 'open' && canComplete(payment, custody);
+  return state === 'open' && canComplete(payment, custody, handoff);
 }
 
 /** A snapshot sufficient to check every cross-track invariant. */
@@ -223,6 +229,7 @@ export interface TransactionSnapshot {
   state: TransactionState;
   paymentState: PaymentState;
   custodyState: CustodyState;
+  handoffState?: HandoffState;
   fulfillmentPath: FulfillmentPath;
   paymentDeadlineAt: Date;
   sellerDropoffDeadlineAt: Date | null;
@@ -268,7 +275,7 @@ export function validateTransaction(tx: TransactionSnapshot): string[] {
   }
 
   // ★★ Completion requires both tracks.
-  if (tx.state === 'completed' && !canComplete(tx.paymentState, tx.custodyState)) {
+  if (tx.state === 'completed' && !canComplete(tx.paymentState, tx.custodyState, tx.handoffState ?? 'not_applicable')) {
     violations.push('tx_completion_requires_both');
   }
 

@@ -15,6 +15,7 @@ import { adminAccess } from '@/lib/admin';
 import { storesForStaff } from '@/services/custody';
 import { countDealsNeedingAttention } from '@/services/deals';
 import { countPendingOffersReceivedBySeller } from '@/services/offers';
+import { isV1Launch } from '@/lib/launch-scope';
 
 export const metadata: Metadata = {
   title: 'CollectTT — Collect with confidence',
@@ -23,13 +24,14 @@ export const metadata: Metadata = {
 
 async function SiteNavigation() {
   const { viewer, isAdmin } = await adminAccess();
+  const legacyFeaturesEnabled = !isV1Launch();
   const [stores, dealActionCount, offerActionCount] = viewer === null
     ? [[], 0, 0] as const
     : await Promise.all([
-        storesForStaff(db, viewer.userId),
-        countDealsNeedingAttention(db, viewer.userId),
-        countPendingOffersReceivedBySeller(viewer.userId),
-      ]);
+      storesForStaff(db, viewer.userId),
+      countDealsNeedingAttention(db, viewer.userId),
+      legacyFeaturesEnabled ? countPendingOffersReceivedBySeller(viewer.userId) : Promise.resolve(0),
+    ]);
   const dealsAttentionCount = dealActionCount + offerActionCount;
 
   const dealsLabel = dealsAttentionCount > 0
@@ -112,6 +114,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <h2 id="footer-legal-title">Legal</h2>
                 <Link href="/privacy-policy">Privacy Policy</Link>
                 <Link href="/terms-of-service">Terms of Service</Link>
+                <Link href="/support">Support</Link>
+                <Link href="/prohibited-items">Prohibited items</Link>
+                <Link href="/minors-policy">Minors policy</Link>
               </nav>
             </div>
             <div className="site-footer__bottom">

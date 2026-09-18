@@ -20,6 +20,7 @@ import { formatMoney } from '../domain/money';
 import { activeRestrictions } from './reputation';
 import { assertFulfillmentEligible } from './fulfillment-eligibility';
 import { getListingDeliveryOption } from './platform-settings';
+import { assertLegacyFeatureAllowed } from '@/lib/launch-scope';
 import {
   ConflictError,
   ForbiddenError,
@@ -39,6 +40,7 @@ export interface SubmitOfferInput {
 }
 
 export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string }> {
+  assertLegacyFeatureAllowed('offers');
   return db.transaction(async (tx) => {
     const listing = await lockedListing(tx, input.listingId);
 
@@ -144,6 +146,7 @@ export async function acceptOffer(
   offerId: string,
   sellerId: string,
 ): Promise<{ transactionId: string }> {
+  assertLegacyFeatureAllowed('offers');
   return db.transaction(async (tx) => {
     const rows = await tx.execute(sqlOfferWithListing(offerId));
     const row = rows.rows[0] as OfferWithListingRow | undefined;
@@ -203,11 +206,13 @@ export async function acceptOffer(
       amountCents: Number(row.amount_cents),
       fulfillmentPath: row.fulfillment_path,
       deliveryOptionId: row.delivery_option_id,
+      meetupLocationId: row.meetup_location_id,
       source: 'offer_accept',
       offerId,
       listingTitle: row.listing_title,
       paymentWindowHours: Number(row.payment_window_hours),
       settlementMethod,
+      commitmentAcknowledged: false,
       relayStoreId,
     });
 
@@ -216,6 +221,7 @@ export async function acceptOffer(
 }
 
 export async function rejectOffer(offerId: string, sellerId: string): Promise<void> {
+  assertLegacyFeatureAllowed('offers');
   await db.transaction(async (tx) => {
     const rows = await tx.execute(sqlOfferWithListing(offerId));
     const row = rows.rows[0] as OfferWithListingRow | undefined;
@@ -377,6 +383,7 @@ function sqlOfferWithListing(offerId: string) {
       l.settlement_methods,
       l.accepts_offers,
       l.payment_window_hours
+      ,l.meetup_location_id
       from offers o
       inner join listings l on l.id = o.listing_id
      where o.id = ${offerId}
@@ -416,4 +423,5 @@ interface OfferWithListingRow {
   settlement_methods: string[];
   accepts_offers: boolean;
   payment_window_hours: number | string;
+  meetup_location_id: string | null;
 }

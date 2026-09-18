@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { eq, inArray, sql } from 'drizzle-orm';
 
 import { db, pool } from '../../src/db/client';
@@ -47,17 +47,21 @@ const buyerB = `c_buyerB_${SUFFIX}`;
 const clerk = `c_clerk_${SUFFIX}`;
 /** A seller WITH a phone on file — the branch of `ownerContact` used on the store board. */
 const phoneSeller = `c_phoneseller_${SUFFIX}`;
-const everyone = [seller, buyerA, buyerB, clerk, phoneSeller];
+/** A dedicated phone-free seller for the board's email fallback branch. */
+const emailSeller = `c_emailseller_${SUFFIX}`;
+const everyone = [seller, buyerA, buyerB, clerk, phoneSeller, emailSeller];
 
 /** Unique per run: profiles.phone_e164 carries a partial unique index. */
 const SELLER_PHONE = `+1868${String(parseInt(SUFFIX, 16) % 10_000_000).padStart(7, '0')}`;
 
 let storeId: string;
+const previousLaunchScope = process.env.COLLECTTT_LAUNCH_SCOPE;
 
 async function createUser(id: string): Promise<void> {
   await db.insert(users).values({ id, name: id, email: `${id}@test.local`, emailVerified: true });
-  await db.insert(profiles).values({ userId: id, displayName: id, handle: id });
-  await db.insert(reputationCounters).values({ userId: id });
+  const digits = BigInt(`0x${createHash('sha256').update(id).digest('hex').slice(0, 12)}`) % 10_000_000_000n;
+  await db.insert(profiles).values({ userId: id, displayName: id, handle: id, phoneE164: `+1${digits.toString().padStart(10, '0')}` });
+  await db.insert(reputationCounters).values({ userId: id, buyCompleted: 3 });
 }
 
 async function makeRelayListing(over: Partial<typeof listings.$inferInsert> = {}): Promise<string> {
@@ -84,6 +88,8 @@ async function makeRelayListing(over: Partial<typeof listings.$inferInsert> = {}
 }
 
 beforeAll(async () => {
+  // These tests exercise retained custody records under the explicit legacy switch.
+  process.env.COLLECTTT_LAUNCH_SCOPE = 'legacy';
   for (const id of everyone) await createUser(id);
   const stores = await db
     .insert(relayStores)
@@ -101,6 +107,10 @@ beforeAll(async () => {
     .update(profiles)
     .set({ phoneE164: SELLER_PHONE })
     .where(eq(profiles.userId, phoneSeller));
+  await db
+    .update(profiles)
+    .set({ phoneE164: null })
+    .where(eq(profiles.userId, emailSeller));
 });
 
 afterAll(async () => {
@@ -139,6 +149,8 @@ afterAll(async () => {
   await q(`delete from reputation_counters where user_id = any($1)`, [everyone]);
   await q(`delete from profiles where user_id = any($1)`, [everyone]);
   await q(`delete from "user" where id = any($1)`, [everyone]);
+  if (previousLaunchScope === undefined) delete process.env.COLLECTTT_LAUNCH_SCOPE;
+  else process.env.COLLECTTT_LAUNCH_SCOPE = previousLaunchScope;
   await pool.end();
 });
 
@@ -310,7 +322,7 @@ describe('relay store nomination', () => {
         },
         { publish: true },
       ),
-    ).rejects.toThrow(/at least one relay store/i);
+    ).rejects.toThrow(/at least one relay (pickup )?store/i);
   });
 
   it('persists nominated relay stores in the same transaction as the listing', async () => {
@@ -646,7 +658,7 @@ describe('custody notification strings', () => {
     // Inserted directly rather than via claimListing: this test targets only the
     // board's read-side mapping of dropoffCode/ownerContact, so a holding with no
     // attached transaction keeps the fixture minimal and the assertion unambiguous.
-    const listingId = await makeRelayListing();
+    const listingId = await makeRelayListing({ sellerId: emailSeller });
     const dropoffCode = generateDropoffCode();
     const inserted = await db
       .insert(custodyHoldings)
@@ -664,9 +676,9 @@ describe('custody notification strings', () => {
     const row = board.find((r) => r.holdingId === holdingId);
 
     expect(row?.dropoffCode).toBe(dropoffCode);
-    // The seller fixture has no phone_e164, so the fallback must fire — and must land on
-    // their auth email, not the generic 'no contact on file' string.
-    expect(row?.ownerContact).toBe(`${seller}@test.local`);
+    // The dedicated seller fixture has no phone_e164, so the fallback must fire — and
+    // must land on their auth email, not the generic 'no contact on file' string.
+    expect(row?.ownerContact).toBe(`${emailSeller}@test.local`);
 
     // Clean up: the holding references the store (on delete restrict), so it must go first.
     await db.delete(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
@@ -918,14 +930,11 @@ describe('the full custody loop', () => {
     expect(facts.some((fact) => fact.type === 'seller_reneged_no_dropoff')).toBe(false);
   });
 
-  it('runs the full loop: drop-off -> pay -> release -> collect -> complete', async () => {
-    const { markReceived, authorizeRelease, markPickedUp } = await import(
+  it('runs the simplified loop: drop-off -> buyer marks paid -> buyer collects -> complete', async () => {
+    const { markReceived, authorizeRelease } = await import(
       '../../src/services/custody'
     );
-    // ★ markPaid / confirmPayment are POSITIONAL: (tx, transactionId, userId). The
-    //   custody store actions next door take object inputs — this codebase mixes both
-    //   styles deliberately, so each signature is read from source rather than inferred.
-    const { markPaid, confirmPayment } = await import('../../src/services/transactions');
+    const { markPaid, confirmCustodyCollection } = await import('../../src/services/transactions');
     const { transactions } = await import('../../src/db/schema/transactions');
 
     const listingId = await makeRelayListing();
@@ -962,36 +971,21 @@ describe('the full custody loop', () => {
     expect(stillHeld[0]!.state).toBe('at_relay');
     expect(stillHeld[0]!.releaseAuthorizedAt).toBeNull();
 
-    // ★ THE REALISTIC NEAR-MISS: the buyer has SAID they paid, and is standing at the
-    //   counter saying so. `buyer_marked_paid` is not `confirmed`, and the gate keys on
-    //   `confirmed` — the seller's word, not the buyer's. This is the refusal the
-    //   escrow guarantee actually rests on.
+    // The buyer's single payment assertion settles payment and automatically makes
+    // an item already on the shelf ready for collection.
     await db.transaction(async (tx) => {
       await markPaid(tx, txId, buyerA);
     });
 
-    await expect(
-      db.transaction(async (tx) => {
-        await authorizeRelease({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
-      }),
-    ).rejects.toThrow(/payment has not been confirmed/i);
-
-    const stillUnreleased = await db
+    const ready = await db
       .select()
       .from(custodyHoldings)
       .where(eq(custodyHoldings.id, holdingId));
-    expect(stillUnreleased[0]!.state).toBe('at_relay');
-    expect(stillUnreleased[0]!.releaseAuthorizedAt).toBeNull();
+    expect(ready[0]!.state).toBe('release_authorized');
+    expect(ready[0]!.releaseAuthorizedAt).not.toBeNull();
 
     await db.transaction(async (tx) => {
-      await confirmPayment(tx, txId, seller);
-    });
-
-    await db.transaction(async (tx) => {
-      await authorizeRelease({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
-    });
-    await db.transaction(async (tx) => {
-      await markPickedUp({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
+      await confirmCustodyCollection(tx, txId, buyerA);
     });
 
     const finished = await db.select().from(transactions).where(eq(transactions.id, txId));

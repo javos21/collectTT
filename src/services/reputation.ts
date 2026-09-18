@@ -8,9 +8,9 @@
  * that caused it must commit together or not at all.
  */
 
-import { and, desc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 
-import type { DbOrTx, Tx } from '../db/client';
+import { dbNow, type DbOrTx, type Tx } from '../db/client';
 import { listings } from '../db/schema/listings';
 import {
   reputationEvents,
@@ -21,12 +21,13 @@ import {
 import { transactions } from '../db/schema/transactions';
 import {
   THRESHOLDS,
-  buyerRestrictions,
-  sellerRestrictions,
+  buyerRestrictionsWithThresholds,
+  sellerRestrictionsWithThresholds,
   type ReputationEventType,
   type RestrictionType,
 } from '../domain/policy/reputation';
 import { notify } from '../notifications/dispatch';
+import { getRestrictionPolicy } from './platform-settings';
 
 /** Which counter column each event type increments. */
 const COUNTER_COLUMN: Partial<Record<ReputationEventType, keyof typeof reputationCounters.$inferSelect>> = {
@@ -47,6 +48,21 @@ export interface RecordEventInput {
   counterpartyUserId?: string | null;
   metadata?: Record<string, unknown>;
 }
+
+/** Events safe for the public trust surface. Admin corrections and allegations are
+ * intentionally omitted; only transaction outcomes are visible to other members. */
+const PUBLIC_REPUTATION_EVENT_TYPES: ReputationEventType[] = [
+  'purchase_completed',
+  'sale_completed',
+  'buyer_paid_on_time',
+  'buyer_paid_late',
+  'buyer_reneged_nonpayment',
+  'buyer_no_show',
+  'seller_delivered_on_time',
+  'seller_reneged_no_dropoff',
+  'seller_no_show',
+  'custody_overstay',
+];
 
 /**
  * Record one objective fact.
@@ -75,7 +91,7 @@ export async function recordEvent(input: RecordEventInput): Promise<boolean> {
   await ensureCounters(input.tx, input.userId);
 
   // Increment the lifetime counter for this fact, if it maps to one. The rolling
-  // 90-day counters are recomputed nightly — they cannot be maintained incrementally
+  // Rolling counters are recomputed nightly — they cannot be maintained incrementally
   // without a decay job, and a full recompute at 2,000 members is milliseconds.
   const column = COUNTER_COLUMN[input.type];
   if (column !== undefined) {
@@ -106,14 +122,15 @@ export async function incrementCounter(
 }
 
 /**
- * Recompute the rolling 90-day windows from the append-only events.
+ * Recompute the rolling policy windows from the append-only events.
  * Called nightly by `reputation:recompute`, and after any renege so a restriction
  * takes effect immediately rather than at 3am.
  */
 export async function recomputeRollingWindows(tx: Tx, userId?: string): Promise<void> {
   // Correlated subqueries in SET, not a LATERAL join in FROM: Postgres does not allow
   // a lateral reference to the UPDATE target table.
-  const since = sql`now() - make_interval(days => ${THRESHOLDS.rollingWindowDays})`;
+  const policy = await getRestrictionPolicy(tx);
+  const since = sql`now() - make_interval(days => ${policy.lookbackDays})`;
   const scope = userId === undefined ? sql`true` : sql`c.user_id = ${userId}`;
 
   await tx.execute(sql`
@@ -144,6 +161,7 @@ export async function recomputeRollingWindows(tx: Tx, userId?: string): Promise<
  */
 export async function evaluateRestrictions(tx: Tx, userId: string): Promise<RestrictionType[]> {
   await recomputeRollingWindows(tx, userId);
+  const policy = await getRestrictionPolicy(tx);
 
   const rows = await tx
     .select()
@@ -155,13 +173,38 @@ export async function evaluateRestrictions(tx: Tx, userId: string): Promise<Rest
   if (c === undefined) return [];
 
   const earned = [
-    ...buyerRestrictions({ buyRenegedIn90d: c.buyReneged90d, buyCompleted: c.buyCompleted }),
-    ...sellerRestrictions({
+    ...buyerRestrictionsWithThresholds({ buyRenegedIn90d: c.buyReneged90d, buyCompleted: c.buyCompleted }, policy.buyer),
+    ...sellerRestrictionsWithThresholds({
       sellRenegedIn90d: c.sellReneged90d,
       sellNoShows: c.sellNoShows,
       sellCompleted: c.sellCompleted,
-    }),
+    }, policy.seller),
   ];
+
+  const now = await dbNow(tx);
+  const expiresAt = new Date(now.getTime() + policy.durationHours * 60 * 60 * 1000);
+  const recentEvents = await tx
+    .select({ id: reputationEvents.id, type: reputationEvents.type })
+    .from(reputationEvents)
+    .where(eq(reputationEvents.userId, userId))
+    .orderBy(desc(reputationEvents.occurredAt))
+    .limit(20);
+  const sourceEventFor = (type: RestrictionType): string | null => {
+    const seller = type === 'meetup_only' || type === 'publish_blocked' || type === 'listing_cap';
+    const sourceTypes: ReputationEventType[] = seller
+      ? ['seller_reneged_no_dropoff', 'seller_no_show']
+      : ['buyer_reneged_nonpayment', 'buyer_no_show'];
+    return recentEvents.find((event) => sourceTypes.includes(event.type))?.id ?? null;
+  };
+
+  await tx.update(restrictions)
+    .set({ lifecycleStatus: 'expired' })
+    .where(and(
+      eq(restrictions.userId, userId),
+      eq(restrictions.lifecycleStatus, 'active'),
+      isNull(restrictions.liftedAt),
+      lt(restrictions.expiresAt, now),
+    ));
 
   const existing = await tx
     .select({ id: restrictions.id, type: restrictions.type })
@@ -171,6 +214,7 @@ export async function evaluateRestrictions(tx: Tx, userId: string): Promise<Rest
         eq(restrictions.userId, userId),
         eq(restrictions.source, 'automatic'),
         isNull(restrictions.liftedAt),
+        or(isNull(restrictions.expiresAt), gte(restrictions.expiresAt, now)),
       ),
     );
 
@@ -183,14 +227,37 @@ export async function evaluateRestrictions(tx: Tx, userId: string): Promise<Rest
       userId,
       type,
       source: 'automatic',
-      reason: reasonFor(type, c.buyReneged90d, c.sellReneged90d + c.sellNoShows),
+      sourceEventId: sourceEventFor(type),
+      sourceActorUserId: null,
+      lifecycleStatus: 'active',
+      reason: reasonFor(type, c.buyReneged90d, c.sellReneged90d + c.sellNoShows, policy.lookbackDays),
+      expiresAt,
     });
     await notify({
       tx,
       userId,
       event: 'restriction_applied',
-      data: { reason: reasonFor(type, c.buyReneged90d, c.sellReneged90d + c.sellNoShows) },
-      idempotencyKey: `restriction:${userId}:${type}:${Date.now()}`,
+      data: { reason: reasonFor(type, c.buyReneged90d, c.sellReneged90d + c.sellNoShows, policy.lookbackDays) },
+      idempotencyKey: `restriction:${userId}:${type}:${c.buyReneged90d}:${c.sellReneged90d + c.sellNoShows}`,
+    });
+  }
+
+  // Give members a chance to correct behaviour before the next progressive step.
+  const buyerFailureWarnings = [
+    { count: c.buyReneged90d, threshold: policy.buyer.prepayRequiredAt, scope: 'buyer prepay' },
+    { count: c.buyReneged90d, threshold: policy.buyer.bidBlockedAt, scope: 'buyer bidding' },
+    { count: c.buyReneged90d, threshold: policy.buyer.reserveBlockedAt, scope: 'buyer reservations' },
+  ];
+  const sellerFailureCount = c.sellReneged90d + c.sellNoShows;
+  const sellerFailureWarnings = [{ count: sellerFailureCount, threshold: policy.seller.publishBlockedAt, scope: 'seller publishing' }];
+  for (const warning of [...buyerFailureWarnings, ...sellerFailureWarnings]) {
+    if (warning.threshold <= 1 || warning.count !== warning.threshold - 1) continue;
+    await notify({
+      tx,
+      userId,
+      event: 'restriction_warning',
+      data: { reason: `${warning.count} incomplete ${warning.scope} event${warning.count === 1 ? '' : 's'} in the last ${policy.lookbackDays} days. One more may pause this scope.` },
+      idempotencyKey: `restriction-warning:${userId}:${warning.scope}:${warning.count}`,
     });
   }
 
@@ -199,25 +266,29 @@ export async function evaluateRestrictions(tx: Tx, userId: string): Promise<Rest
     if (earned.includes(row.type)) continue;
     await tx
       .update(restrictions)
-      .set({ liftedAt: sql`now()` })
+      .set({ liftedAt: sql`now()`, lifecycleStatus: 'lifted' })
       .where(eq(restrictions.id, row.id));
   }
 
   return earned;
 }
 
-function reasonFor(type: RestrictionType, buyerFailures: number, sellerFailures: number): string {
+function reasonFor(type: RestrictionType, buyerFailures: number, sellerFailures: number, lookbackDays: number = THRESHOLDS.rollingWindowDays): string {
   switch (type) {
     case 'prepay_required':
-      return `${buyerFailures} unpaid claims in the last ${THRESHOLDS.rollingWindowDays} days — sellers may require payment up front.`;
+      return `${buyerFailures} unpaid claims in the last ${lookbackDays} days — sellers may require payment up front.`;
     case 'claim_blocked':
-      return `${buyerFailures} unpaid claims in the last ${THRESHOLDS.rollingWindowDays} days — claiming is paused.`;
+      return `${buyerFailures} unpaid claims in the last ${lookbackDays} days — claiming is paused.`;
     case 'meetup_only':
-      return `${sellerFailures} undelivered sales in the last ${THRESHOLDS.rollingWindowDays} days — meetup deals only.`;
+      return `${sellerFailures} undelivered sales in the last ${lookbackDays} days — meetup deals only.`;
     case 'listing_cap':
-      return `${sellerFailures} undelivered sales in the last ${THRESHOLDS.rollingWindowDays} days — new listings are paused.`;
+      return `${sellerFailures} undelivered sales in the last ${lookbackDays} days — new listings are paused.`;
     case 'bid_blocked':
       return 'Bidding is paused on this account.';
+    case 'reserve_blocked':
+      return `${buyerFailures} incomplete purchases in the recent policy window — reservations are paused.`;
+    case 'publish_blocked':
+      return `${sellerFailures} incomplete sales in the recent policy window — publishing is paused.`;
   }
 }
 
@@ -240,7 +311,6 @@ export async function publicProfile(tx: Tx, userId: string) {
   const rows = await tx
     .select({
       displayName: profiles.displayName,
-      handle: profiles.handle,
       memberSince: profiles.memberSince,
       counters: reputationCounters,
     })
@@ -254,7 +324,6 @@ export async function publicProfile(tx: Tx, userId: string) {
 export type TrustSnapshot = {
   userId: string;
   displayName: string;
-  handle: string;
   area: string | null;
   memberSince: Date;
   counters: {
@@ -264,6 +333,7 @@ export type TrustSnapshot = {
     buyPaidOnTime: number;
     sellCompleted: number;
     sellReneged90d: number;
+    successfulAuctions: number;
   };
   events: Array<{
     id: string;
@@ -285,12 +355,11 @@ export async function trustSnapshotsForMembers(
   const ids = [...new Set(userIds)];
   if (ids.length === 0) return new Map();
 
-  const [profileRows, eventRows] = await Promise.all([
+  const [profileRows, eventRows, auctionRows] = await Promise.all([
     tx
       .select({
         userId: profiles.userId,
         displayName: profiles.displayName,
-        handle: profiles.handle,
         area: profiles.area,
         memberSince: profiles.memberSince,
         buyClaimsTotal: reputationCounters.buyClaimsTotal,
@@ -314,9 +383,24 @@ export async function trustSnapshotsForMembers(
       .from(reputationEvents)
       .leftJoin(transactions, eq(transactions.id, reputationEvents.transactionId))
       .leftJoin(listings, eq(listings.id, transactions.listingId))
-      .where(inArray(reputationEvents.userId, ids))
+      .where(and(inArray(reputationEvents.userId, ids), inArray(reputationEvents.type, PUBLIC_REPUTATION_EVENT_TYPES)))
       .orderBy(desc(reputationEvents.occurredAt)),
+    tx
+      .select({ buyerId: transactions.buyerId, sellerId: transactions.sellerId })
+      .from(transactions)
+      .where(and(
+        or(inArray(transactions.buyerId, ids), inArray(transactions.sellerId, ids)),
+        eq(transactions.state, 'completed'),
+        inArray(transactions.source, ['auction_win', 'auction_runner_up']),
+      )),
   ]);
+
+  const auctionCountByUser = new Map<string, number>();
+  for (const row of auctionRows) {
+    for (const id of [row.buyerId, row.sellerId]) {
+      if (ids.includes(id)) auctionCountByUser.set(id, (auctionCountByUser.get(id) ?? 0) + 1);
+    }
+  }
 
   const eventsByUser = new Map<string, TrustSnapshot['events']>();
   for (const event of eventRows) {
@@ -331,7 +415,6 @@ export async function trustSnapshotsForMembers(
       {
         userId: profile.userId,
         displayName: profile.displayName,
-        handle: profile.handle,
         area: profile.area,
         memberSince: profile.memberSince,
         counters: {
@@ -341,6 +424,7 @@ export async function trustSnapshotsForMembers(
           buyPaidOnTime: profile.buyPaidOnTime ?? 0,
           sellCompleted: profile.sellCompleted ?? 0,
           sellReneged90d: profile.sellReneged90d ?? 0,
+          successfulAuctions: auctionCountByUser.get(profile.userId) ?? 0,
         },
         events: eventsByUser.get(profile.userId) ?? [],
       },

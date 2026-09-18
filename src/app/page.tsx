@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { ArrowRight, Gavel, Plus, Search, Store, Tag } from 'lucide-react';
+import { ArrowRight, Gavel, Plus, Search, Tag } from 'lucide-react';
 
 import { browseListings, recentlyClaimedListings } from '@/services/listings';
 import { HomeListingCarousel, type HomeListingRow } from './home-listing-carousel';
+import { isV1Launch } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,15 +131,15 @@ export default async function HomePage() {
         )}
       </section>
 
-      <section className="home-sell-prompt home-store-prompt" aria-labelledby="store-prompt-title">
+      {!isV1Launch() && <section className="home-sell-prompt home-store-prompt" aria-labelledby="store-prompt-title">
         <div>
           <h2 id="store-prompt-title">Have a storefront?</h2>
           <p>Want to join the community? Create a Store application here.</p>
         </div>
         <Link className="home-sell-prompt__cta" href="/store/apply">
-          <Store aria-hidden="true" />Create Store Application
+          Create Store Application
         </Link>
-      </section>
+      </section>}
     </main>
   );
 }

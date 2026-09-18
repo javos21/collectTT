@@ -1,7 +1,7 @@
 /**
  * notifications:dispatch — hand one delivery row to its channel adapter.
  *
- * One job per (event × channel), so a failing email cannot hold up a WhatsApp message
+ * One job per (event × channel), so a failing email cannot hold up other delivery work
  * and a retry re-sends only the channel that actually failed.
  *
  * IDEMPOTENT: guarded on `status = 'pending'`. A replayed job finds the row already
@@ -51,8 +51,8 @@ export async function dispatchNotification(payload: Payload, helpers: JobHelpers
 
   const adapter = getAdapter(delivery.channel as NotificationChannel);
   if (adapter === undefined || !adapter.isAvailable()) {
-    // The channel is routed in the event catalogue but has no adapter yet — WhatsApp,
-    // today. Recorded as skipped so the gap is visible in the data rather than silent.
+    // The channel is routed in the event catalogue but has no adapter yet. Record it as
+    // skipped so a future channel misconfiguration is visible rather than silent.
     await db
       .update(notificationDeliveries)
       .set({ status: 'skipped', lastError: 'no adapter registered for channel' })

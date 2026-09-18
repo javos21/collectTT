@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
-import { requireAdmin } from '@/lib/admin';
+import { requireAdminAction } from '@/lib/admin';
+import { assertLegacyFeatureAllowed } from '@/lib/launch-scope';
 import { confirmStoreApplication, declineStoreApplication, deleteRelayStore } from '@/services/store-applications';
 
 function text(formData: FormData, field: string): string {
@@ -17,7 +18,8 @@ function finish(message: string): never {
 }
 
 export async function confirmStoreApplicationAction(formData: FormData): Promise<void> {
-  const viewer = await requireAdmin();
+  const viewer = await requireAdminAction();
+  assertLegacyFeatureAllowed('store_custody');
   const id = text(formData, 'applicationId');
   if (id === '') finish('Choose a Store application first.');
   try {
@@ -29,7 +31,8 @@ export async function confirmStoreApplicationAction(formData: FormData): Promise
 }
 
 export async function declineStoreApplicationAction(formData: FormData): Promise<void> {
-  const viewer = await requireAdmin();
+  const viewer = await requireAdminAction();
+  assertLegacyFeatureAllowed('store_custody');
   const id = text(formData, 'applicationId');
   if (id === '') finish('Choose a Store application first.');
   try {
@@ -41,7 +44,8 @@ export async function declineStoreApplicationAction(formData: FormData): Promise
 }
 
 export async function deleteStoreAction(formData: FormData): Promise<void> {
-  const viewer = await requireAdmin();
+  const viewer = await requireAdminAction();
+  assertLegacyFeatureAllowed('store_custody');
   const id = text(formData, 'storeId');
   if (id === '') finish('Choose a Store first.');
   try {

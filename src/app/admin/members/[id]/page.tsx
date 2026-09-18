@@ -12,6 +12,7 @@ import { formatMoney } from '@/domain/money';
 import { requireAdmin } from '@/lib/admin';
 import { AdminFrame } from '../../admin-frame';
 import { LiftRestrictionForm, MemberAdminActions } from '../member-actions';
+import { auditedAdminPhoneAccess } from '@/services/private-disclosure';
 
 function date(value: Date | null): string {
   return value === null ? '—' : value.toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -52,15 +53,13 @@ export default async function AdminMemberDetailPage({
 }) {
   const { id } = await params;
   const feedback = await searchParams;
-  await requireAdmin(`/admin/members/${encodeURIComponent(id)}`);
+  const admin = await requireAdmin(`/admin/members/${encodeURIComponent(id)}`);
 
   const memberRows = await db
     .select({
       userId: profiles.userId,
       displayName: profiles.displayName,
       handle: profiles.handle,
-      phoneE164: profiles.phoneE164,
-      phoneVerifiedAt: profiles.phoneVerifiedAt,
       bio: profiles.bio,
       area: profiles.area,
       role: profiles.role,
@@ -77,6 +76,7 @@ export default async function AdminMemberDetailPage({
 
   const member = memberRows[0];
   if (member === undefined) notFound();
+  const phone = await auditedAdminPhoneAccess(admin.userId, id);
 
   const [counterRows, accountRows, restrictionRows, listingRows, dealRows] = await Promise.all([
     db.select().from(reputationCounters).where(eq(reputationCounters.userId, id)).limit(1),
@@ -107,6 +107,7 @@ export default async function AdminMemberDetailPage({
         state: transactions.state,
         paymentState: transactions.paymentState,
         custodyState: transactions.custodyState,
+        source: transactions.source,
         createdAt: transactions.createdAt,
       })
       .from(transactions)
@@ -121,6 +122,7 @@ export default async function AdminMemberDetailPage({
   const activeRestrictions = restrictionRows.filter((restriction) => isActiveRestriction(restriction, now));
   const accountProviders = [...new Set(accountRows.map((account) => account.providerId))];
   const completedDeals = (counters?.buyCompleted ?? 0) + (counters?.sellCompleted ?? 0);
+  const successfulAuctions = dealRows.filter((deal) => deal.state === 'completed' && (deal.source === 'auction_win' || deal.source === 'auction_runner_up')).length;
 
   return (
     <AdminFrame activeNav="members">
@@ -150,17 +152,18 @@ export default async function AdminMemberDetailPage({
               <div><dt>Role</dt><dd><span className="admin-status admin-status--draft">{label(member.role)}</span></dd></div>
               <div><dt>Account created</dt><dd>{dateTime(member.authCreatedAt)}</dd></div>
               <div><dt>Sign-in providers</dt><dd>{accountProviders.length === 0 ? 'Not available' : accountProviders.map(label).join(', ')}</dd></div>
-              <div><dt>Phone</dt><dd>{member.phoneE164 ?? 'Not supplied'}{member.phoneVerifiedAt !== null && <small>Verified {date(member.phoneVerifiedAt)}</small>}</dd></div>
+              <div><dt>Phone</dt><dd>{phone.phoneE164 ?? 'Not supplied'}</dd></div>
               <div><dt>Area</dt><dd>{member.area ?? 'Not supplied'}</dd></div>
             </dl>
             {member.bio !== null && <p className="admin-detail-note">{member.bio}</p>}
           </section>
 
           <section className="admin-panel" aria-labelledby="member-trust-title">
-            <div className="admin-panel__heading"><div><h2 id="member-trust-title">Trust snapshot</h2><p className="admin-panel__subcopy">Objective counters only; no admin adjustments in this slice.</p></div><ShieldCheck size={19} aria-hidden="true" /></div>
+            <div className="admin-panel__heading"><div><h2 id="member-trust-title">Trust snapshot</h2><p className="admin-panel__subcopy">Verified objective counters; private admin corrections remain in the audit trail.</p></div><ShieldCheck size={19} aria-hidden="true" /></div>
             <dl className="admin-metric-list">
               <div><dt>Purchases completed</dt><dd>{counters?.buyCompleted ?? 0}</dd></div>
               <div><dt>Sales completed</dt><dd>{counters?.sellCompleted ?? 0}</dd></div>
+              <div><dt>Successful auctions</dt><dd>{successfulAuctions}</dd></div>
               <div><dt>Paid on time</dt><dd>{counters?.buyPaidOnTime ?? 0} / {counters?.buyClaimsTotal ?? 0}</dd></div>
               <div><dt>Buyer reneges</dt><dd>{counters?.buyRenegedTotal ?? 0}</dd></div>
               <div><dt>Seller reneges</dt><dd>{counters?.sellRenegedTotal ?? 0}</dd></div>
