@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import { and, desc, eq, or, sql } from 'drizzle-orm';
 import { Package } from 'lucide-react';
 
@@ -9,6 +10,7 @@ import { transactions } from '@/db/schema/transactions';
 import { HomeListingTile, type HomeListingRow } from '@/app/home-listing-carousel';
 import { currentUser } from '@/lib/session';
 import { reportAccountAction } from './actions';
+import { ShareListingsButton } from '@/components/share-listings-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +41,7 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
 
   const c = row.counters;
 
-  const [theirListings, successfulAuctionRows] = await Promise.all([
+  const [theirListings, listingCountRows, successfulAuctionRows] = await Promise.all([
     db
       .select({
         id: listings.id,
@@ -65,6 +67,10 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
       .limit(12),
     db
       .select({ count: sql<number>`count(*)::int` })
+      .from(listings)
+      .where(and(eq(listings.sellerId, id), eq(listings.status, 'active'))),
+    db
+      .select({ count: sql<number>`count(*)::int` })
       .from(transactions)
       .where(and(
         or(eq(transactions.buyerId, id), eq(transactions.sellerId, id)),
@@ -78,6 +84,7 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
   const paidOnTime = c?.buyPaidOnTime ?? 0;
   const paidOnTimePurchases = `${paidOnTime} / ${claims}`;
   const successfulAuctions = Number(successfulAuctionRows[0]?.count ?? 0);
+  const activeListingCount = Number(listingCountRows[0]?.count ?? 0);
 
   const initials = row.displayName
     .trim()
@@ -180,7 +187,15 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
           <div>
             <h2 id="listings-heading">Active listings</h2>
           </div>
-          <span className="member-section__count">{theirListings.length} listed</span>
+          <div className="member-section__actions">
+            <span className="member-section__count">{activeListingCount} listed</span>
+            {activeListingCount > 0 && (
+              <>
+                <Link href={`/listings?seller=${encodeURIComponent(id)}`}>Search all listings</Link>
+                <ShareListingsButton path={`/listings?seller=${encodeURIComponent(id)}`} sellerName={row.displayName} />
+              </>
+            )}
+          </div>
         </div>
       {theirListings.length === 0 ? (
         <div className="member-empty"><Package size={21} aria-hidden="true" /><span>Nothing listed right now.</span></div>

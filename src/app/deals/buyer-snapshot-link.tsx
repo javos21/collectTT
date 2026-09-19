@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { BadgeCheck, MapPin, UserRound, X } from 'lucide-react';
+import Link from 'next/link';
 
 import type { BuyerSnapshotData } from './buyer-snapshot-data';
 
@@ -204,6 +205,12 @@ export function BuyerSnapshotLink({
               <MapPin size={15} aria-hidden="true" />
               Trust details are based on verified CollectTT transaction outcomes.
             </p>
+            <div className="buyer-snapshot-modal__actions">
+              {subjectLabel === 'Seller' && (
+                <Link href={`/listings?seller=${encodeURIComponent(snapshot.userId)}`} onClick={() => setIsOpen(false)}>View active listings</Link>
+              )}
+              <Link href={`/members/${snapshot.userId}`} onClick={() => setIsOpen(false)}>View full profile</Link>
+            </div>
           </section>
         </div>,
         document.body,

@@ -239,6 +239,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
           completedAt: iso(transaction.completedAt),
         }))}
         identity={{
+          userId: user.userId,
           accountName: identity.accountName,
           displayName: identity.displayName,
           email: user.email,

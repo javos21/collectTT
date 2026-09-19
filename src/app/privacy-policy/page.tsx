@@ -5,11 +5,11 @@ import { PRIVACY_VERSION } from '@/lib/legal';
 export const metadata: Metadata = { title: 'Privacy Policy — CollectTT' };
 
 export default function PrivacyPolicyPage() {
-  return <LegalPage eyebrow="Legal" title="Privacy Policy" updated={`Working draft · Version ${PRIVACY_VERSION} · Last updated September 19, 2026`}>
-    <p><strong>This is a first working draft.</strong> It explains how CollectTT proposes to handle personal information for the launch product. It is not legal advice. Before publication, confirm the operator identity, privacy contact, service providers, retention periods, and the rights and notices required in every launch jurisdiction with local counsel.</p>
+  return <LegalPage eyebrow="Legal" title="Privacy Policy" updated={`Version ${PRIVACY_VERSION} · Last updated September 19, 2026`}>
+    <p>This Policy explains how CollectTT collects, uses, shares, protects, and retains personal information when you use the marketplace.</p>
 
     <h2>1. Who is responsible for your information</h2>
-    <p>CollectTT is operated by <strong>[INSERT LEGAL OPERATOR NAME]</strong>, of <strong>[INSERT REGISTERED BUSINESS ADDRESS]</strong> (“CollectTT”, “we”, “us”, or “our”). CollectTT is the organisation responsible for the marketplace information described here. For privacy questions or requests, contact <strong>[INSERT PRIVACY EMAIL]</strong>.</p>
+    <p>CollectTT (“CollectTT”, “we”, “us”, or “our”) is the organisation responsible for the marketplace information described here. For privacy questions or requests, contact us through the <a href="/support">CollectTT support page</a>.</p>
 
     <h2>2. Information we collect</h2>
     <ul>
@@ -41,20 +41,20 @@ export default function PrivacyPolicyPage() {
     <p>We do not disclose private phone or email details to another member before a valid commitment unless you choose to share them.</p>
 
     <h2>6. Service providers and international processing</h2>
-    <p>The launch product uses a hosted Postgres/Supabase database and object storage, an application host, and an email delivery adapter. <strong>[INSERT THE FINAL PROVIDER NAMES, REGIONS, AND ANALYTICS/ERROR-MONITORING TOOLS BEFORE PUBLICATION.]</strong> Providers may process information outside Trinidad and Tobago. We will use reasonable contractual and technical safeguards appropriate to the information and applicable law.</p>
+    <p>The service uses hosted database and object storage, application hosting, email delivery, monitoring, and security providers. Providers may process information outside Trinidad and Tobago. We use reasonable contractual and technical safeguards appropriate to the information and applicable law.</p>
 
     <h2>7. Retention</h2>
-    <p>We retain account and transaction records for as long as needed to provide the service, preserve the history of commitments, investigate disputes and abuse, enforce restrictions, maintain security, and meet legal or accounting obligations. We retain private evidence and delivery logs only for the approved operational period. <strong>[COUNSEL AND OPERATIONS TO SET SPECIFIC RETENTION PERIODS AND A DELETION SCHEDULE.]</strong></p>
+    <p>We retain account and transaction records for as long as needed to provide the service, preserve the history of commitments, investigate disputes and abuse, enforce restrictions, maintain security, and meet legal or accounting obligations. We retain private evidence and delivery logs only for the applicable operational and legal retention period.</p>
 
     <h2>8. Security</h2>
     <p>We use access controls, authentication, rate limits, private storage boundaries, audit records, and other safeguards designed to reduce unauthorised access or disclosure. No internet service is risk-free. If you believe your account or information is compromised, change your password and contact support promptly.</p>
 
     <h2>9. Cookies and similar technology</h2>
-    <p>CollectTT uses essential cookies or similar storage for sessions, security, and core functionality. <strong>[CONFIRM WHETHER ANALYTICS, ADVERTISING, OR OPTIONAL COOKIE TECHNOLOGY WILL BE ENABLED.]</strong> If optional analytics or marketing technology is added, we will describe it here and provide any required controls before using it.</p>
+    <p>CollectTT uses essential cookies or similar storage for sessions, security, and core functionality. If optional analytics or marketing technology is added, we will describe it here and provide any controls required by law before using it.</p>
 
     <h2>10. Your choices and requests</h2>
-    <p>You can update your profile and notification preferences in the product. You may contact <strong>[INSERT PRIVACY EMAIL]</strong> to ask for access to, correction of, or deletion of personal information, to object to a use, or to ask a question about a disclosure. We may need to verify your identity and may retain information that we must keep for security, disputes, fraud prevention, or legal obligations.</p>
-    <p>Essential security, commitment, deadline, dispute, and restriction notices cannot be disabled while you use the relevant features. Where applicable law provides a right to complain to a regulator, we will identify the appropriate contact in the final version.</p>
+    <p>You can update your profile and notification preferences in the product. You may use the <a href="/support">CollectTT support page</a> to ask for access to, correction of, or deletion of personal information, to object to a use, or to ask a question about a disclosure. We may need to verify your identity and may retain information that we must keep for security, disputes, fraud prevention, or legal obligations.</p>
+    <p>Essential security, commitment, deadline, dispute, and restriction notices cannot be disabled while you use the relevant features. Where applicable law provides a right to complain to a regulator, you may exercise that right.</p>
 
     <h2>11. Minors</h2>
     <p>CollectTT is intended for adults. We do not knowingly invite a child to create a marketplace account or participate in a private meetup. If you believe a child has provided information or is at risk, contact support immediately; we may remove the information or restrict the account subject to safety and legal requirements.</p>
@@ -66,6 +66,6 @@ export default function PrivacyPolicyPage() {
     <p>We may update this Policy when the product, providers, or legal requirements change. We will publish the new version and date. If a change materially affects how we use information, we will provide a reasonable notice and any consent or choice required by law.</p>
 
     <h2>14. Contact</h2>
-    <p>For privacy requests or questions, contact <strong>[INSERT PRIVACY EMAIL]</strong> and include “Privacy” in the subject line. Replace every bracketed placeholder and obtain local counsel review before public launch.</p>
+    <p>For privacy requests or questions, contact us through the <a href="/support">CollectTT support page</a>.</p>
   </LegalPage>;
 }

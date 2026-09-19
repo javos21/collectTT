@@ -142,4 +142,14 @@ describe('browseListings', () => {
     expect(result.total).toBe(1);
     expect(result.rows[0]?.description).toContain(SEARCH_TERM);
   });
+
+  it('finds and scopes active listings by seller', async () => {
+    const byName = await browseListings({ query: seller });
+    expect(byName.total).toBe(8);
+    expect(byName.rows.every((row) => row.sellerId === seller)).toBe(true);
+
+    const storefront = await browseListings({ sellerId: seller });
+    expect(storefront.total).toBe(8);
+    expect(storefront.rows.every((row) => row.sellerId === seller)).toBe(true);
+  });
 });

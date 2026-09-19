@@ -5,12 +5,12 @@ import { TERMS_VERSION } from '@/lib/legal';
 export const metadata: Metadata = { title: 'Terms of Service — CollectTT' };
 
 export default function TermsOfServicePage() {
-  return <LegalPage eyebrow="Legal" title="Terms of Service" updated={`Working draft · Version ${TERMS_VERSION} · Last updated September 19, 2026`}>
-    <p><strong>Read this draft before using CollectTT.</strong> These Terms describe the rules for the CollectTT marketplace, including listings, offers, auctions, direct payments, and meetups. They are written as a first working draft and are not a substitute for advice from a Trinidad and Tobago attorney.</p>
+  return <LegalPage eyebrow="Legal" title="Terms of Service" updated={`Version ${TERMS_VERSION} · Last updated September 19, 2026`}>
+    <p>These Terms describe the rules for the CollectTT marketplace, including listings, offers, auctions, direct payments, and meetups. Please read them before using CollectTT.</p>
 
     <h2>1. Who operates CollectTT</h2>
-    <p>CollectTT is operated by <strong>[INSERT LEGAL OPERATOR NAME]</strong>, of <strong>[INSERT REGISTERED BUSINESS ADDRESS]</strong> (“CollectTT”, “we”, “us”, or “our”). Before publication, replace these brackets with the legal operator, business address, support email, and any registration number that must be displayed for the launch countries.</p>
-    <p>Questions about these Terms can be sent to <strong>[INSERT SUPPORT EMAIL]</strong>. The public support page is available at <a href="/support">/support</a>.</p>
+    <p>CollectTT operates the CollectTT marketplace (“CollectTT”, “we”, “us”, or “our”).</p>
+    <p>Questions about these Terms can be sent through the <a href="/support">CollectTT support page</a>.</p>
 
     <h2>2. Accepting these Terms</h2>
     <p>By creating an account, checking the acceptance box, or using a feature that requires an account, you agree to these Terms and the <a href="/privacy-policy">Privacy Policy</a>. If you do not agree, do not create an account or use the marketplace. We record the Terms version accepted at account creation.</p>
@@ -67,18 +67,16 @@ export default function TermsOfServicePage() {
 
     <h2>16. Liability</h2>
     <p>To the maximum extent permitted by applicable law, CollectTT is not responsible for indirect, incidental, special, consequential, exemplary, or punitive loss, lost profit, lost opportunity, loss of data, or loss arising from a member’s conduct, item, payment, delivery, meetup, or content. Nothing in these Terms excludes liability that the law does not allow us to exclude, including liability for fraud or deliberate misconduct.</p>
-    <p><strong>[COUNSEL TO CONFIRM THE APPROPRIATE LIABILITY CAP, IF ANY, FOR THE LAUNCH JURISDICTIONS.]</strong></p>
-
     <h2>17. Indemnity</h2>
     <p>To the extent permitted by law, you agree to reimburse CollectTT for reasonable losses, claims, costs, and professional fees arising from your breach of these Terms, unlawful conduct, content, or dispute with another member. This does not require you to indemnify CollectTT for its own non-excludable misconduct.</p>
 
     <h2>18. Governing law and disputes</h2>
-    <p><strong>[COUNSEL TO CONFIRM GOVERNING LAW, COURTS, AND ANY REQUIRED CONSUMER DISPUTE OR MEDIATION PROCESS.]</strong> The current product assumption is that disputes are governed by the laws of Trinidad and Tobago and heard by a court with proper jurisdiction there, subject to mandatory consumer protections and any right to bring a claim elsewhere that cannot lawfully be waived.</p>
+    <p>These Terms and disputes arising from them are governed by the laws of Trinidad and Tobago and may be heard by a court with proper jurisdiction there, subject to mandatory consumer protections and any right to bring a claim elsewhere that cannot lawfully be waived.</p>
 
     <h2>19. Changes to these Terms</h2>
     <p>We may update these Terms to reflect product, safety, or legal changes. We will publish the new version and update the version date. If a change materially affects your rights or obligations, we will provide a reasonable notice and may require renewed acceptance before you use the affected features.</p>
 
     <h2>20. Contact</h2>
-    <p>For legal notices, privacy requests, or questions about these Terms, contact <strong>[INSERT SUPPORT EMAIL]</strong> and include “Legal” in the subject line. Replace all bracketed placeholders and obtain local counsel review before public launch.</p>
+    <p>For legal notices, privacy requests, or questions about these Terms, contact us through the <a href="/support">CollectTT support page</a>.</p>
   </LegalPage>;
 }

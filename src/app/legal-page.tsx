@@ -19,7 +19,7 @@ export function LegalPage({
         <p className="legal-page__updated">{updated}</p>
       </div>
       <div className="legal-page__body">{children}</div>
-      <p className="legal-page__notice">These v1 surfaces are published for product use and remain subject to final legal review. Questions? <Link href="/support">Contact CollectTT support</Link>.</p>
+      <p className="legal-page__notice">Questions about this policy? <Link href="/support">Contact CollectTT support</Link>.</p>
     </main>
   );
 }

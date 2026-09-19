@@ -26,6 +26,7 @@ import { Tabs } from '@/components/application/tabs/tabs';
 import { NativeSelect } from '@/components/base/select/select-native';
 import { normalizeProfileTab, profileTabs } from '@/lib/profile-tabs';
 import { OPTIONAL_NOTIFICATION_PREFERENCES } from '@/notifications/events';
+import { ShareListingsButton } from '@/components/share-listings-button';
 
 type CounterData = {
   buyClaimsTotal: number;
@@ -70,6 +71,7 @@ interface ProfilePageProps {
   deliveryOptions: DeliveryOptionData[];
   relayStores: RelayStoreData[];
   identity: {
+    userId: string;
     accountName: string;
     displayName: string;
     email: string;
@@ -529,9 +531,20 @@ function ListingsTable({ listings, saleType, deleteListingAction }: ListingTable
   );
 }
 
-function ListingsPanel({ listings, deleteListingAction }: Pick<ProfilePageProps, 'listings' | 'deleteListingAction'>) {
+function ListingsPanel({ listings, deleteListingAction, identity }: Pick<ProfilePageProps, 'listings' | 'deleteListingAction' | 'identity'>) {
+  const activeCount = listings.filter((listing) => listing.status === 'active').length;
   return (
     <div className="profile-content-stack">
+      <section className="profile-seller-share" aria-labelledby="profile-seller-share-title">
+        <div>
+          <h3 id="profile-seller-share-title">Promote your active listings</h3>
+          <p>Share one link that always shows your current active inventory. Buyers can search and filter it.</p>
+        </div>
+        <div className="profile-seller-share__actions">
+          <Link href={`/listings?seller=${encodeURIComponent(identity.userId)}`}>View public listings ({activeCount})</Link>
+          <ShareListingsButton path={`/listings?seller=${encodeURIComponent(identity.userId)}`} sellerName={identity.displayName} />
+        </div>
+      </section>
       <ListingsTable listings={listings} saleType="auction" deleteListingAction={deleteListingAction} />
       <ListingsTable listings={listings} saleType="straight_sale" deleteListingAction={deleteListingAction} />
     </div>
@@ -568,7 +581,7 @@ const panelByTab: Record<string, FC<ProfilePageProps>> = {
   account: (props) => <AccountPanel {...props} />,
   activity: ({ claims, bids, offers, deals }) => <ActivityPanel claims={claims} bids={bids} offers={offers} deals={deals} />,
   trust: ({ counters, reputationEvents }) => <TrustPanel counters={counters} reputationEvents={reputationEvents} />,
-  listings: ({ listings, deleteListingAction }) => <ListingsPanel listings={listings} deleteListingAction={deleteListingAction} />,
+  listings: ({ listings, deleteListingAction, identity }) => <ListingsPanel listings={listings} deleteListingAction={deleteListingAction} identity={identity} />,
   'bids-offers': ({ bids, offers }) => <BidsOffersPanel bids={bids} offers={offers} />,
 };
 

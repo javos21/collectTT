@@ -59,12 +59,12 @@ Do not use production credentials or production member data for this local pass.
 | Desktop/mobile accessibility smoke | Pass locally | Add/execute the full A–L browser suite |
 | Real worker enqueue, processing, and idempotency | Pass locally and against Supabase synthetic data | Exercise deadline, provider-failure, and recovery drills in staging |
 | Notification retry and admin retry intervention | Covered by flow/security tests | Verify with a real provider failure and an audited admin retry |
-| Account Terms acceptance | Implemented: required checkbox, server/API guard, and stored Terms version | Confirm final legal copy/version and run a staging sign-up acceptance audit |
+| Account Terms acceptance | Implemented: required checkbox, server/API guard, stored Terms version, and approved legal copy | Run a staging sign-up acceptance audit |
 | Migration forward rehearsal and rollback/forward-fix procedure | Pending | Run on an isolated production-like copy |
 | Brevo email and phone-provider verification | Pending | Configure staging credentials and run delivery probes |
 | Public image versus private evidence restore | Pending | Complete backup and restore drill |
 | Approximately 100 active listings and staged beta gates | Pending | Seller recruitment, alpha, trusted pilot, invite-only beta |
-| Final legal approval and monitoring alerts | Working drafts generated; operator/provider/retention placeholders remain | Product, legal, and operations sign-off; replace bracketed placeholders before public launch |
+| Legal approval and monitoring alerts | Legal copy approved; public draft markers and placeholders removed | Keep legal versions and monitoring evidence current |
 
 The local implementation is ready for staging rehearsal; Milestone 8 should not be
 called a public-launch exit until the pending external gates have owners and evidence.

@@ -1,7 +1,11 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
 import { BadgeCheck, Clock3, UserRound } from 'lucide-react';
+import { eq } from 'drizzle-orm';
 
 import { db } from '@/db/client';
+import { profiles } from '@/db/schema/profiles';
 import { browseListings, BROWSE_SORTS, type BrowseSort } from '@/services/listings';
 import { trustSnapshotsForMembers } from '@/services/reputation';
 import { filtersForDefinition, coerceFiltersForDefinition } from '@/domain/categories/filters';
@@ -11,29 +15,35 @@ import { listMarketplaceOptions } from '@/services/platform-settings';
 import { activeCategoryDefinitions } from '@/services/catalog';
 import { serializeTrustSnapshot } from '../deals/buyer-snapshot-data';
 import { BuyerSnapshotLink } from '../deals/buyer-snapshot-link';
+import { ShareListingsButton } from '@/components/share-listings-button';
 
 export const dynamic = 'force-dynamic';
 
-const PATH_LABELS: Record<string, string> = {
-  cash_meetup: 'Public Meetup',
-  remote_ship: 'Ships from Seller',
-  relay: 'Store Pickup',
-  full_service: 'CollectTT Delivery',
-};
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<Metadata> {
+  const params = await searchParams;
+  const sellerId = typeof params.seller === 'string' && params.seller.trim() !== '' ? params.seller : undefined;
+  if (sellerId === undefined) return {};
 
-const PAYMENT_LABELS: Record<string, string> = {
-  cash: 'Cash',
-  bank_transfer: 'Bank Transfer',
-  wam: 'WAM',
-};
+  const seller = (await db
+    .select({ displayName: profiles.displayName })
+    .from(profiles)
+    .where(eq(profiles.userId, sellerId))
+    .limit(1))[0];
+
+  if (seller === undefined) return {};
+  return {
+    title: `${seller.displayName}'s active listings — CollectTT`,
+    description: `Browse, search, and filter ${seller.displayName}'s active collectible listings on CollectTT.`,
+  };
+}
 
 function stringValues(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) return value;
   return value === undefined ? [] : [value];
-}
-
-function labelList(values: readonly string[], labels: Record<string, string>): string {
-  return values.map((value) => labels[value] ?? value.replaceAll('_', ' ')).join(', ');
 }
 
 function timeLeft(endsAt: Date | null): string {
@@ -65,11 +75,21 @@ export default async function BrowsePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const [availableDeliveryOptions, availablePaymentOptions, availableCategories] = await Promise.all([
+  const sellerId = typeof params.seller === 'string' && params.seller.trim() !== '' ? params.seller : undefined;
+  const [availableDeliveryOptions, availablePaymentOptions, availableCategories, sellerRows] = await Promise.all([
     listMarketplaceOptions('delivery', { activeOnly: true }),
     listMarketplaceOptions('payment', { activeOnly: true }),
     activeCategoryDefinitions(),
+    sellerId === undefined
+      ? Promise.resolve([])
+      : db
+          .select({ userId: profiles.userId, displayName: profiles.displayName, area: profiles.area })
+          .from(profiles)
+          .where(eq(profiles.userId, sellerId))
+          .limit(1),
   ]);
+  const selectedSeller = sellerRows[0];
+  if (sellerId !== undefined && selectedSeller === undefined) notFound();
   const query = typeof params.q === 'string' ? params.q.trim() : '';
   const categoryKeys = new Set(availableCategories.map((category) => category.key));
   const categoryLabels = new Map(availableCategories.map((category) => [category.key, category.label]));
@@ -116,6 +136,7 @@ export default async function BrowsePage({
 
   const { rows, total, pageSize, nextCursor } = await browseListings({
     ...(query !== '' ? { query } : {}),
+    ...(sellerId !== undefined ? { sellerId } : {}),
     ...(selectedCategories.length > 0 ? { categories: selectedCategories } : {}),
     ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
     ...(saleType !== undefined ? { saleType } : {}),
@@ -144,6 +165,7 @@ export default async function BrowsePage({
     cursor?: string | null;
   } = {}) => {
     const qs = new URLSearchParams();
+    if (sellerId !== undefined) qs.set('seller', sellerId);
     if (query !== '') qs.set('q', query);
     for (const selectedCategory of selectedCategories) qs.append('category', selectedCategory);
     const nextSaleType = 'saleType' in overrides ? overrides.saleType : saleType;
@@ -181,17 +203,37 @@ export default async function BrowsePage({
     <main className="catalog-page">
       <section className="catalog-header">
         <div>
-          <h1>Browse listings</h1>
+          <h1>{selectedSeller === undefined ? 'Browse listings' : `${selectedSeller.displayName}'s listings`}</h1>
+          {selectedSeller !== undefined && (
+            <p>
+              All active listings from this seller
+              {selectedSeller.area !== null && <><span aria-hidden="true"> · </span>{selectedSeller.area}</>}.
+            </p>
+          )}
         </div>
         <form className="catalog-search" action="/listings" method="get" role="search">
+          {sellerId !== undefined && <input type="hidden" name="seller" value={sellerId} />}
           {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
           {location !== '' && <input type="hidden" name="location" value={location} />}
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2" stroke="currentColor" strokeWidth="1.8" /><path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-          <label className="sr-only" htmlFor="catalog-query">Search listings</label>
-          <input id="catalog-query" name="q" type="search" defaultValue={query} placeholder="Search listings" />
+          <label className="sr-only" htmlFor="catalog-query">{selectedSeller === undefined ? 'Search listings or sellers' : `Search ${selectedSeller.displayName}'s listings`}</label>
+          <input id="catalog-query" name="q" type="search" defaultValue={query} placeholder={selectedSeller === undefined ? 'Search listings or sellers' : `Search ${selectedSeller.displayName}'s listings`} />
           <button type="submit">Search</button>
         </form>
       </section>
+
+      {selectedSeller !== undefined && (
+        <section className="seller-catalog-banner" aria-label={`${selectedSeller.displayName} seller page`}>
+          <div>
+            <UserRound aria-hidden="true" />
+            <p><strong>Shopping from {selectedSeller.displayName}</strong><span>Search, filter, and sort this seller&apos;s active inventory.</span></p>
+          </div>
+          <div className="seller-catalog-banner__actions">
+            <Link href={`/members/${selectedSeller.userId}`}>View trust profile</Link>
+            <ShareListingsButton path={`/listings?seller=${encodeURIComponent(selectedSeller.userId)}`} sellerName={selectedSeller.displayName} />
+          </div>
+        </section>
+      )}
 
       <div className="browse-layout">
         {/* -------------------------------------------------- filter rail */}
@@ -206,6 +248,7 @@ export default async function BrowsePage({
             </svg>
           </summary>
           <form method="get" className="filter-form" aria-label="Listing filters">
+            {sellerId !== undefined && <input type="hidden" name="seller" value={sellerId} />}
             {query !== '' && <input type="hidden" name="q" value={query} />}
             {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
             <div className="form-field form-field--compact">
@@ -282,10 +325,12 @@ export default async function BrowsePage({
               <span className="muted">
                 {total === 1 ? 'Listing' : 'Listings'}
                 {query !== '' && ` matching “${query}”`}
-                {selectedCategories.length > 0 && ` in ${selectedCategories.map((value) => value.replace('_', ' ')).join(', ')}`}
+                {selectedCategories.length > 0 && ` in ${selectedCategories.map((value) => categoryLabels.get(value) ?? value.replace('_', ' ')).join(', ')}`}
+                {selectedSeller !== undefined && ` from ${selectedSeller.displayName}`}
               </span>
             </div>
             <form method="get" className="sort-form" aria-label="Sort listings">
+              {sellerId !== undefined && <input type="hidden" name="seller" value={sellerId} />}
               {query !== '' && <input type="hidden" name="q" value={query} />}
               {selectedCategories.map((value) => <input key={value} type="hidden" name="category" value={value} />)}
               {saleType !== undefined && <input type="hidden" name="saleType" value={saleType} />}
@@ -309,22 +354,17 @@ export default async function BrowsePage({
           {total === 0 ? (
             <div className="empty-state">
               <h2>Nothing matches that</h2>
-              <p>Try a different filter, or be the first to list something here.</p>
-              <Link className="button" href="/listings/new">Create a listing</Link>
+              <p>{selectedSeller === undefined ? 'Try a different filter, or be the first to list something here.' : 'Try a different search or clear the filters to see this seller’s active listings.'}</p>
+              {selectedSeller === undefined ? (
+                <Link className="button" href="/listings/new">Create a listing</Link>
+              ) : (
+                <Link className="button" href={`/listings?seller=${encodeURIComponent(selectedSeller.userId)}`}>Clear search and filters</Link>
+              )}
             </div>
           ) : (
             <>
               <div className="catalog-results-grid">
                 {rows.map((row) => {
-                  const deliveryOptions = row.deliveryOptionLabels.length > 0
-                    ? row.deliveryOptionLabels.join(', ')
-                    : labelList(row.fulfillmentPaths, PATH_LABELS);
-                  const storeOptions = row.fulfillmentPaths.includes('relay')
-                    ? (row.relayStoreNames ?? []).join(', ') || 'None'
-                    : 'None';
-                  const paymentOptions = row.paymentOptionLabels.length > 0
-                    ? row.paymentOptionLabels.join(', ')
-                    : labelList(row.settlementMethods, PAYMENT_LABELS);
                   const sellerSnapshot = sellerSnapshots.get(row.sellerId);
                   return (
                   <article className="catalog-card" key={row.id}>
@@ -350,30 +390,23 @@ export default async function BrowsePage({
                               showTriggerIcon={false}
                             />
                           )}
-                          <span className={`catalog-card__seller-trust ${(row.sellerCompletedSales ?? 0) > 0 ? 'catalog-card__seller-trust--completed' : 'catalog-card__seller-trust--new'}`}>
-                            {(row.sellerCompletedSales ?? 0) > 0
-                              ? `${row.sellerCompletedSales} completed sale${row.sellerCompletedSales === 1 ? '' : 's'}`
-                              : 'New seller'}
-                          </span>
                         </div>
-                      </div>
-                      <div className="catalog-card__options" aria-label="Listing options">
-                        <p><strong>Delivery</strong><span>{deliveryOptions}</span></p>
-                        <p><strong>Stores</strong><span>{storeOptions}</span></p>
-                        <p><strong>Payment options</strong><span>{paymentOptions}</span></p>
                       </div>
                       <div className="catalog-card__footer">
                         <div className="catalog-card__price">
                           <strong className="num">{row.saleType === 'auction' ? formatMoney(row.currentBidCents ?? row.startBidCents ?? 0) : formatMoney(row.priceCents ?? 0)}</strong>
-                          {row.saleType === 'straight_sale' && row.acceptsOffers && (
-                            <span className="catalog-card__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
-                          )}
-                          {row.saleType === 'auction' && <small>{row.bidCount} bid{row.bidCount === 1 ? '' : 's'}</small>}
-                          {row.saleType === 'auction' && (
-                            <span className={`catalog-card__time catalog-card__time--${auctionUrgency(row.endsAt)}`}>
-                              <Clock3 aria-hidden="true" />{timeLeft(row.endsAt)}
-                            </span>
-                          )}
+                          <div className="catalog-card__status">
+                            {row.saleType === 'auction' ? (
+                              <span className={`catalog-card__time catalog-card__time--${auctionUrgency(row.endsAt)}`}>
+                                <Clock3 aria-hidden="true" />
+                                {timeLeft(row.endsAt)}
+                              </span>
+                            ) : row.acceptsOffers ? (
+                              <span className="catalog-card__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
+                            ) : (
+                              <span className="catalog-card__sale-label">Straight sale</span>
+                            )}
+                          </div>
                         </div>
                         <Link className="catalog-card__cta" href={`/listings/${row.id}#buy-panel`}>{row.saleType === 'auction' ? 'Bid' : 'Claim'}</Link>
                       </div>

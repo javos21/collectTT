@@ -21,7 +21,7 @@ import {
 import { sellerMeetupLocations, sellerMarketplacePreferences } from '../db/schema/seller-settings';
 import { listingRelayStores, relayStores } from '../db/schema/custody';
 import { images } from '../db/schema/images';
-import { profiles, reputationCounters } from '../db/schema/profiles';
+import { profiles } from '../db/schema/profiles';
 import { transactions } from '../db/schema/transactions';
 import { marketplaceOptions } from '../db/schema/settings';
 import { parseAttributesWithCatalogValues } from './catalog';
@@ -867,8 +867,10 @@ export const BROWSE_SORTS = ['newest', 'price_low', 'price_high', 'ending_soon']
 export type BrowseSort = (typeof BROWSE_SORTS)[number];
 
 export interface BrowseFilters {
-  /** Optional text search across listing titles and descriptions. */
+  /** Optional text search across listing titles, descriptions, and seller display names. */
   query?: string;
+  /** Restrict the public catalog to one seller's active listings. */
+  sellerId?: string;
   category?: string;
   /** Match any selected category from a checklist facet. */
   categories?: readonly string[];
@@ -973,8 +975,11 @@ function browseConditions(filters: BrowseFilters) {
   if (query !== undefined && query !== '') {
     const pattern = `%${query}%`;
     conditions.push(
-      sql`(${listings.title} ilike ${pattern} or coalesce(${listings.description}, '') ilike ${pattern})`,
+      sql`(${listings.title} ilike ${pattern} or coalesce(${listings.description}, '') ilike ${pattern} or ${profiles.displayName} ilike ${pattern})`,
     );
+  }
+  if (filters.sellerId !== undefined) {
+    conditions.push(eq(listings.sellerId, filters.sellerId));
   }
   if (filters.category !== undefined) {
     conditions.push(eq(listings.category, filters.category));
@@ -1082,7 +1087,6 @@ function selectBrowseRows(
       createdAt: listings.createdAt,
       sellerName: profiles.displayName,
       sellerId: profiles.userId,
-      sellerCompletedSales: reputationCounters.sellCompleted,
       fulfillmentPaths: listings.fulfillmentPaths,
       settlementMethods: listings.settlementMethods,
       meetupLocation: sql<string | null>`(
@@ -1148,7 +1152,6 @@ function selectBrowseRows(
     })
     .from(listings)
     .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
-    .leftJoin(reputationCounters, eq(reputationCounters.userId, profiles.userId))
     .where(where)
     .orderBy(...browseOrder(sort))
     .limit(limit)

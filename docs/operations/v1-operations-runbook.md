@@ -73,7 +73,7 @@ should not be used to expose member-level rankings.
 
 ## Data retention baseline
 
-The following is the v1 implementation baseline pending final legal approval:
+The following is the approved v1 implementation baseline:
 
 | Data | Operational purpose | Baseline handling |
 | --- | --- | --- |
@@ -83,9 +83,8 @@ The following is the v1 implementation baseline pending final legal approval:
 | Notification deliveries | Delivery retry, incident response, and member history | Keep status, attempts, provider message ID, and error metadata; never use delivery payloads as an analytics source. |
 | Admin audit events | Accountability for high-impact operations | Append-only; retain for the approved compliance and incident-review period. |
 
-Before public launch, the product owner and legal reviewer must replace these baseline
-descriptions with approved durations and confirm the deletion/backup treatment for each
-class of data.
+The product owner and operations team must document any approved retention-duration
+changes and keep deletion and backup treatment aligned for each class of data.
 
 ## Backup and restore drill
 

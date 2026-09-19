@@ -321,6 +321,26 @@ export default async function ListingPage({
                                 </span>
                               </span>
                             )}
+                            {option.fulfillmentPath === 'cash_meetup' && (
+                              <span className="settle-list__locations" aria-label="Meetup location">
+                                <span className="settle-list__locations-label">Meetup location</span>
+                                <span className="settle-list__locations-list">
+                                  {result.meetupLocation === null ? (
+                                    <span className="settle-list__location settle-list__location--missing">Not specified on this listing</span>
+                                  ) : (
+                                    <>
+                                      <span className="settle-list__location">
+                                        {result.meetupLocation.label}{' '}
+                                        <span className="settle-list__location-area">({result.meetupLocation.area})</span>
+                                      </span>
+                                      {result.meetupLocation.instructions !== null && (
+                                        <span className="settle-list__location-instructions">{result.meetupLocation.instructions}</span>
+                                      )}
+                                    </>
+                                  )}
+                                </span>
+                              </span>
+                            )}
                           </span>
                         </li>
                       );
@@ -345,13 +365,6 @@ export default async function ListingPage({
                   </p>
                 </div>
               </div>
-              {result.meetupLocation !== null && (
-                <div className="listing-settlement-panel">
-                  <h2 className="listing-detail-title">Meetup location</h2>
-                  <p>{result.meetupLocation.label} — {result.meetupLocation.area}</p>
-                  {result.meetupLocation.instructions !== null && <p className="buybox__note">{result.meetupLocation.instructions}</p>}
-                </div>
-              )}
             </section>
 
             <section className="listing-detail-card" aria-labelledby="listing-details-heading">
