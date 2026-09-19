@@ -8,6 +8,7 @@ import { authClient } from '@/lib/auth-client';
 import { AuthFeedback } from '@/components/auth-feedback';
 import { PasswordField } from '@/components/password-field';
 import { Button } from '@/components/ui/button';
+import { TERMS_VERSION } from '@/lib/legal';
 
 type Mode = 'sign-in' | 'sign-up';
 
@@ -76,6 +77,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
   const [accountName, setAccountName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [email, setEmail] = useState('');
   const [availability, setAvailability] = useState<Record<AvailabilityField, Availability>>({
     email: EMPTY_AVAILABILITY,
@@ -219,7 +221,23 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
           return;
         }
 
-        const result = await authClient.signUp.email({ name: requestedAccountName, email, password, callbackURL });
+        if (!acceptTerms) {
+          setError('You must accept the Terms of Service before creating an account.');
+          return;
+        }
+
+        // The server endpoint accepts the versioned consent fields. The generated
+        // client type only knows Better Auth's core fields, so keep this cast local
+        // rather than weakening the auth client throughout the app.
+        const signUpInput = {
+          name: requestedAccountName,
+          email,
+          password,
+          callbackURL,
+          acceptTerms: true,
+          termsVersion: TERMS_VERSION,
+        } as Parameters<typeof authClient.signUp.email>[0];
+        const result = await authClient.signUp.email(signUpInput);
         if (result.error !== null) {
           setError(errorMessage(result.error));
         } else {
@@ -311,6 +329,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
     setAccountName('');
     setDisplayName('');
     setPhone('');
+    setAcceptTerms(false);
     setEmail('');
     setAvailability({ email: EMPTY_AVAILABILITY });
   }
@@ -472,6 +491,20 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
                 required
               />
             </div>
+          )}
+
+          {mode === 'sign-up' && (
+            <label className="auth-terms-accept" htmlFor="auth-terms">
+              <input
+                id="auth-terms"
+                name="acceptTerms"
+                type="checkbox"
+                checked={acceptTerms}
+                onChange={(event) => setAcceptTerms(event.target.checked)}
+                required
+              />
+              <span>I agree to the <Link href="/terms-of-service" target="_blank" rel="noreferrer">CollectTT Terms of Service</Link>.</span>
+            </label>
           )}
 
           {mode === 'sign-in' && (

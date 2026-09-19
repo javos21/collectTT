@@ -27,6 +27,20 @@ export const auth = betterAuth({
       verification: schema.verifications,
     },
   }),
+  user: {
+    additionalFields: {
+      termsVersion: {
+        type: 'string',
+        required: true,
+        returned: false,
+      },
+      acceptTerms: {
+        type: 'boolean',
+        required: true,
+        returned: false,
+      },
+    },
+  },
   secret: config.BETTER_AUTH_SECRET,
   baseURL: config.BETTER_AUTH_URL,
   trustedOrigins: [config.APP_URL],
@@ -60,6 +74,10 @@ export const auth = betterAuth({
   plugins: [
     emailOTP({
       overrideDefaultEmailVerification: true,
+      // Account creation is the explicit email/password flow, where the
+      // versioned Terms checkbox is enforced. OTP sign-in must not create a
+      // second account-creation path that could bypass that consent.
+      disableSignUp: true,
       otpLength: 6,
       expiresIn: 10 * 60,
       allowedAttempts: 5,

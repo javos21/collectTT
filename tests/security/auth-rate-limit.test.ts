@@ -32,6 +32,7 @@ vi.mock('@/lib/rate-limit', () => ({
 }));
 
 const { GET, POST } = await import('../../src/app/api/auth/[...all]/route');
+const { TERMS_VERSION } = await import('../../src/lib/legal');
 
 describe('authentication rate-limit boundary', () => {
   beforeEach(() => {
@@ -96,6 +97,33 @@ describe('authentication rate-limit boundary', () => {
     expect(response.status).toBe(429);
     expect(response.headers.get('Retry-After')).toBe('37');
     expect(delegatedPost).not.toHaveBeenCalled();
+  });
+
+  it('rejects account creation without current Terms acceptance', async () => {
+    const request = new Request('http://localhost/api/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'new@example.com' }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'TERMS_ACCEPTANCE_REQUIRED' });
+    expect(delegatedPost).not.toHaveBeenCalled();
+  });
+
+  it('passes a signup through only when the checkbox and version are present', async () => {
+    const request = new Request('http://localhost/api/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'new@example.com', acceptTerms: true, termsVersion: TERMS_VERSION }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    expect(delegatedPost).toHaveBeenCalledWith(request);
   });
 
   it('does not rate-limit unrelated authenticated session reads', async () => {

@@ -19,19 +19,24 @@ import { eq } from 'drizzle-orm';
 import { db, pool } from '../src/db/client';
 import { images } from '../src/db/schema/images';
 import { profiles } from '../src/db/schema/profiles';
-import { createUploadTicket, confirmUpload } from '../src/services/images';
+import { createUploadTicket, confirmUpload, deleteImage } from '../src/services/images';
 import { getObject } from '../src/lib/storage';
 
 async function main(): Promise<void> {
+  let owner: string | undefined;
+  let imageId: string | undefined;
+
+  try {
   // Any existing member will do as the image owner.
   const owners = await db.select({ id: profiles.userId }).from(profiles).limit(1);
-  const owner = owners[0]?.id;
+  owner = owners[0]?.id;
   if (owner === undefined) {
     throw new Error('No profiles found. Run `npm run seed:dev` first.');
   }
 
   console.log('1. requesting a presigned upload…');
   const ticket = await createUploadTicket(owner, 'image/webp');
+  imageId = ticket.imageId;
   console.log(`   image ${ticket.imageId}`);
 
   console.log('2. uploading straight to storage (the web process never sees the bytes)…');
@@ -100,11 +105,16 @@ async function main(): Promise<void> {
   console.log('   0 jobs re-queued');
 
   console.log('\nPASS — Phase 0 pipeline verified end to end.');
-  await pool.end();
+  } finally {
+    if (owner !== undefined && imageId !== undefined) {
+      await deleteImage(imageId, owner);
+      console.log(`   cleaned up image ${imageId} and its storage variants`);
+    }
+    await pool.end();
+  }
 }
 
-main().catch(async (error: unknown) => {
+main().catch((error: unknown) => {
   console.error('\nFAIL', error);
-  await pool.end();
   process.exit(1);
 });

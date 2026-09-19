@@ -51,11 +51,14 @@ export async function processImage(payload: Payload, helpers: Helpers): Promise<
   try {
     const original = await getObject(row.key);
     const meta = await sharp(original).metadata();
+    // Sharp 0.35's Metadata.format type omits the legacy AVIF literal even though
+    // the runtime decoder still reports it. Keep the accepted legacy format explicit.
+    const format = meta.format as string | undefined;
     const width = meta.width ?? 0;
     const height = meta.height ?? 0;
     // New uploads are required to be WebP by confirmUpload. These legacy formats are
     // still accepted here so jobs created before the compression change can finish.
-    if (meta.format !== 'jpeg' && meta.format !== 'png' && meta.format !== 'webp' && meta.format !== 'avif') {
+    if (format !== 'jpeg' && format !== 'png' && format !== 'webp' && format !== 'avif') {
       throw new Error('Uploaded image format is not supported.');
     }
     if (width <= 0 || height <= 0) throw new Error('Uploaded image has no usable dimensions.');
@@ -92,7 +95,7 @@ export async function processImage(payload: Payload, helpers: Helpers): Promise<
         variants,
         width,
         height,
-        contentType: meta.format === 'jpeg' ? 'image/jpeg' : meta.format === 'png' ? 'image/png' : meta.format === 'avif' ? 'image/avif' : UPLOAD_CONTENT_TYPE,
+        contentType: format === 'jpeg' ? 'image/jpeg' : format === 'png' ? 'image/png' : format === 'avif' ? 'image/avif' : UPLOAD_CONTENT_TYPE,
         bytes: original.byteLength,
         processedAt: sql`now()`,
       })

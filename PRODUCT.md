@@ -36,7 +36,12 @@ append-only audit trail. Admin impersonation is not supported.
   Newest/Ending Soon sorting.
 - Seller-defined reusable meetup and payment choices, with cash meetup and direct bank
   transfer as the v1 payment methods. CollectTT does not store bank details or funds.
-- Fixed-price listings may accept buyer offers below the asking price.
+- Cash meetups use one buyer action after the exchange: **I paid and collected the
+  item** records payment and receipt together. Historical hand-off/receipt rows remain
+  readable but are not the launch experience.
+- Fixed-price listings may opt into buyer offers below the asking price; pending offers
+  do not reserve the listing, and seller acceptance atomically opens a normal deal at
+  the offered amount.
 - Deliberate atomic fixed-price reservation and binding bids with two-minute
   anti-sniping, winner/default fallback, deadlines, reminders, disputes, and
   idempotent automation.
@@ -61,9 +66,9 @@ must not be placed on the v1 critical path.
 ## Legacy compatibility
 
 Historical custody records, store applications, and their schema are retained for
-controlled inspection and migration planning. Fixed-price offers remain supported in
-v1; the single `COLLECTTT_LAUNCH_SCOPE=v1` flag prevents new writes into the remaining
-legacy paths. Setting the flag to `legacy` is reserved for rollback/testing.
+controlled inspection and migration planning. Fixed-price offers are a supported v1
+flow; the single `COLLECTTT_LAUNCH_SCOPE=v1` flag prevents new writes into the
+remaining legacy paths. Setting the flag to `legacy` is reserved for rollback/testing.
 
 ## Design and legal principles
 

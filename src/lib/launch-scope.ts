@@ -55,7 +55,9 @@ export function isV1Launch(): boolean {
 }
 
 export function isLegacyFeatureAllowed(feature: LegacyFeature): boolean {
-  if (feature === 'store_custody' || feature === 'offers') return true;
+  // Fixed-price offers are deliberately first-class in v1. Store custody and the
+  // remaining legacy rails stay available only under the explicit legacy switch.
+  if (feature === 'offers') return true;
   return !isV1Launch();
 }
 

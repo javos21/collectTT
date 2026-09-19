@@ -317,6 +317,12 @@ export default async function DealPage({
       {flash.done === 'meetup-complete' && <div className="alert alert--info">Meetup confirmed. This deal is complete.</div>}
       {flash.done === 'dispute-submitted' && <div className="alert alert--info" role="status">Your dispute was submitted. CollectTT support will review this deal.</div>}
 
+      {t.settlementMethod === 'bank_transfer' && (
+        <p className="deal-payment-disclaimer" role="note">
+          Payments made directly to another user are not protected by CollectTT.
+        </p>
+      )}
+
       {contact !== null && (
         <section className="deal-contact-card" aria-labelledby="deal-contact-title">
           <div><Phone aria-hidden="true" /><h2 id="deal-contact-title">Contact {contact.displayName}</h2></div>

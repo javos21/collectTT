@@ -12,13 +12,26 @@
 type Check = { label: string; run: () => Promise<void> };
 
 const baseUrl = (process.env.COLLECTTT_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+const parsedTimeoutMs = Number(process.env.COLLECTTT_VERIFY_TIMEOUT_MS ?? 10_000);
+const requestTimeoutMs = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 10_000;
 
 function url(path: string): string {
   return `${baseUrl}${path}`;
 }
 
 async function get(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(url(path), { ...init, redirect: 'manual' });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    return await fetch(url(path), { ...init, redirect: 'manual', signal: controller.signal });
+  } catch (error) {
+    const detail = error instanceof Error && error.name === 'AbortError'
+      ? `timed out after ${requestTimeoutMs}ms`
+      : error instanceof Error ? error.message : String(error);
+    throw new Error(`could not reach ${url(path)} (${detail}); start the web process and verify COLLECTTT_BASE_URL`);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function expectStatus(path: string, status: number, init?: RequestInit): Promise<Response> {
@@ -94,8 +107,8 @@ const checks: Check[] = [
     label: 'direct-object mutation probes require a session',
     async run() {
       const requests: Array<[string, Record<string, unknown>]> = [
-        ['/api/profile/display-name', { displayName: 'launch-probe' }],
-        ['/api/deals/not-a-deal/evidence', { note: 'launch-probe' }],
+        ['/api/profile/onboarding', { displayName: 'launch-probe', phone: '+18685550123' }],
+        ['/api/deals/not-a-deal/evidence', { contentType: 'text/plain' }],
         ['/api/deals/not-a-deal/evidence/confirm', { evidenceId: 'not-evidence' }],
       ];
       for (const [path, body] of requests) {

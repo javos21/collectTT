@@ -250,15 +250,17 @@ export async function acceptOfferAction(formData: FormData): Promise<void> {
 
   const listingId = String(formData.get('listingId') ?? '');
   const offerId = String(formData.get('offerId') ?? '');
+  let result: { transactionId: string };
 
   try {
     await enforceUserAndIpRateLimit('listing:offer', user.userId, RATE_LIMITS.offer);
-    const result = await acceptOffer(offerId, user.userId);
-    revalidatePath(`/listings/${listingId}`);
-    redirect(`/deals/${result.transactionId}`);
+    result = await acceptOffer(offerId, user.userId);
   } catch (error) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent(message(error))}`);
   }
+
+  revalidatePath(`/listings/${listingId}`);
+  redirect(`/deals/${result.transactionId}`);
 }
 
 export async function rejectOfferAction(formData: FormData): Promise<void> {

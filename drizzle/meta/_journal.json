@@ -281,6 +281,13 @@
       "when": 1789702620138,
       "tag": "0039_dusty_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789831593923,
+      "tag": "0040_add_terms_acceptance",
+      "breakpoints": true
     }
   ]
 }

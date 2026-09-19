@@ -552,6 +552,7 @@ export default async function ListingPage({
                   <details className="buybox__offer-disclosure">
                     <summary>Make an offer</summary>
                     <div className="buybox__offer-fields">
+                      <p className="buybox__note">This is a proposal, not a reservation. The seller must accept it before a deal opens.</p>
                       <label htmlFor="offerAmount">Your offer</label>
                       <input
                         id="offerAmount"
@@ -560,7 +561,7 @@ export default async function ListingPage({
                         inputMode="decimal"
                         placeholder={(Math.max(1, (listing.priceCents ?? 1) - 1) / 100).toFixed(2)}
                       />
-                      <button className="secondary" type="submit" formAction={submitOfferAction}>Submit offer</button>
+                      <button className="secondary" type="submit" formAction={submitOfferAction} formNoValidate>Submit offer</button>
                     </div>
                   </details>
                 </div>

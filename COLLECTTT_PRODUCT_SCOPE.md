@@ -49,6 +49,8 @@ v1 must include:
 - Drafts, duplication, expiration, relisting, and sold-outside-CollectTT handling.
 - Global keyword search, practical filters, and deterministic sorting.
 - Immediate fixed-price reservation after a deliberate buyer confirmation.
+- Optional fixed-price buyer offers below the asking price, with seller accept/reject
+  controls and an atomic accepted-offer reservation.
 - Binding auctions, anti-sniping, and winner/default handling.
 - Structured cash-meetup and bank-transfer transaction workflows.
 - Seller-defined reusable meetup and payment choices.
@@ -130,7 +132,10 @@ Audit entries must be append-only to ordinary admin users.
 - A listing must be either **fixed price** or **auction**, never both simultaneously.
 - v1 listings are free to create and publish.
 - Lots or bundles are represented as ordinary listings; no special lot engine is required.
-- A listing represents one sellable offer. Multi-quantity inventory behavior is not established and must not be assumed without product-owner approval.
+- A listing represents one sellable item/lot. A fixed-price listing may optionally
+  accept buyer offers below the asking price; an offer is a proposal, not a
+  reservation. Multi-quantity inventory behavior is not established and must not be
+  assumed without product-owner approval.
 
 ### 5.2 Required listing data
 
@@ -201,7 +206,8 @@ Set may be captured where relevant and must be filterable if present. Category-s
 - CollectTT must not store seller bank-account details in v1.
 - The product must avoid presenting bank-transfer screenshots as proof that funds cleared.
 
-The interaction principle is: eliminate negotiation wherever the seller could have defined the answer beforehand.
+The interaction principle is: make the seller's predefined choices the default, while
+allowing an explicit, seller-controlled offer path on fixed-price listings that opt in.
 
 ## 8. Fixed-price commitment flow
 
@@ -224,6 +230,23 @@ The reservation operation must be concurrency-safe: at most one buyer can reserv
 - Support may cancel a transaction and decide whether the outcome is neutral, recorded as an issue, or restriction-worthy.
 - Seller failure must be tracked as seriously as buyer failure.
 - A formal dispute must suspend automatic blame until admin review.
+
+### 8.3 Fixed-price offers
+
+Offers are a supported v1 product flow, separate from auction fallback offers:
+
+1. A seller opts a fixed-price listing into offers with `acceptsOffers`.
+2. A buyer chooses one of the seller's allowed meetup/payment choices and submits a
+   price below the asking price. A pending offer does not reserve the listing.
+3. The seller may accept or reject each pending offer. Accepting one atomically
+   reserves the listing and opens the standard transaction at the offered amount.
+4. A buyer may cancel a pending offer before the listing is reserved; an accepted
+   offer cannot be casually cancelled by either party.
+5. Competing pending offers remain auditable while the accepted deal is open and are
+   closed only when the accepted transaction reaches its payment-confirmed point.
+6. Offer creation, acceptance, rejection, cancellation, and notifications are
+   idempotent and authorization-checked. Every transition is visible in the
+   listing/deal history and is safe to retry.
 
 ## 9. Auction rules
 
@@ -281,6 +304,11 @@ The implementation should support the following canonical state model or a demon
 
 The implementation may use more granular states, but it must preserve the transition rules, responsible actor, timestamps, and a complete event timeline.
 
+For launch v1 cash meetups, the buyer's single **I paid and collected the item**
+action records both milestones atomically and may move directly from an open deal to
+`COMPLETED`; `AWAITING_CONFIRMATION` remains relevant to bank-transfer or historical
+multi-step rows.
+
 ### 10.2 Transaction event record
 
 Each meaningful transition must create an immutable event containing:
@@ -295,10 +323,15 @@ Each meaningful transition must create an immutable event containing:
 ### 10.3 Cash meetup flow
 
 1. Parties coordinate after phone-number disclosure.
-2. Seller marks **Item handed over**.
-3. Buyer confirms **Item received**.
-4. The transaction becomes `COMPLETED`.
-5. The transaction may auto-complete after a configured confirmation period if the buyer does not report a problem.
+2. At the physical meetup, the buyer hands over cash and receives the item.
+3. The buyer completes one action: **I paid and collected the item**.
+4. The server atomically records payment confirmed and item received, then completes
+   the transaction. The action is idempotent and safe to retry.
+5. The seller is notified of completion and may report a problem through support;
+   dispute handling remains available after the meetup.
+
+The older seller-handoff/buyer-receipt handshake remains readable for historical
+transactions, but it is not the launch v1 cash-meetup experience.
 
 ### 10.4 Bank-transfer flow
 
@@ -458,6 +491,7 @@ Required email events include, where relevant to the recipient:
 - auction ending, won, or lost;
 - anti-snipe extension;
 - next-highest-bidder offer;
+- fixed-price offer received, accepted, rejected, or cancelled;
 - payment marked sent;
 - payment confirmed/received;
 - handoff/item-received status change;
@@ -587,7 +621,8 @@ The following decisions remain unresolved and must be surfaced—not guessed—d
 3. Exact predefined auction duration choices.
 4. Minimum bid increment rules.
 5. Exact transaction deadlines by payment/fulfillment type.
-6. Auto-completion delay after handoff or a pending confirmation.
+6. Auto-completion policy for historical handoff rows and any bank-transfer milestone
+   that still requires a pending confirmation.
 7. Next-highest-bidder offer window and how many bidders may be offered sequentially.
 8. Exact restriction thresholds, lookback windows, and durations.
 9. Definition and display window for “recent transaction issues.”
@@ -610,7 +645,6 @@ For avoidance of doubt, v1 must not be delayed to add:
 - in-app chat;
 - exact meetup scheduling;
 - seller approval of buyers;
-- offers or price negotiation;
 - simultaneous Buy Now and Auction modes;
 - public reviews, ratings, or trust scores;
 - government-ID/KYC verification;
@@ -638,7 +672,20 @@ A new buyer with one active reservation attempts another reservation or an aucti
 
 ### Scenario C — Cash meetup completion
 
-The seller marks the item handed over, the buyer confirms receipt, the transaction completes once, both Trust Snapshots update correctly, and retrying either request creates no duplicate events.
+The buyer completes the single **I paid and collected the item** action after the
+meetup. Payment and receipt are recorded atomically, the transaction completes once,
+both Trust Snapshots update correctly, and retrying the request creates no duplicate
+events.
+
+### Scenario N — Fixed-price offer acceptance
+
+A seller opts a fixed-price listing into offers. A buyer submits a below-ask offer
+with an allowed meetup/payment choice; the listing remains active while it is
+pending. The seller accepts one offer, the listing is reserved atomically, the
+accepted offer opens a normal deal at the offered amount, and competing offers remain
+auditable until the accepted deal reaches payment confirmation. Replaying submit,
+accept, reject, or cancel requests creates no duplicate offer, reservation, event, or
+notification.
 
 ### Scenario D — Bank-transfer evidence
 

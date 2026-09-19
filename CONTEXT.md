@@ -21,12 +21,18 @@ Private contact information collected during onboarding and disclosed only to th
 _Avoid_: Verified phone, public contact detail, Trust signal
 
 **Listing**:
-One sellable fixed-price or auction offer with its own immutable lifecycle record.
-_Avoid_: Post, inventory item, lot engine
+One sellable fixed-price item/lot or auction item with its own immutable lifecycle record.
+_Avoid_: Post, inventory item, offer
 
 **Reservation**:
 An exclusive, binding fixed-price purchase commitment between one buyer and one Listing.
 _Avoid_: Claim, seller approval
+
+**Fixed-price Offer**:
+A buyer's below-asking proposal on a fixed-price Listing that has opted into offers. It
+becomes a Transaction only when the seller accepts it; while pending, it is not a
+Reservation.
+_Avoid_: Bid, Reservation, fallback offer
 
 **Bid**:
 A binding auction commitment by a buyer at an explicit amount.
@@ -37,7 +43,8 @@ A time-limited invitation to a prior eligible bidder after an auction winner def
 _Avoid_: Promotion, automatic runner-up commitment
 
 **Transaction**:
-The coordinated completion attempt created by a Reservation, auction win, or accepted Fallback Offer.
+The coordinated completion attempt created by a Reservation, an accepted Fixed-price
+Offer, an auction win, or an accepted Fallback Offer.
 _Avoid_: Deal, payment
 
 **Milestone**:
@@ -51,6 +58,11 @@ _Avoid_: Payment rejection, report alone
 **Meetup Option**:
 A reusable seller-defined location that a buyer may select when the seller enables it for a Listing.
 _Avoid_: Appointment, scheduled meetup
+
+**Cash Meetup**:
+A direct exchange where the buyer pays cash and receives the item at a seller-defined
+Meetup Option, then confirms the completed exchange once.
+_Avoid_: Handoff/receipt handshake, scheduled appointment
 
 **Payment Option**:
 A seller-enabled method for paying directly outside CollectTT, limited in v1 to cash meetup and direct bank transfer.

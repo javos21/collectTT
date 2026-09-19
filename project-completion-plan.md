@@ -22,6 +22,9 @@ Required v1 capabilities:
   Sold outside CollectTT;
 - deterministic browse/search/filtering;
 - seller-defined cash-meetup and direct bank-transfer choices;
+- optional fixed-price buyer offers below asking price, with seller accept/reject and
+  atomic accepted-offer reservation;
+- launch cash meetups completed by one buyer confirmation after payment and collection;
 - atomic reservations, binding bids, repeated two-minute anti-sniping, deadlines,
   disputes, progressive restrictions, transactional email, and audited admin actions;
 - factual Trust Snapshots, contextual support/reporting, privacy and authenticity
@@ -46,7 +49,7 @@ legacy is a controlled rollback/test mode only.
 | 1 | Identity, eligibility, and privacy foundation | Docker-verified; staging/provider pending | Migration applied to local Docker Postgres, full suite passes, Render staging migration and OTP provider smoke test remain. |
 | 2 | Listing lifecycle and discovery | Docker-verified; staging pending | Seller defaults/meetups, draft/resume, duplicate/relist, sold-outside, fixed expiration, location filtering, all-type browse, auction Ending Soon, and keyset cursor support are implemented; local acceptance coverage passes, while staging verification remains. |
 | 3 | Commitment and transaction workflows | Docker-verified locally; staging pending | Fixed-price Reserve / buy acknowledgement, durable meetup/payment choices, atomic commitment cap, structured unavailable/restricted outcomes, and retry-safe reservation path. |
-| 4 | Direct transaction workflows, evidence, deadlines, and disputes | Docker-verified locally; staging/provider pending | Cash hand-off/receipt and auto-completion, bank-transfer evidence authorization, direct-payment disclaimer, reminder/expiry scheduling, dispute pause, support deadline extension, and audited dispute outcomes. |
+| 4 | Direct transaction workflows, evidence, deadlines, and disputes | Docker-verified locally; staging/provider pending | Single-action cash meetup completion, legacy hand-off/receipt readability, bank-transfer evidence authorization, direct-payment disclaimer, reminder/expiry scheduling, dispute pause, support deadline extension, and audited dispute outcomes. |
 | 5 | Auction close, fallback, and trust | Development-complete locally; acceptance tests pending | Binding bid acknowledgement, anti-sniping, winner default, explicit expiring runner-up offers, admin bid invalidation, and ladder recomputation are implemented; Docker migration is applied, while acceptance/browser checks remain. |
 | 6 | Admin, support, notifications, and launch operations | Development-complete locally; acceptance/operations pending | Independent trust restriction scopes, configurable progressive policy, factual public snapshots, private contextual support cases, audited trust/listing/support interventions, and seller notifications are implemented; provider health, monitoring, backups/restore, legal review, and staged beta remain. |
 
@@ -56,10 +59,11 @@ legacy is a controlled rollback/test mode only.
 - [x] Rewrite README and PRODUCT around the marketplace v1 contract.
 - [x] Mark the old product-design and Phase 2 custody documents historical.
 - [x] Add one v1/legacy launch flag with v1 as the safe default.
-- [x] Reject prohibited fulfillment, payment, offer, reserve, buyout, and seller-window
-      inputs in the listing service.
+- [x] Reject prohibited fulfillment, payment, reserve, buyout, and seller-window inputs
+      in the listing service while preserving the explicit v1 fixed-price offer opt-in.
 - [x] Hide Store entry/application/counter routes in v1 and reject their server writes.
-- [x] Hide offer creation/accept/reject controls in v1 while retaining historical reads.
+- [x] Keep fixed-price offer creation/accept/reject controls in v1; hide only the
+      remaining legacy custody/store controls while retaining historical reads.
 - [x] Add the route/state inventory covering public, member, admin, API, and legacy routes.
 - [ ] Review the inventory with the product owner and approve any open policy values.
 
@@ -101,11 +105,12 @@ acceptance tests for relisting, expiration, and deterministic browsing.
 ### 3. Commitment and transaction
 
 Align the existing granular payment/custody implementation with the v1-equivalent
-transaction lifecycle. Implement deliberate reservation confirmation, cash handoff and
-receipt milestones, bank-transfer evidence-only uploads, seller confirmation of cleared
-funds, platform deadlines/reminders/expiry, support extensions, dispute pause, and
-contextual reporting. Preserve direct-payment disclaimers and event timelines. Prove
-concurrency, retry idempotency, and objective expiry with database-backed tests.
+transaction lifecycle. Implement deliberate reservation confirmation, the single buyer
+cash-meetup completion action, bank-transfer evidence-only uploads, seller confirmation
+of cleared funds, platform deadlines/reminders/expiry, support extensions, dispute
+pause, and contextual reporting. Preserve direct-payment disclaimers, legacy
+hand-off/receipt readability, and event timelines. Prove concurrency, retry
+idempotency, and objective expiry with database-backed tests.
 
 ### 4. Auctions and behavioral trust
 
@@ -136,7 +141,9 @@ For every slice, verify:
 - mobile keyboard/focus/contrast behavior;
 - focused tests, typecheck, production build, and git diff check.
 
-Current safe checks: `npm run typecheck`, `npm run build`, `npm run verify:offline`,
-`npx drizzle-kit check`, `git diff --check`, and the full Docker-backed suite pass in
-this worktree (20 files, 216 tests). Render staging/provider/browser checks remain
-outside this local verification.
+Current safe checks: `npm run typecheck`, `npm run verify:offline`,
+`npm run build`, `npx drizzle-kit check`, `git diff --check`, and the focused
+unit/security suite pass in this worktree (107 tests). The HTTP preflight remains
+outstanding. Remote synthetic mutation flows (Phase 0 image pipeline, Phase 1 trading
+loop, and legacy-only Phase 2 custody) also pass; staging/provider/browser checks and
+production smoke tests remain outside this verification.

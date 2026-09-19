@@ -46,7 +46,12 @@ const scheduledJobKeys: string[] = [];
 
 async function mkUser(id: string) {
   await db.insert(users).values({ id, name: id, email: `${id}@verify.local`, emailVerified: true });
-  await db.insert(profiles).values({ userId: id, displayName: id, handle: id });
+  await db.insert(profiles).values({
+    userId: id,
+    displayName: id,
+    handle: id,
+    phoneE164: `+1868555${String(Math.abs(id.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 10000).padStart(4, '0')}`,
+  });
   await db.insert(reputationCounters).values({ userId: id });
 }
 

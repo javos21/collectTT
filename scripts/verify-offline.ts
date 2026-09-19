@@ -53,17 +53,33 @@ const checks: Check[] = [
     },
   },
   {
-    label: 'legacy write paths are explicitly quarantined',
+    label: 'offers stay in v1 while Store custody remains legacy-only',
     run: () => {
       contains('src/services/offers.ts', "assertLegacyFeatureAllowed('offers')");
       contains('src/app/admin/stores/actions.ts', "assertLegacyFeatureAllowed('store_custody')", 'requireAdminAction');
+      const scope = read('src/lib/launch-scope.ts');
+      if (!scope.includes("if (feature === 'offers') return true;")) {
+        throw new Error('launch scope must explicitly keep fixed-price offers available in v1');
+      }
+      if (scope.includes("feature === 'store_custody' || feature === 'offers'")) {
+        throw new Error('launch scope must not allow Store custody in v1');
+      }
+    },
+  },
+  {
+    label: 'launch product includes offers and the simplified cash meetup action',
+    run: () => {
+      contains('COLLECTTT_PRODUCT_SCOPE.md', '### 8.3 Fixed-price offers', '### 10.3 Cash meetup flow', 'I paid and collected the item');
+      contains('src/services/offers.ts', 'commitmentAcknowledged: true');
+      contains('src/app/deals/[id]/actions.ts', 'completeCashMeetupAction', 'completeCashMeetup(tx, id, user.userId)');
+      contains('src/app/deals/[id]/page.tsx', 'completeCashMeetupAction', 'I paid and collected the item');
     },
   },
   {
     label: 'public Store routes are hidden in v1',
     run: () => {
       for (const route of ['src/app/store/page.tsx', 'src/app/store/[storeId]/page.tsx', 'src/app/store/apply/page.tsx']) {
-        contains(route, 'isV1Launch()', 'notFound()');
+        contains(route, "isLegacyFeatureAllowed('store_custody')", 'notFound()');
       }
     },
   },

@@ -12,11 +12,11 @@ controlled rollback, but they are not allowed to create new v1 activity.
 | `/` | Keep | loading, empty marketplace, active inventory, unavailable/error | Marketplace discovery and disclaimer surface. |
 | `/listings` | Keep | query, filters, pagination, no results, stale result, error | Newest default; no recommendation feed. |
 | `/listings/new` | Keep | signed out, phone-unverified, restricted, validation error, upload failure, draft/publish success | Only fixed-price/auction, cash meetup, cash/bank transfer. Server gate is authoritative. |
-| `/listings/[id]` | Keep | active, reserved, sold, expired, sold outside, draft owner-only, unauthorized, bid/claim unavailable | Public display name only; offers are available for fixed-price listings, while legacy custody controls remain hidden in v1. |
-| `/listings/[id]/edit` | Keep | owner, locked after commitment/bid, invalid input, cancelled, legacy read-only refusal | v1 hides offer and seller-authored payment-window controls. |
+| `/listings/[id]` | Keep | active, reserved, sold, expired, sold outside, draft owner-only, unauthorized, bid/claim unavailable | Public display name only; fixed-price offers are available when the seller opts in, while legacy custody controls remain hidden in v1. |
+| `/listings/[id]/edit` | Keep | owner, locked after commitment/bid, invalid input, cancelled, legacy read-only refusal | v1 exposes the seller's offer opt-in and hides seller-authored payment-window controls. |
 | `/deals` | Keep | no deals, action-needed, completed, expired/cancelled, disputed, authorization failure | Transaction inbox; direct-payment disclaimer. |
 | `/deals/[id]` | Keep | buyer/seller party view, pre-commitment denial, open, milestone confirmation, disputed, completed, expired | Phone disclosure only after valid commitment and only to counterparties. |
-| `/me` | Keep | signed out, account, listings, bids/offers (legacy history), deals, restrictions, phone OTP states | Account name private; display name public. Legacy offers remain readable where supported. |
+| `/me` | Keep | signed out, account, listings, bids/offers, deals, restrictions, phone OTP states | Account name private; display name public. Fixed-price offer history remains visible alongside auction activity. |
 | `/members/[id]` | Keep | public profile, no profile, private-field denial | Trust Snapshot has facts only; no handle/phone/ratings. |
 | `/sign-in` | Keep | sign-in, sign-up, email verification pending/failed, validation, provider error | Collect private account name and separate public display name. |
 | `/forgot-password` | Keep | request, unknown email, sent, rate limited, delivery failure | Email-only recovery. |

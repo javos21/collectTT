@@ -299,13 +299,7 @@ describe('★ atomic straight-sale claim', () => {
   });
 });
 
-describe('★ fixed-price offers (legacy compatibility)', () => {
-  const previousLaunchScope = process.env.COLLECTTT_LAUNCH_SCOPE;
-  beforeAll(() => { process.env.COLLECTTT_LAUNCH_SCOPE = 'legacy'; });
-  afterAll(() => {
-    if (previousLaunchScope === undefined) delete process.env.COLLECTTT_LAUNCH_SCOPE;
-    else process.env.COLLECTTT_LAUNCH_SCOPE = previousLaunchScope;
-  });
+describe('★ fixed-price offers (v1)', () => {
   it('records one pending offer without reserving the listing', async () => {
     const listingId = await makeListing({ priceCents: 10_000, acceptsOffers: true });
 
@@ -448,6 +442,7 @@ describe('★ fixed-price offers (legacy compatibility)', () => {
     expect(opened?.offerId).toBe(first.id);
     expect(opened?.buyerId).toBe(buyers[2]);
     expect(opened?.amountCents).toBe(8_000);
+    expect(opened?.handoffState).toBe('awaiting_handoff');
 
     // An accepted offer uses the normal buyer expiry path and respects the listing's
     // auto-relist setting, rather than leaving the listing permanently claimed.

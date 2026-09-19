@@ -6,6 +6,15 @@ viewports, and the real worker/image queue has been verified. This document sepa
 those local exits from gates that require staging credentials, production-like data,
 or a human owner.
 
+Verification note (2026-09-19): the database-free preflight is passing (17/17), the
+focused unit/security set is passing (107 tests), and the Next 16 production build is
+passing with deterministic single-worker page-data collection. The HTTP preflight could
+not reach a running local web process in this environment, so that gate still needs a
+local or staging rerun. The Supabase mutation flows (Phase 0 image pipeline, Phase 1
+trading loop, and legacy-only Phase 2 custody sweep) also passed; their synthetic rows
+and storage objects were cleaned up. Three unrelated pre-existing overdue worker jobs
+remain in the remote queue and are recorded separately from this verification.
+
 ## Repeatable local checks
 
 Start Docker Postgres/object storage, the web process, and the worker with local
@@ -44,16 +53,18 @@ Do not use production credentials or production member data for this local pass.
 
 | Gate | Local status | Staging/production owner |
 | --- | --- | --- |
-| Typecheck, build, offline, full Vitest, Drizzle check | Pass | Re-run in CI/staging |
-| Public route, readiness, redirect, 404, and direct-object HTTP preflight | Pass | Re-run against staging |
+| Typecheck, offline, focused Vitest, Drizzle check | Pass | Re-run in CI/staging |
+| Production build | Pass (single-worker page-data collection) | Re-run in CI/staging |
+| Public route, readiness, redirect, 404, and direct-object HTTP preflight | Blocked: no reachable local web process | Re-run against staging |
 | Desktop/mobile accessibility smoke | Pass locally | Add/execute the full A–L browser suite |
-| Real worker enqueue, processing, and idempotency | Pass locally | Exercise deadline, provider-failure, and recovery drills in staging |
+| Real worker enqueue, processing, and idempotency | Pass locally and against Supabase synthetic data | Exercise deadline, provider-failure, and recovery drills in staging |
 | Notification retry and admin retry intervention | Covered by flow/security tests | Verify with a real provider failure and an audited admin retry |
+| Account Terms acceptance | Implemented: required checkbox, server/API guard, and stored Terms version | Confirm final legal copy/version and run a staging sign-up acceptance audit |
 | Migration forward rehearsal and rollback/forward-fix procedure | Pending | Run on an isolated production-like copy |
 | Brevo email and phone-provider verification | Pending | Configure staging credentials and run delivery probes |
 | Public image versus private evidence restore | Pending | Complete backup and restore drill |
 | Approximately 100 active listings and staged beta gates | Pending | Seller recruitment, alpha, trusted pilot, invite-only beta |
-| Final legal approval and monitoring alerts | Pending | Product, legal, and operations sign-off |
+| Final legal approval and monitoring alerts | Working drafts generated; operator/provider/retention placeholders remain | Product, legal, and operations sign-off; replace bracketed placeholders before public launch |
 
 The local implementation is ready for staging rehearsal; Milestone 8 should not be
 called a public-launch exit until the pending external gates have owners and evidence.

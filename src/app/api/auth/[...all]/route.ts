@@ -6,6 +6,7 @@ import {
   enforceAuthRateLimit,
   RateLimitExceeded,
 } from '@/lib/rate-limit';
+import { hasAcceptedTerms } from '@/lib/legal';
 
 const handler = toNextJsHandler(auth);
 
@@ -110,6 +111,23 @@ async function rejectMemberNameChange(request: Request): Promise<Response | null
   );
 }
 
+async function requireTermsAcceptance(request: Request): Promise<Response | null> {
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/^\/api\/auth/, '') || '/';
+  if (request.method !== 'POST' || path !== '/sign-up/email') return null;
+
+  const body: unknown = await request.clone().json().catch(() => null);
+  if (hasAcceptedTerms(body)) return null;
+
+  return Response.json(
+    {
+      code: 'TERMS_ACCEPTANCE_REQUIRED',
+      message: 'You must accept the current CollectTT Terms of Service before creating an account.',
+    },
+    { status: 400 },
+  );
+}
+
 export async function GET(request: Request) {
   const rejected = await enforceAuthRequestLimit(request);
   return rejected ?? handler.GET(request);
@@ -119,5 +137,7 @@ export async function POST(request: Request) {
   const nameChangeRejected = await rejectMemberNameChange(request);
   if (nameChangeRejected !== null) return nameChangeRejected;
   const rejected = await enforceAuthRequestLimit(request);
-  return rejected ?? handler.POST(request);
+  if (rejected !== null) return rejected;
+  const termsRejected = await requireTermsAcceptance(request);
+  return termsRejected ?? handler.POST(request);
 }

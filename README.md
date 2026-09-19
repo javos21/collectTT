@@ -28,6 +28,7 @@ v1 includes:
 - manual fixed-price and auction listings, drafts, duplication, expiration, relisting,
   and Sold outside CollectTT;
 - fixed-price listings with optional buyer offers below the asking price;
+- cash meetups completed by one buyer confirmation after payment and collection;
 - global search, practical filters, deterministic sorting, and factual Trust Snapshots;
 - atomic reservations, binding bids, repeated two-minute anti-sniping, deadlines,
   reminders, disputes, progressive restrictions, and audited admin intervention;

@@ -212,7 +212,11 @@ export async function acceptOffer(
       listingTitle: row.listing_title,
       paymentWindowHours: Number(row.payment_window_hours),
       settlementMethod,
-      commitmentAcknowledged: false,
+      // Seller acceptance is the commitment moment for an offer. Mark the deal as
+      // v1-aware so cash meetups use the single buyer "paid and collected" action,
+      // just like a direct reservation. Legacy scope still maps this to the
+      // historical handoff state through initialHandoffState().
+      commitmentAcknowledged: true,
       relayStoreId,
     });
 

@@ -2,6 +2,10 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['pg', 'graphile-worker', 'sharp'],
+  experimental: {
+    // Keep production page-data collection deterministic in constrained CI runners.
+    cpus: 1,
+  },
   // Browser automation stores console/HMR artifacts in the project root. Keep
   // those generated files out of the dev watcher or every HMR event can cause
   // another HMR event.

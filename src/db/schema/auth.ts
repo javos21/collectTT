@@ -13,9 +13,14 @@ export const users = pgTable('user', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
-  emailVerified: boolean('email_verified').notNull().default(false),
-  image: text('image'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    emailVerified: boolean('email_verified').notNull().default(false),
+    image: text('image'),
+    // Version of the Terms of Service accepted at account creation. This is
+    // intentionally nullable for accounts created before acceptance tracking
+    // was introduced; new sign-ups are validated by the auth route.
+    termsVersion: text('terms_version'),
+    acceptTerms: boolean('terms_accepted'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

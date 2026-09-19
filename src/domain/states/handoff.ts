@@ -1,8 +1,8 @@
 /**
- * The peer-to-peer item hand-off track used by v1 cash-meetup transactions.
- * Payment confirmation is not the same thing as receipt: the seller records the
- * hand-off, then the buyer records receipt. Legacy transactions use
- * `not_applicable` and keep their historical two-track behaviour.
+ * The peer-to-peer item hand-off track retained for historical transactions and
+ * granular support/admin transitions. Launch v1 cash meetups use the buyer's single
+ * "paid and collected" action, which moves directly to `buyer_received`. Legacy
+ * transactions use `not_applicable` and keep their historical two-track behaviour.
  */
 
 import type { ActorRole } from './actors';

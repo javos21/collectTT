@@ -17,7 +17,9 @@ The work is nevertheless **large** because several existing domain rules directl
 
 - The current product calls itself a coordination layer rather than a marketplace and makes Store custody a central product rail.
 - A fixed-price purchase is called a claim; offers and seller acceptance are supported.
-- Cash meetups complete when the seller confirms payment. There is no seller handoff plus buyer receipt handshake.
+- Cash meetups use one buyer action after the physical exchange: the buyer confirms
+  they paid and collected the item, and the server records payment and receipt
+  atomically. The older handoff/receipt handshake remains readable for legacy rows.
 - Auctions support buyouts and reserve prices.
 - A defaulting auction winner is automatically replaced by the next bidder, who is immediately committed.
 - Users choose seller-authored payment windows.
@@ -97,7 +99,7 @@ Effort assumes implementation, migrations, UI, notifications, and meaningful aut
 | Reservation concurrency | One conditional update selects a single buyer | Exactly one reservation and transaction | **Implemented** | Preserve; add v1 acceptance coverage |
 | New-buyer commitment cap | No cross-listing active-reservation gate | At most one active reservation for a new buyer | **Missing** | High, 3–5 days because the check must be concurrency-safe |
 | Contact disclosure | Deal pages never fetch participant phones | Reveal both private phone numbers immediately after valid reservation/settlement, only to parties/admin | **Missing** | High, 4–7 days including direct-object tests |
-| Cash meetup lifecycle | Seller payment confirmation completes a P2P transaction | Seller marks handoff; buyer confirms receipt; optional configured auto-completion | **Conflicting** | High, 1.5–2.5 weeks |
+| Cash meetup lifecycle | Seller payment confirmation completes a P2P transaction | Buyer confirms **I paid and collected the item** once; payment and receipt complete atomically | **Implemented** | Preserve idempotency, dispute handling, and legacy-row readability |
 | Bank transfer lifecycle | Mark-paid and seller-confirm-payment exist; confirmation completes direct transactions | Optional evidence, clear disclaimer, cleared-funds confirmation, then handoff/receipt | **Partial / conflicting** | High, 1.5–2.5 weeks |
 | Evidence uploads | Listing images only | Private transaction evidence with strict authorization | **Missing** | High, 4–7 days |
 | Transaction states | One OPEN rollup plus payment/custody tracks; no disputed rollup | Required actions, in-progress, confirmation, disputed pause, terminal outcomes or equivalent | **Partial / conflicting** | High, 2–3 weeks; can evolve tracks rather than flattening |
@@ -157,8 +159,11 @@ Use the following canonical terms going forward:
 - **Listing:** one sellable offer and one immutable lifecycle record.
 - **Reservation:** the exclusive fixed-price commitment linking one buyer to one listing.
 - **Bid:** a binding auction commitment at an explicit amount.
+- **Fixed-price Offer:** an optional below-ask buyer proposal on a fixed-price listing;
+  it is not a reservation until the seller accepts it.
 - **Fallback Offer:** a time-limited invitation to a prior bidder; it is not a commitment until accepted.
-- **Transaction:** the coordinated completion attempt created by a reservation, auction win, or accepted fallback offer.
+- **Transaction:** the coordinated completion attempt created by a reservation, an
+  accepted fixed-price offer, an auction win, or an accepted fallback offer.
 - **Milestone:** an actor-confirmed fact such as payment sent, payment received, item handed over, or item received.
 - **Dispute:** a state that pauses automatic completion, automatic expiry/blame, and ordinary party transitions until admin resolution.
 - **Trust Event:** an immutable platform-established behavioral fact.
@@ -298,7 +303,8 @@ Work:
 - [x] Rename the user-facing action from Claim to Reserve/Buy while retaining the proven atomic SQL pattern.
 - [x] Add the explicit commitment confirmation and persist the chosen meetup/payment options.
 - [x] Atomically create the reservation/transaction, reserve the listing, enqueue deadlines/emails, and unlock contact disclosure.
-- [x] Remove all seller approval/rejection and offer dependencies from this path.
+- [x] Keep the direct reservation path independent of offer state; fixed-price offers
+  use the separate seller accept/reject path and converge on the same transaction flow.
 - [x] Apply the new-buyer active commitment cap inside the same concurrency-safe operation.
 - [x] Add structured unavailable/restricted/unverified outcomes.
 
@@ -314,18 +320,21 @@ Verification:
 **Difficulty:** Very high  
 **Depends on:** Milestone 3
 
-**Implementation status (2026-09-13):** Docker-verified locally. v1 acknowledged meetup
-commitments now require payment confirmation, seller hand-off, and buyer receipt (with
-an idempotent receipt-window auto-completion job). Member reports pause the dispute
-track; support can resume or resolve to a terminal outcome with an audit trail. Bank
-transfer evidence has private storage tickets, confirmation, and party-only download
-authorization, while the exact direct-payment disclaimer is shown in the deal room.
+**Implementation status (2026-09-13):** Docker-verified locally. v1 acknowledged cash
+meetup commitments complete through one idempotent buyer action that records payment
+and receipt together. The older seller hand-off/buyer receipt transitions remain
+readable for historical rows. Member reports pause the dispute track; support can
+resume or resolve to a terminal outcome with an audit trail. Bank-transfer evidence
+has private storage tickets, confirmation, and party-only download authorization,
+while the exact direct-payment disclaimer is shown in the deal room.
 Render staging and storage/provider/browser smoke checks remain pending.
 
 Work:
 
 - [x] Evolve the transaction state model to represent responsible actor and required action without discarding the useful separate tracks.
-- [x] Cash: seller marks item handed over; buyer confirms received; configured buyer-confirmation timeout may auto-complete.
+- [x] Cash meetup: buyer confirms **I paid and collected the item** once after the
+  physical exchange; payment and receipt are recorded atomically. Legacy hand-off /
+  receipt rows remain readable.
 - [x] Bank transfer: buyer marks payment sent and may attach private evidence; seller confirms cleared funds; then the parties complete handoff/receipt.
 - [x] Display the direct-payment disclaimer on every bank-transfer step.
 - [x] Add transaction evidence records and private storage/download authorization.
@@ -337,8 +346,10 @@ Work:
 
 Verification:
 
-- [x] Acceptance scenarios C–F core paths pass locally (cash hand-off/receipt, dispute pause, evidence authorization); staging/provider scenarios remain pending.
-- [x] Replaying the hand-off/receipt transitions creates no duplicate completion events; deadline jobs use stable dedupe keys.
+- [x] Acceptance scenarios C–F core paths pass locally (single-action cash meetup,
+  dispute pause, evidence authorization); staging/provider scenarios remain pending.
+- [x] Replaying the cash-meetup action creates no duplicate completion events;
+  legacy hand-off/receipt and deadline jobs use stable dedupe keys.
 
 ### Milestone 5 — Binding auctions and fallback offers
 
@@ -454,7 +465,9 @@ Exit:
 1. **Inventory production data first.** Count records by listing state/type, transaction state/source, fulfillment path, reserve/buyout usage, offers, custody state, phone presence, and open jobs. Until this is done, production migration complexity is **Unknown**.
 2. **Use additive migrations.** Add v1 states and tables before changing writers. Avoid destructive enum replacement in the first release.
 3. **Add a workflow version.** Mark new v1 listings/transactions separately so legacy records remain interpretable under the rules that created them.
-4. **Quarantine legacy creation.** Stop new offers, reserve/buyout auctions, custody, and seller-authored deadlines before backfilling.
+4. **Quarantine legacy creation.** Stop only legacy offer/custody/reserve/buyout
+   writers and seller-authored deadlines before backfilling; v1 fixed-price offers
+   remain enabled through their dedicated workflow.
 5. **Backfill active records explicitly.** Map draft/active records to v1 only when their required seller choices and verification data are valid. Keep incompatible records legacy or require seller review.
 6. **Preserve history.** Do not rewrite legacy transaction, custody, offer, or audit events into v1 semantics.
 7. **Update constraints with state changes.** In particular, active-transaction uniqueness must include OPEN and DISPUTED, and listing exclusivity must include RESERVED.
@@ -513,7 +526,7 @@ Estimated effort after payment-provider decisions: **3–5 engineer-weeks**.
 
 | Existing behavior | v1 treatment |
 |---|---|
-| Offers and seller acceptance | Feature-disable for new activity; keep legacy history readable |
+| Fixed-price offers and seller acceptance | Supported in v1 for opt-in fixed-price listings; keep historical records readable and keep auction fallback offers distinct |
 | Store applications, relay Store custody, staff roles/routes | Hide from v1 navigation and new listings; preserve historical data; remove only after a separate decision |
 | Remote shipping and full-service delivery | Disable as selectable v1 choices unless the product scope is amended |
 | Reserve prices and auction buyout | Disable for new v1 auctions; preserve legacy display/settlement |

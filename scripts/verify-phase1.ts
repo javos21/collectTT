@@ -20,6 +20,7 @@ import { db, pool } from '../src/db/client';
 import { users } from '../src/db/schema/auth';
 import { profiles, reputationCounters, reputationEvents } from '../src/db/schema/profiles';
 import { listings, claims } from '../src/db/schema/listings';
+import { auctionFallbackOffers } from '../src/db/schema/auction-fallback-offers';
 import { transactions } from '../src/db/schema/transactions';
 import { claimListing } from '../src/db/atomic/claim-listing';
 import { placeBid } from '../src/db/atomic/place-bid';
@@ -34,7 +35,12 @@ const everyone = [seller, buyerA, buyerB];
 
 async function mkUser(id: string) {
   await db.insert(users).values({ id, name: id, email: `${id}@verify.local`, emailVerified: true });
-  await db.insert(profiles).values({ userId: id, displayName: id, handle: id });
+  await db.insert(profiles).values({
+    userId: id,
+    displayName: id,
+    handle: id,
+    phoneE164: `+1868555${String(Math.abs(id.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 10000).padStart(4, '0')}`,
+  });
   await db.insert(reputationCounters).values({ userId: id });
 }
 
@@ -84,8 +90,8 @@ async function main(): Promise<void> {
     .returning({ id: listings.id });
   const auctionId = auctionRows[0]!.id;
 
-  await placeBid({ listingId: auctionId, bidderId: buyerA, amountCents: 6_000 });
-  const second = await placeBid({ listingId: auctionId, bidderId: buyerB, amountCents: 9_000 });
+  await placeBid({ listingId: auctionId, bidderId: buyerA, amountCents: 6_000, commitmentAcknowledged: true });
+  const second = await placeBid({ listingId: auctionId, bidderId: buyerB, amountCents: 9_000, commitmentAcknowledged: true });
   console.log(`   top bid ${formatMoney(second.amountCents)} by buyerB`);
 
   // Bring the deadline forward and let the real worker resolve it.
@@ -108,8 +114,8 @@ async function main(): Promise<void> {
   if (winnerTx.amountCents !== 9_000) throw new Error(`wrong amount: ${winnerTx.amountCents}`);
   console.log(`   worker closed it — buyerB owes ${formatMoney(winnerTx.amountCents)}`);
 
-  // ─────────────────────────────────────────────── 2. renege + runner-up promotion
-  console.log('2. winner never pays — worker should renege and promote the runner-up…');
+  // ─────────────────────────────────────────────── 2. renege + explicit fallback offer
+  console.log('2. winner never pays — worker should send the runner-up an explicit fallback offer…');
   await db
     .update(transactions)
     .set({ paymentDeadlineAt: sql`now() - interval '1 hour'` })
@@ -120,27 +126,26 @@ async function main(): Promise<void> {
     `payment_window:${winnerTx.id}`,
   );
 
-  const promoted = await waitFor('the runner-up to be promoted', async () => {
+  const fallback = await waitFor('the runner-up fallback offer', async () => {
     const rows = await db
       .select()
-      .from(transactions)
+      .from(auctionFallbackOffers)
       .where(
         and(
-          eq(transactions.listingId, auctionId),
-          eq(transactions.state, 'open'),
-          eq(transactions.source, 'auction_runner_up'),
+          eq(auctionFallbackOffers.listingId, auctionId),
+          eq(auctionFallbackOffers.status, 'pending'),
         ),
       )
       .limit(1);
     return rows[0];
   });
 
-  if (promoted.buyerId !== buyerA) throw new Error(`wrong runner-up: ${promoted.buyerId}`);
+  if (fallback.buyerId !== buyerA) throw new Error(`wrong runner-up: ${fallback.buyerId}`);
   // ★ They owe THEIR bid, not the winner's.
-  if (promoted.amountCents !== 6_000) {
-    throw new Error(`runner-up should owe their own bid 6000, got ${promoted.amountCents}`);
+  if (fallback.amountCents !== 6_000) {
+    throw new Error(`runner-up fallback should use their own bid 6000, got ${fallback.amountCents}`);
   }
-  console.log(`   promoted buyerA at THEIR bid ${formatMoney(promoted.amountCents)}`);
+  console.log(`   sent buyerA a fallback offer at THEIR bid ${formatMoney(fallback.amountCents)}`);
 
   const reneged = (
     await db.select().from(transactions).where(eq(transactions.id, winnerTx.id))
@@ -180,6 +185,7 @@ async function main(): Promise<void> {
     listingId: saleId,
     claimantId: buyerA,
     fulfillmentPath: 'cash_meetup',
+    commitmentAcknowledged: true,
   });
   let rejected = false;
   try {
@@ -187,6 +193,7 @@ async function main(): Promise<void> {
       listingId: saleId,
       claimantId: buyerB,
       fulfillmentPath: 'cash_meetup',
+      commitmentAcknowledged: true,
     });
   } catch (error) {
     if (!(error instanceof ConflictError)) throw error;
@@ -234,6 +241,7 @@ async function cleanup(): Promise<void> {
     await q(`delete from reputation_events where transaction_id in ${sub}`, [ids]);
     await q(`delete from transactions where listing_id = any($1)`, [ids]);
     await q(`delete from claims where listing_id = any($1)`, [ids]);
+    await q(`delete from auction_fallback_offers where listing_id = any($1)`, [ids]);
     await q(`delete from bids where listing_id = any($1)`, [ids]);
     await q(`delete from listings where id = any($1)`, [ids]);
   }
