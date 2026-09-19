@@ -22,6 +22,9 @@ export const metadata: Metadata = {
   description: 'A trusted, peer-to-peer home for trading cards, comics and collectibles in Trinidad & Tobago.',
 };
 
+// Navigation is session-sensitive. Keep the shared shell fresh after auth changes.
+export const dynamic = 'force-dynamic';
+
 async function SiteNavigation() {
   const { viewer, isAdmin } = await adminAccess();
   const legacyFeaturesEnabled = !isV1Launch();
@@ -43,23 +46,25 @@ async function SiteNavigation() {
       <nav aria-label="Primary navigation">
         <Link href="/listings"><SearchLg className="nav-icon" aria-hidden="true" />Browse</Link>
         <Link href="/listings/new"><Plus className="nav-icon" aria-hidden="true" />Sell</Link>
-        <Link
-          className="nav-with-badge"
-          href="/deals"
-          aria-label={dealsLabel}
-        >
-          <CoinsSwap01 className="nav-icon" aria-hidden="true" />
-          <span>My Deals</span>
-          {dealsAttentionCount > 0 && (
-            <span className="notification-badge" aria-hidden="true">
-              {dealsAttentionCount > 99 ? '99+' : dealsAttentionCount}
-            </span>
-          )}
-        </Link>
+        {viewer !== null && (
+          <Link
+            className="nav-with-badge"
+            href="/deals"
+            aria-label={dealsLabel}
+          >
+            <CoinsSwap01 className="nav-icon" aria-hidden="true" />
+            <span>My Deals</span>
+            {dealsAttentionCount > 0 && (
+              <span className="notification-badge" aria-hidden="true">
+                {dealsAttentionCount > 99 ? '99+' : dealsAttentionCount}
+              </span>
+            )}
+          </Link>
+        )}
         {stores.length > 0 && <Link href="/store"><Building05 className="nav-icon" aria-hidden="true" />Store</Link>}
         {isAdmin && <Link href="/admin"><ShieldCheck className="nav-icon" aria-hidden="true" />Admin</Link>}
         {viewer === null ? (
-          <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Sign in</Link>
+          <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Log in</Link>
         ) : (
           <ProfileMenu displayName={viewer.displayName} image={viewer.image} signOutAction={signOutAction} />
         )}
@@ -110,7 +115,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link href="/deals">My Deals</Link>
                 <Link href="/sign-in">Sign In</Link>
               </nav>
-              <nav className="site-footer__nav" aria-labelledby="footer-legal-title">
+              <nav className="site-footer__nav site-footer__nav--legal" aria-labelledby="footer-legal-title">
                 <h2 id="footer-legal-title">Legal</h2>
                 <Link href="/privacy-policy">Privacy Policy</Link>
                 <Link href="/terms-of-service">Terms of Service</Link>

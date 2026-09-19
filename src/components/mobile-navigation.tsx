@@ -65,19 +65,21 @@ export function MobileNavigation({ hasStore, isAdmin, signedIn, dealsAttentionCo
           {signedIn ? (
             <Link href="/me" tabIndex={open ? 0 : -1} onClick={closeMenu}><UserCircle aria-hidden="true" /><span>Profile</span></Link>
           ) : (
-            <Link href="/sign-in" tabIndex={open ? 0 : -1} onClick={closeMenu}><UserRound aria-hidden="true" /><span>Sign in</span></Link>
+            <Link href="/sign-in" tabIndex={open ? 0 : -1} onClick={closeMenu}><UserRound aria-hidden="true" /><span>Log in</span></Link>
           )}
           {hasStore && <Link href="/store" tabIndex={open ? 0 : -1} onClick={closeMenu}><Building05 aria-hidden="true" /><span>Store</span></Link>}
           {isAdmin && <Link href="/admin" tabIndex={open ? 0 : -1} onClick={closeMenu}><ShieldCheck aria-hidden="true" /><span>Admin</span></Link>}
-          <Link href="/deals" aria-label={dealsLabel} tabIndex={open ? 0 : -1} onClick={closeMenu}>
-            <CoinsSwap01 aria-hidden="true" />
-            <span>My Deals</span>
-            {dealsAttentionCount > 0 && (
-              <span className="notification-badge" aria-hidden="true">
-                {dealsAttentionCount > 99 ? '99+' : dealsAttentionCount}
-              </span>
-            )}
-          </Link>
+          {signedIn && (
+            <Link href="/deals" aria-label={dealsLabel} tabIndex={open ? 0 : -1} onClick={closeMenu}>
+              <CoinsSwap01 aria-hidden="true" />
+              <span>My Deals</span>
+              {dealsAttentionCount > 0 && (
+                <span className="notification-badge" aria-hidden="true">
+                  {dealsAttentionCount > 99 ? '99+' : dealsAttentionCount}
+                </span>
+              )}
+            </Link>
+          )}
           <Link href="/listings/new" tabIndex={open ? 0 : -1} onClick={closeMenu}><Plus aria-hidden="true" /><span>Sell</span></Link>
           <Link href="/listings" tabIndex={open ? 0 : -1} onClick={closeMenu}><SearchLg aria-hidden="true" /><span>Browse</span></Link>
         </nav>

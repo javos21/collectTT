@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { CategoryDefinition } from '@/domain/categories/types';
 import { AttributeFields } from './attribute-fields';
@@ -85,6 +85,12 @@ export function ListingForm({
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
   const [selectedDeliveryOptionIds, setSelectedDeliveryOptionIds] = useState<string[]>([]);
   const steps = STEPS;
+
+  useEffect(() => {
+    // Step changes happen in place, so route-level scroll restoration cannot help here.
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [step]);
+
   const handleDeliverySelectionChange = useCallback((ids: string[]) => {
     setSelectedDeliveryOptionIds(ids);
   }, []);

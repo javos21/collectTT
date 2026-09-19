@@ -59,7 +59,7 @@ export function HomeListingTile({ row }: { row: HomeListingRow }) {
     <Link className="home-listing-tile" href={`/listings/${row.id}`}>
       <div className="home-listing-tile__image">
         {row.primaryImageId ? (
-          <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" />
+          <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" loading="lazy" decoding="async" />
         ) : (
           <span aria-hidden="true">Collectible preview</span>
         )}

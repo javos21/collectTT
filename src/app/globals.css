@@ -1379,9 +1379,16 @@ tbody tr:hover { background: rgba(8,122,88,.06); }
   gap: 2.5rem;
   align-items: start;
 }
-.listing-main { min-width: 0; }
+.listing-main { display: contents; }
+.gallery { grid-column: 1; grid-row: 1; min-width: 0; }
+.listing-details { grid-column: 1; grid-row: 2; }
+.buybox { grid-column: 2; grid-row: 1 / span 2; }
 @media (max-width: 880px) {
-  .listing-body { grid-template-columns: 1fr; gap: 1.75rem; }
+  .listing-body { grid-template-columns: 1fr; gap: 1.25rem; }
+  .gallery, .buybox, .listing-details { grid-column: 1; grid-row: auto; }
+  .gallery { order: 1; }
+  .buybox { order: 2; }
+  .listing-details { order: 3; margin-top: 0; }
 }
 
 /* gallery — CSS-only hero track + thumbnail rail, native scroll-snap */
@@ -3813,10 +3820,18 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   }
   .site-footer__top {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.5rem;
+    gap: .9rem 1rem;
   }
   .site-footer__nav a { min-height: 44px; }
   .site-footer__brand { grid-column: 1 / -1; }
+  .site-footer__nav--legal {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 1rem;
+  }
+  .site-footer__nav--legal h2 { grid-column: 1 / -1; }
+  .site-footer__nav--legal a { width: auto; }
+  .site-footer__inner { padding-top: 1.75rem; }
   .site-footer__bottom { align-items: flex-start; flex-direction: column; gap: .35rem; }
   .home-sell-prompt {
     align-items: flex-start;
@@ -5535,7 +5550,7 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 .home-listing-tile__image img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   object-position: center;
 }
 
