@@ -2,8 +2,8 @@
  * The single release gate for marketplace features that remain outside the v1 path.
  *
  * v1 is the default. `COLLECTTT_LAUNCH_SCOPE=legacy` is an explicit rollback/test
- * switch for reading and operating historical custody records while the new
- * marketplace is rolled out. Offers are supported in v1.
+ * switch for features that remain outside the current marketplace. Fixed-price
+ * offers and store custody are supported in v1.
  */
 
 export const LAUNCH_SCOPES = ['v1', 'legacy'] as const;
@@ -55,9 +55,9 @@ export function isV1Launch(): boolean {
 }
 
 export function isLegacyFeatureAllowed(feature: LegacyFeature): boolean {
-  // Fixed-price offers are deliberately first-class in v1. Store custody and the
-  // remaining legacy rails stay available only under the explicit legacy switch.
-  if (feature === 'offers') return true;
+  // Fixed-price offers and the staffed Store custody flow are deliberately
+  // first-class in v1. The remaining legacy rails stay behind the explicit switch.
+  if (feature === 'offers' || feature === 'store_custody') return true;
   return !isV1Launch();
 }
 
