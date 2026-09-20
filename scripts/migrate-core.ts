@@ -18,9 +18,10 @@ import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 
 import { sslConfig } from '../src/db/ssl';
+import { connectForMigration } from './migration-connection';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -86,8 +87,15 @@ export async function runMigrations(connectionString: string, label: string): Pr
     ...sslConfig(connectionString),
   });
 
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
   try {
+    client = await connectForMigration(() => pool.connect(), {
+      onRetry: (attempt, delayMs) => {
+        console.warn(
+          `[migrate] session pool is full; retrying connection after ${delayMs}ms (attempt ${attempt + 1} of 6)`,
+        );
+      },
+    });
     console.log(`[migrate] target ${describeTarget(connectionString)}`);
     console.log('[migrate] waiting for the migration lock…');
     await client.query('select pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
@@ -105,11 +113,13 @@ export async function runMigrations(connectionString: string, label: string): Pr
 
     console.log('[migrate] done');
   } finally {
-    try {
-      await client.query('select pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]);
-    } finally {
-      client.release();
-      await pool.end();
+    if (client !== undefined) {
+      try {
+        await client.query('select pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]);
+      } finally {
+        client.release();
+      }
     }
+    await pool.end();
   }
 }
