@@ -74,7 +74,6 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
   const [notice, setNotice] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
-  const [accountName, setAccountName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
@@ -196,14 +195,9 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
       }
 
       if (mode === 'sign-up') {
-        const requestedAccountName = String(form.get('accountName') ?? '').trim();
         const requestedDisplayName = String(form.get('displayName') ?? '').trim();
         const requestedPhone = String(form.get('phone') ?? '').trim();
         const confirmPassword = String(form.get('confirmPassword') ?? '');
-        if (requestedAccountName.length < 2 || requestedAccountName.length > 80) {
-          setError('Use 2–80 characters for your private account name.');
-          return;
-        }
         if (requestedDisplayName.length < 2 || requestedDisplayName.length > 80) {
           setError('Use 2–80 characters for your public display name.');
           return;
@@ -230,7 +224,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
         // client type only knows Better Auth's core fields, so keep this cast local
         // rather than weakening the auth client throughout the app.
         const signUpInput = {
-          name: requestedAccountName,
+          name: requestedDisplayName,
           email,
           password,
           callbackURL,
@@ -326,7 +320,6 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
     setNotice('');
     setVerificationEmail('');
     setVerificationCode('');
-    setAccountName('');
     setDisplayName('');
     setPhone('');
     setAcceptTerms(false);
@@ -397,53 +390,38 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
         <form className="auth-form" noValidate onSubmit={submit}>
           {mode === 'sign-up' && (
             <>
-            <div>
-              <label htmlFor="auth-account-name">Account name</label>
-              <input
-                id="auth-account-name"
-                name="accountName"
-                type="text"
-                value={accountName}
-                onChange={(event) => setAccountName(event.target.value)}
-                autoComplete="name"
-                minLength={2}
-                maxLength={80}
-                aria-describedby="auth-account-name-help"
-                required
-              />
-              <small id="auth-account-name-help" className="field-help">Private. Used only for your account and support.</small>
-            </div>
-            <div>
-              <label htmlFor="auth-display-name">Display name</label>
-              <input
-                id="auth-display-name"
-                name="displayName"
-                type="text"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                minLength={2}
-                maxLength={80}
-                aria-describedby="auth-display-name-help"
-                required
-              />
-              <small id="auth-display-name-help" className="field-help">Public. Shown on listings, bids, and your Trust Snapshot.</small>
-            </div>
-            <div>
-              <label htmlFor="auth-phone">Mobile number</label>
-              <input
-                id="auth-phone"
-                name="phone"
-                type="tel"
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                autoComplete="tel"
-                inputMode="tel"
-                maxLength={30}
-                aria-describedby="auth-phone-help"
-                required
-              />
-              <small id="auth-phone-help" className="field-help">Private. Shared only with the other person after a transaction begins.</small>
-            </div>
+              <div>
+                <label htmlFor="auth-display-name">Display name</label>
+                <input
+                  id="auth-display-name"
+                  name="displayName"
+                  type="text"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  autoComplete="name"
+                  minLength={2}
+                  maxLength={80}
+                  aria-describedby="auth-display-name-help"
+                  required
+                />
+                <small id="auth-display-name-help" className="field-help">Shown on listings, bids, and your Trust Snapshot. Used as your account name too.</small>
+              </div>
+              <div>
+                <label htmlFor="auth-phone">Mobile number</label>
+                <input
+                  id="auth-phone"
+                  name="phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={30}
+                  aria-describedby="auth-phone-help"
+                  required
+                />
+                <small id="auth-phone-help" className="field-help">Private. Shared only with the other person after a transaction begins.</small>
+              </div>
             </>
           )}
           <div>
