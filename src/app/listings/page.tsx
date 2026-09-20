@@ -119,7 +119,6 @@ export default async function BrowsePage({
     ? Math.round(Number(maxPriceInput) * 100)
     : undefined;
   const page = Math.max(1, Number.parseInt(String(params.page ?? '1'), 10) || 1);
-  const cursor = typeof params.cursor === 'string' ? params.cursor : undefined;
 
   // Only attributes the category declares as filterable are honoured (a query string
   // cannot smuggle arbitrary JSONB predicates in), and each value is coerced to the
@@ -134,7 +133,7 @@ export default async function BrowsePage({
   const attributes =
     activeCategoryDefinition !== undefined ? coerceFiltersForDefinition(activeCategoryDefinition, raw) : {};
 
-  const { rows, total, pageSize, nextCursor } = await browseListings({
+  const { rows, total, pageSize } = await browseListings({
     ...(query !== '' ? { query } : {}),
     ...(sellerId !== undefined ? { sellerId } : {}),
     ...(selectedCategories.length > 0 ? { categories: selectedCategories } : {}),
@@ -146,7 +145,7 @@ export default async function BrowsePage({
     ...(maxPriceCents !== undefined ? { maxPriceCents } : {}),
     ...(location !== '' ? { location } : {}),
     sort,
-    ...(cursor !== undefined ? { cursor } : { page }),
+    page,
   });
   const sellerSnapshots = await trustSnapshotsForMembers(db, rows.map((row) => row.sellerId));
 
@@ -162,7 +161,6 @@ export default async function BrowsePage({
     maxPrice?: string | null;
     location?: string | null;
     page?: number;
-    cursor?: string | null;
   } = {}) => {
     const qs = new URLSearchParams();
     if (sellerId !== undefined) qs.set('seller', sellerId);
@@ -186,8 +184,6 @@ export default async function BrowsePage({
       if (value !== undefined) qs.set(`attr_${key}`, value);
     }
     if ((overrides.page ?? 1) > 1) qs.set('page', String(overrides.page));
-    const nextCursor = 'cursor' in overrides ? overrides.cursor : undefined;
-    if (nextCursor) qs.set('cursor', nextCursor);
     const s = qs.toString();
     return s === '' ? '/listings' : `/listings?${s}`;
   };
@@ -416,19 +412,15 @@ export default async function BrowsePage({
                 })}
               </div>
 
-              {(nextCursor !== undefined || totalPages > 1) && (
+              {totalPages > 1 && (
                 <nav className="pager" aria-label="Pagination">
-                  {cursor !== undefined ? (
-                    <Link className="pager__link" href={browseHref({ cursor: null, page: 1 })} rel="prev">← Restart</Link>
-                  ) : page > 1 ? (
+                  {page > 1 ? (
                     <Link className="pager__link" href={pageHref(page - 1)} rel="prev">← Previous</Link>
                   ) : (
                     <span className="pager__link is-disabled" aria-disabled="true">← Previous</span>
                   )}
-                  <span className="pager__status num">{cursor !== undefined ? 'More listings' : `Page ${page} of ${totalPages}`}</span>
-                  {nextCursor !== undefined ? (
-                    <Link className="pager__link" href={browseHref({ cursor: nextCursor, page: 1 })} rel="next">Next →</Link>
-                  ) : page < totalPages ? (
+                  <span className="pager__status num">Page {page} of {totalPages}</span>
+                  {page < totalPages ? (
                     <Link className="pager__link" href={pageHref(page + 1)} rel="next">Next →</Link>
                   ) : (
                     <span className="pager__link is-disabled" aria-disabled="true">Next →</span>
