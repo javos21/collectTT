@@ -15,12 +15,13 @@ afterEach(() => {
 });
 
 describe('v1 launch scope', () => {
-  it('defaults to v1, allows fixed-price offers, and blocks other legacy writes', () => {
+  it('defaults to v1, allows fixed-price offers and store custody, and blocks other legacy writes', () => {
     delete process.env.COLLECTTT_LAUNCH_SCOPE;
     expect(launchScope()).toBe('v1');
     expect(isLegacyFeatureAllowed('offers')).toBe(true);
-    expect(isLegacyFeatureAllowed('store_custody')).toBe(false);
-    expect(() => assertLegacyFeatureAllowed('store_custody')).toThrow('Store Custody');
+    expect(isLegacyFeatureAllowed('store_custody')).toBe(true);
+    expect(() => assertLegacyFeatureAllowed('store_custody')).not.toThrow();
+    expect(() => assertLegacyFeatureAllowed('reserve_price')).toThrow('Reserve Price');
   });
 
   it('allows legacy operations only when explicitly selected', () => {
