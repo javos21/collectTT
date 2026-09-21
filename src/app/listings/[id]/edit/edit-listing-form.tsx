@@ -19,7 +19,7 @@ export function EditListingForm({
   saleType,
   status,
   meetupLocations,
-  meetupLocationId,
+  meetupLocationIds,
   acceptsOffers,
   paymentWindowHours,
   deliveryOptions,
@@ -37,7 +37,7 @@ export function EditListingForm({
   saleType: 'straight_sale' | 'auction';
   status: string;
   meetupLocations: readonly { id: string; label: string; area: string }[];
-  meetupLocationId: string | null;
+  meetupLocationIds: readonly string[];
   acceptsOffers: boolean;
   paymentWindowHours: number;
   deliveryOptions: readonly { id: string; label: string; expectedDeliveryDays: number; fulfillmentPath?: string | null }[];
@@ -49,12 +49,12 @@ export function EditListingForm({
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
   const [formError, setFormError] = useState('');
   const [availableMeetupLocations, setAvailableMeetupLocations] = useState(meetupLocations);
-  const [selectedMeetupLocationId, setSelectedMeetupLocationId] = useState(meetupLocationId ?? '');
+  const [selectedMeetupLocationIds, setSelectedMeetupLocationIds] = useState<string[]>([...meetupLocationIds]);
   const hasMeetupDelivery = deliveryOptions.some((option) => option.fulfillmentPath === 'cash_meetup');
 
   function handleMeetupLocationCreated(location: InlineMeetupLocation) {
     setAvailableMeetupLocations((current) => [location, ...current.filter((item) => item.id !== location.id)]);
-    setSelectedMeetupLocationId(location.id);
+    setSelectedMeetupLocationIds((current) => current.length < 3 ? [...current, location.id] : current);
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -106,14 +106,19 @@ export function EditListingForm({
           </label>
         )}
         {hasMeetupDelivery && (
-          <div className="form-field form-field--compact">
-            <label htmlFor="edit-meetup-location">Meetup location</label>
-            <select id="edit-meetup-location" name="meetupLocationId" value={selectedMeetupLocationId} onChange={(event) => setSelectedMeetupLocationId(event.target.value)}>
-              <option value="">No saved location</option>
-              {availableMeetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
-            </select>
+          <fieldset className="form-field form-field--compact">
+            <legend>Public meetup locations</legend>
+            <small>Choose 1–3. The buyer will select one when they reserve or bid. {selectedMeetupLocationIds.length}/3 selected.</small>
+            <div className="choice-grid">
+              {availableMeetupLocations.map((location) => (
+                <label className="choice-card choice-card--compact" key={location.id}>
+                  <input type="checkbox" name="meetupLocationIds" value={location.id} checked={selectedMeetupLocationIds.includes(location.id)} disabled={!selectedMeetupLocationIds.includes(location.id) && selectedMeetupLocationIds.length >= 3} onChange={(event) => setSelectedMeetupLocationIds((current) => event.target.checked ? [...current, location.id].slice(0, 3) : current.filter((id) => id !== location.id))} />
+                  <span><strong>{location.label}</strong><small>{location.area}</small></span>
+                </label>
+              ))}
+            </div>
             <InlineMeetupLocationForm onCreated={handleMeetupLocationCreated} />
-          </div>
+          </fieldset>
         )}
         {!v1 && <div className="form-field form-field--compact">
           <label htmlFor="edit-payment-window">Payment period</label>

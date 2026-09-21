@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 type RelayStore = { id: string; name: string; area: string };
+type MeetupLocation = { id: string; label: string; area: string };
 
 export function SettlementFields({
   idPrefix,
@@ -10,13 +11,15 @@ export function SettlementFields({
   deliveryOptions,
   paymentOptions,
   relayCandidates,
+  meetupLocations,
   v1 = true,
 }: {
   idPrefix: string;
   fieldPrefix?: string;
-  deliveryOptions: readonly { id: string; label: string; requiresStore: boolean }[];
+  deliveryOptions: readonly { id: string; label: string; requiresStore: boolean; fulfillmentPath?: string | null }[];
   paymentOptions: readonly { key: string; label: string }[];
   relayCandidates: readonly RelayStore[];
+  meetupLocations: readonly MeetupLocation[];
   v1?: boolean;
 }) {
   const [selectedDeliveryOptionId, setSelectedDeliveryOptionId] = useState('');
@@ -34,6 +37,8 @@ export function SettlementFields({
   const deliveryId = `${idPrefix}deliveryOptionId`;
   const paymentId = `${idPrefix}settlementMethod`;
   const storeId = `${idPrefix}relayStoreId`;
+  const meetupId = `${idPrefix}meetupLocationId`;
+  const selectedDelivery = deliveryOptions.find((option) => option.id === selectedDeliveryOptionId);
 
   return (
     <div className="buybox__settlement-fields">
@@ -81,6 +86,20 @@ export function SettlementFields({
               <option key={store.id} value={store.id}>
                 {store.name} — {store.area}
               </option>
+            ))}
+          </select>
+        </>
+      )}
+
+      {selectedDelivery?.fulfillmentPath === 'cash_meetup' && (
+        <>
+          <label htmlFor={meetupId}>
+            Meetup location <span className="required-mark" aria-hidden="true">*</span>
+          </label>
+          <select id={meetupId} name={`${fieldPrefix}meetupLocationId`} defaultValue="" required>
+            <option value="" disabled>Select a public meetup location</option>
+            {meetupLocations.map((location) => (
+              <option key={location.id} value={location.id}>{location.label} — {location.area}</option>
             ))}
           </select>
         </>

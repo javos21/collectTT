@@ -33,6 +33,7 @@ import { getListingDeliveryOption } from '../../services/platform-settings';
 import { assertMarketplaceEligible } from '../../services/marketplace-eligibility';
 import { assertV1ListingTerms } from '../../lib/launch-scope';
 import { recordAnalyticsEvent } from '../../services/analytics';
+import { assertListingMeetupLocation } from '../../services/meetup-selection';
 
 export interface BidResult {
   bidId: string;
@@ -59,6 +60,7 @@ export async function placeBid(opts: {
   settlementMethod?: SettlementMethod;
   /** Which relay store the bidder will collect from. Required when path === 'relay'. */
   relayStoreId?: string | null;
+  meetupLocationId?: string | null;
   /** Explicit acknowledgement that a bid is a binding purchase commitment. */
   commitmentAcknowledged?: boolean;
 }): Promise<BidResult> {
@@ -130,6 +132,9 @@ export async function placeBid(opts: {
         buyerRestrictions: restrictions,
       });
     }
+    const meetupLocationId = fulfillmentPath === 'cash_meetup'
+      ? await assertListingMeetupLocation(tx, opts.listingId, opts.meetupLocationId ?? listing.meetupLocationId)
+      : null;
 
     const startBid = listing.startBidCents ?? 0;
     const minimum = minimumNextBid(listing.currentBidCents, startBid);
@@ -157,6 +162,7 @@ export async function placeBid(opts: {
         settlementMethod,
         fulfillmentPath: fulfillmentPath ?? null,
         deliveryOptionId: opts.deliveryOptionId ?? null,
+        meetupLocationId,
         relayStoreId: opts.relayStoreId ?? null,
         status: 'active',
       })
@@ -296,7 +302,7 @@ export async function placeBid(opts: {
         fulfillmentPath:
           fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
         deliveryOptionId: opts.deliveryOptionId ?? null,
-        meetupLocationId: listing.meetupLocationId,
+        meetupLocationId,
         source: 'auction_win',
         winningBidId: bid.id,
         listingTitle: listing.title,

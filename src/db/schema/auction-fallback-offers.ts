@@ -21,6 +21,7 @@ import { profiles } from './profiles';
 import { listings, bids } from './listings';
 import { marketplaceOptions } from './settings';
 import { fulfillmentPathEnum, fallbackOfferStatusEnum } from './enums';
+import { sellerMeetupLocations } from './seller-settings';
 
 export const auctionFallbackOffers = pgTable(
   'auction_fallback_offers',
@@ -33,6 +34,7 @@ export const auctionFallbackOffers = pgTable(
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path').notNull(),
     deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
+    meetupLocationId: uuid('meetup_location_id').references(() => sellerMeetupLocations.id, { onDelete: 'set null' }),
     settlementMethod: text('settlement_method'),
     relayStoreId: uuid('relay_store_id'),
     status: fallbackOfferStatusEnum('status').notNull().default('pending'),

@@ -81,7 +81,8 @@ export default async function NewListingPage({
   ]);
   const activeMeetupLocations = meetupLocations.filter((location) => location.active);
   const sourceListing = duplicateSource?.listing;
-  const initialMeetupLocationId = sourceListing?.meetupLocationId ?? (activeMeetupLocations.length === 1 ? activeMeetupLocations[0]!.id : null);
+  const initialMeetupLocationIds = duplicateSource?.meetupLocations.map((location) => location.id)
+    ?? (activeMeetupLocations.length === 1 ? [activeMeetupLocations[0]!.id] : []);
   const sourceDeliveryOptions = new Map(duplicateSource?.deliveryOptions.map((option) => [option.id, option.expectedDeliveryDays]));
   const formDeliveryOptions = deliveryOptions.map((option) => ({
     id: option.id,
@@ -124,7 +125,7 @@ export default async function NewListingPage({
         meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area }))}
         defaultDeliveryOptionIds={duplicateSource?.deliveryOptions.map((option) => option.id) ?? sellerPreferences.defaultDeliveryOptionIds}
         defaultRelayStoreIds={duplicateSource?.relayStoreIds ?? sellerPreferences.defaultRelayStoreIds}
-        initialMeetupLocationId={initialMeetupLocationId}
+        initialMeetupLocationIds={initialMeetupLocationIds}
         defaultPaymentMethods={sourceListing?.settlementMethods ?? sellerPreferences.defaultPaymentMethods}
         initialTitle={sourceListing?.title}
         initialDescription={sourceListing?.description ?? undefined}

@@ -27,6 +27,7 @@ import {
   NotFoundError,
   openTransaction,
 } from './transactions';
+import { assertListingMeetupLocation } from './meetup-selection';
 
 export interface SubmitOfferInput {
   listingId: string;
@@ -37,6 +38,7 @@ export interface SubmitOfferInput {
   /** The buyer's chosen payment method. Required by the web action. */
   settlementMethod?: SettlementMethod;
   relayStoreId?: string | null;
+  meetupLocationId?: string | null;
 }
 
 export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string }> {
@@ -88,6 +90,9 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
       );
     }
     const relayStoreId = fulfillmentPath === 'relay' ? input.relayStoreId ?? null : null;
+    const meetupLocationId = fulfillmentPath === 'cash_meetup'
+      ? await assertListingMeetupLocation(tx, input.listingId, input.meetupLocationId)
+      : null;
     await assertFulfillmentEligible(tx, {
       listingId: input.listingId,
       path: fulfillmentPath,
@@ -117,6 +122,7 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
         amountCents: input.amountCents,
         fulfillmentPath,
         deliveryOptionId: input.deliveryOptionId ?? null,
+        meetupLocationId,
         settlementMethod,
         relayStoreId,
         status: 'pending',
@@ -374,6 +380,7 @@ function sqlOfferWithListing(offerId: string) {
       o.amount_cents,
       o.fulfillment_path,
       o.delivery_option_id,
+      o.meetup_location_id,
       o.settlement_method,
       o.relay_store_id,
       o.status as offer_status,
@@ -387,7 +394,6 @@ function sqlOfferWithListing(offerId: string) {
       l.settlement_methods,
       l.accepts_offers,
       l.payment_window_hours
-      ,l.meetup_location_id
       from offers o
       inner join listings l on l.id = o.listing_id
      where o.id = ${offerId}

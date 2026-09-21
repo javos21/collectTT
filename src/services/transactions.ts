@@ -1245,6 +1245,7 @@ export async function promoteNextCandidate(
         amountCents: candidate.amountCents,
         fulfillmentPath: candidate.fulfillmentPath,
         deliveryOptionId: candidate.deliveryOptionId ?? null,
+        meetupLocationId: candidate.meetupLocationId ?? null,
         settlementMethod: candidate.settlementMethod ?? null,
         relayStoreId: candidate.relayStoreId ?? null,
         status: 'pending',
@@ -1340,6 +1341,7 @@ export async function promoteNextCandidate(
           amountCents: candidate.amountCents,
           fulfillmentPath: candidate.fulfillmentPath,
           deliveryOptionId: candidate.deliveryOptionId ?? null,
+          meetupLocationId: candidate.meetupLocationId ?? null,
           source: 'auction_runner_up',
           winningBidId: candidate.bidId,
           listingTitle: listing.title,
@@ -1445,6 +1447,7 @@ export async function acceptAuctionFallbackOffer(
       amountCents: offer.amountCents,
       fulfillmentPath: offer.fulfillmentPath,
       deliveryOptionId: offer.deliveryOptionId,
+      meetupLocationId: offer.meetupLocationId,
       source: 'auction_runner_up',
       winningBidId: offer.bidId,
       listingTitle: listing.title,
@@ -1634,6 +1637,7 @@ interface Candidate {
   amountCents: number;
   fulfillmentPath: FulfillmentPath;
   deliveryOptionId?: string | null;
+  meetupLocationId?: string | null;
   /** The candidate's own payment choice, retained through promotion. */
   settlementMethod?: SettlementMethod | null;
   /** The runner-up's own store choice, not the winner's. */
@@ -1676,6 +1680,7 @@ async function nextFromBidLadder(
       //   Phase 2, which carry neither a path nor a store — see fallbackFulfillmentPath.
       fulfillmentPath: row.fulfillmentPath ?? fallbackFulfillmentPath(listing.paths),
       deliveryOptionId: row.deliveryOptionId,
+      meetupLocationId: row.meetupLocationId,
       settlementMethod:
         (row.settlementMethod as SettlementMethod | null) ??
         (listing.settlementMethods[0] as SettlementMethod | undefined),

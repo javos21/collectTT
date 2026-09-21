@@ -21,7 +21,7 @@ import { db, pool } from '../../src/db/client';
 import { users } from '../../src/db/schema/auth';
 import { profiles, reputationCounters, reputationEvents } from '../../src/db/schema/profiles';
 import { sellerMeetupLocations } from '../../src/db/schema/seller-settings';
-import { listings, claims, bids } from '../../src/db/schema/listings';
+import { listings, claims, bids, listingMeetupLocations } from '../../src/db/schema/listings';
 import { auctionFallbackOffers } from '../../src/db/schema/auction-fallback-offers';
 import { offers } from '../../src/db/schema/offers';
 import { transactions, transactionEvents } from '../../src/db/schema/transactions';
@@ -178,25 +178,34 @@ describe('★ atomic straight-sale claim', () => {
     expect(listing?.status).toBe('active');
   });
 
-  it('persists the selected meetup location on the claim and transaction', async () => {
-    const location = await db.insert(sellerMeetupLocations).values({
+  it('persists the buyer-selected meetup location on the claim and transaction', async () => {
+    const locations = await db.insert(sellerMeetupLocations).values([{
       sellerId: seller,
-      label: `M3 meetup ${SUFFIX}`,
+      label: `M3 north meetup ${SUFFIX}`,
+      area: 'Chaguanas',
+    }, {
+      sellerId: seller,
+      label: `M3 south meetup ${SUFFIX}`,
       area: 'San Fernando',
-    }).returning({ id: sellerMeetupLocations.id });
-    const listingId = await makeListing({ meetupLocationId: location[0]!.id });
+    }]).returning({ id: sellerMeetupLocations.id });
+    const listingId = await makeListing({ meetupLocationId: locations[0]!.id });
+    await db.insert(listingMeetupLocations).values([
+      { listingId, meetupLocationId: locations[0]!.id, position: 0 },
+      { listingId, meetupLocationId: locations[1]!.id, position: 1 },
+    ]);
 
     const result = await claimListing({
       listingId,
       claimantId: buyers[0]!,
       fulfillmentPath: 'cash_meetup',
+      meetupLocationId: locations[1]!.id,
       commitmentAcknowledged: true,
     });
     const claim = (await db.select({ meetupLocationId: claims.meetupLocationId }).from(claims).where(eq(claims.listingId, listingId)))[0];
     const transaction = (await db.select({ meetupLocationId: transactions.meetupLocationId }).from(transactions).where(eq(transactions.id, result.transactionId)))[0];
 
-    expect(claim?.meetupLocationId).toBe(location[0]!.id);
-    expect(transaction?.meetupLocationId).toBe(location[0]!.id);
+    expect(claim?.meetupLocationId).toBe(locations[1]!.id);
+    expect(transaction?.meetupLocationId).toBe(locations[1]!.id);
   });
 
   it('resolves 6 SIMULTANEOUS claims to exactly one winner with no backup rows', async () => {

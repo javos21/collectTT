@@ -35,7 +35,7 @@ export function ListingForm({
   meetupLocations,
   defaultDeliveryOptionIds,
   defaultRelayStoreIds,
-  initialMeetupLocationId,
+  initialMeetupLocationIds,
   defaultPaymentMethods,
   initialTitle = '',
   initialDescription = '',
@@ -61,7 +61,7 @@ export function ListingForm({
   meetupLocations: readonly MeetupLocation[];
   defaultDeliveryOptionIds: readonly string[];
   defaultRelayStoreIds: readonly string[];
-  initialMeetupLocationId: string | null;
+  initialMeetupLocationIds: readonly string[];
   defaultPaymentMethods: readonly string[];
   initialTitle?: string;
   initialDescription?: string;
@@ -87,7 +87,7 @@ export function ListingForm({
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
   const [selectedDeliveryOptionIds, setSelectedDeliveryOptionIds] = useState<string[]>([]);
   const [availableMeetupLocations, setAvailableMeetupLocations] = useState<MeetupLocation[]>([...meetupLocations]);
-  const [selectedMeetupLocationId, setSelectedMeetupLocationId] = useState(initialMeetupLocationId ?? '');
+  const [selectedMeetupLocationIds, setSelectedMeetupLocationIds] = useState<string[]>([...initialMeetupLocationIds]);
   const steps = STEPS;
 
   useEffect(() => {
@@ -102,7 +102,11 @@ export function ListingForm({
 
   function handleMeetupLocationCreated(location: InlineMeetupLocation) {
     setAvailableMeetupLocations((current) => [location, ...current.filter((item) => item.id !== location.id)]);
-    setSelectedMeetupLocationId(location.id);
+    setSelectedMeetupLocationIds((current) => current.length < 3 ? [...current, location.id] : current);
+  }
+
+  function toggleMeetupLocation(id: string, checked: boolean) {
+    setSelectedMeetupLocationIds((current) => checked ? [...current, id].slice(0, 3) : current.filter((value) => value !== id));
   }
 
   function validateStep(stepToValidate: number): boolean {
@@ -138,6 +142,10 @@ export function ListingForm({
       form.querySelector('input[name="relayStoreIds"]:checked') === null
     ) {
       setStepError({ message: 'Choose at least one pickup store.', target: 'delivery' });
+      return false;
+    }
+    if (stepToValidate === 3 && hasMeetupDelivery && selectedMeetupLocationIds.length === 0) {
+      setStepError({ message: 'Choose at least one public meetup location.', target: 'delivery' });
       return false;
     }
     if (stepToValidate === 4 && form.querySelector('input[name="paymentOptionKeys"]:checked') === null) {
@@ -248,14 +256,19 @@ export function ListingForm({
         <DeliveryFields deliveryOptions={deliveryOptions} relayStoreOptions={relayStoreOptions} defaultDeliveryOptionIds={defaultDeliveryOptionIds} defaultRelayStoreIds={defaultRelayStoreIds} onSelectionChange={handleDeliverySelectionChange} />
         {hasMeetupDelivery && (
           <div className="meetup-location-picker">
-            <div className="form-field form-field--compact">
-              <label htmlFor="meetupLocationId">Meetup location</label>
-              <select id="meetupLocationId" name="meetupLocationId" value={selectedMeetupLocationId} onChange={(event) => setSelectedMeetupLocationId(event.target.value)}>
-                <option value="">Choose a saved meetup location</option>
-                {availableMeetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
-              </select>
-              <small>{availableMeetupLocations.length === 0 ? 'Add a location here without leaving your listing.' : 'Choose the location buyers should use for this listing.'}</small>
-            </div>
+            <fieldset className="form-field form-field--compact">
+              <legend>Public meetup locations</legend>
+              <small id="meetup-location-help">Choose up to 3. The buyer will select one when they reserve or bid. {selectedMeetupLocationIds.length}/3 selected.</small>
+              <div className="choice-grid" aria-describedby="meetup-location-help">
+                {availableMeetupLocations.map((location) => (
+                  <label className="choice-card choice-card--compact" key={location.id}>
+                    <input type="checkbox" name="meetupLocationIds" value={location.id} checked={selectedMeetupLocationIds.includes(location.id)} disabled={!selectedMeetupLocationIds.includes(location.id) && selectedMeetupLocationIds.length >= 3} onChange={(event) => toggleMeetupLocation(location.id, event.target.checked)} />
+                    <span><strong>{location.label}</strong><small>{location.area}</small></span>
+                  </label>
+                ))}
+              </div>
+              {availableMeetupLocations.length === 0 && <small>Add a public location here without leaving your listing.</small>}
+            </fieldset>
             <InlineMeetupLocationForm onCreated={handleMeetupLocationCreated} />
           </div>
         )}

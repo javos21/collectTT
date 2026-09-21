@@ -35,7 +35,7 @@ export async function updateListingAction(formData: FormData): Promise<void> {
       paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
       ...(Object.keys(deliveryOptionEstimates).length > 0 ? { deliveryOptionEstimates } : {}),
       imageIds: formData.getAll('imageIds').map(String),
-      meetupLocationId: String(formData.get('meetupLocationId') ?? '').trim() || null,
+      meetupLocationIds: formData.getAll('meetupLocationIds').map(String),
     });
     redirect(`/listings/${listingId}`);
   } catch (error) {

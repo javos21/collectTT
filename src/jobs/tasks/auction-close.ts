@@ -165,7 +165,7 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
           fulfillmentPath:
             winner.fulfillmentPath ?? fallbackFulfillmentPath(listing.fulfillmentPaths),
           deliveryOptionId: winner.deliveryOptionId,
-          meetupLocationId: listing.meetupLocationId,
+          meetupLocationId: winner.meetupLocationId ?? listing.meetupLocationId,
           source: 'auction_win',
           winningBidId: winner.id,
           listingTitle: listing.title,

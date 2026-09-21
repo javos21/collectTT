@@ -295,6 +295,13 @@
       "when": 1789998603157,
       "tag": "0041_many_mariko_yashida",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790025144471,
+      "tag": "0042_rare_clea",
+      "breakpoints": true
     }
   ]
 }

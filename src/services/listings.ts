@@ -15,6 +15,7 @@ import {
   listingImages,
   listingAuditEvents,
   listingDeliveryOptions,
+  listingMeetupLocations,
   listingFulfillmentTerms,
   categories,
 } from '../db/schema/listings';
@@ -69,6 +70,8 @@ export const listingInputSchema = z
     relayStoreIds: z.array(z.string().uuid()).default([]),
     deliveryEstimates: z.record(z.string(), z.number().int().min(1).max(60)).default({}),
     attributes: z.record(z.unknown()).default({}),
+    meetupLocationIds: z.array(z.string().uuid()).max(3, 'Choose no more than 3 meetup locations').default([]),
+    /** Legacy single-location input retained for scripts and older callers. */
     meetupLocationId: z.string().uuid().optional(),
   })
   .superRefine((value, ctx) => {
@@ -118,7 +121,11 @@ export async function createListing(
   ]);
   const rawDelivery = Array.isArray(rawRecord.deliveryOptionIds) ? rawRecord.deliveryOptionIds : [];
   const rawPayments = Array.isArray(rawRecord.paymentOptionKeys) ? rawRecord.paymentOptionKeys : [];
-  const rawMeetup = typeof rawRecord.meetupLocationId === 'string' && rawRecord.meetupLocationId !== '' ? rawRecord.meetupLocationId : undefined;
+  const rawMeetupIds = Array.isArray(rawRecord.meetupLocationIds)
+    ? rawRecord.meetupLocationIds
+    : typeof rawRecord.meetupLocationId === 'string' && rawRecord.meetupLocationId !== ''
+      ? [rawRecord.meetupLocationId]
+      : [];
   const parsedInput = listingInputSchema.parse({
     ...rawRecord,
     ...(rawDelivery.length === 0 && (!Array.isArray(rawRecord.fulfillmentPaths) || rawRecord.fulfillmentPaths.length === 0)
@@ -127,7 +134,7 @@ export async function createListing(
     ...(rawPayments.length === 0 && (!Array.isArray(rawRecord.settlementMethods) || rawRecord.settlementMethods.length === 0)
       ? { paymentOptionKeys: sellerDefaults.defaultPaymentMethods }
       : {}),
-    ...(rawMeetup !== undefined ? { meetupLocationId: rawMeetup } : {}),
+    meetupLocationIds: rawMeetupIds,
   });
   const requestedDeliveryIds = [...new Set(parsedInput.deliveryOptionIds)];
   const requestedPaymentKeys = [...new Set(parsedInput.paymentOptionKeys)];
@@ -159,16 +166,21 @@ export async function createListing(
     : parsedInput.fulfillmentPaths;
   const input = {
     ...parsedInput,
-    meetupLocationId: fulfillmentPaths.includes('cash_meetup')
-      ? parsedInput.meetupLocationId ?? (meetupLocations.filter((location) => location.active).length === 1
-        ? meetupLocations.find((location) => location.active)?.id
-        : undefined)
-      : undefined,
+    meetupLocationIds: fulfillmentPaths.includes('cash_meetup')
+      ? [...new Set(parsedInput.meetupLocationIds.length > 0
+        ? parsedInput.meetupLocationIds
+        : meetupLocations.filter((location) => location.active).length === 1
+          ? [meetupLocations.find((location) => location.active)!.id]
+          : [])]
+      : [],
   };
   const settlementMethods = requestedPaymentKeys.length > 0 ? requestedPaymentKeys : input.settlementMethods;
   const relayStoreIds = input.relayStoreIds.length > 0 ? input.relayStoreIds : sellerDefaults.defaultRelayStoreIds;
   if (fulfillmentPaths.length === 0) throw new UnavailableMarketplaceOptionError('delivery');
   if (settlementMethods.length === 0) throw new UnavailableMarketplaceOptionError('payment');
+  if (fulfillmentPaths.includes('cash_meetup') && input.meetupLocationIds.length === 0) {
+    throw new Error('Choose at least one public meetup location.');
+  }
   assertV1ListingTerms({
     fulfillmentPaths,
     settlementMethods,
@@ -188,17 +200,16 @@ export async function createListing(
 
   return db.transaction(async (tx) => {
     await assertMarketplaceEligible(tx, sellerId, 'persist_listing');
-    if (input.meetupLocationId !== undefined) {
-      const location = await tx
+    if (input.meetupLocationIds.length > 0) {
+      const locations = await tx
         .select({ id: sellerMeetupLocations.id })
         .from(sellerMeetupLocations)
         .where(and(
-          eq(sellerMeetupLocations.id, input.meetupLocationId),
           eq(sellerMeetupLocations.sellerId, sellerId),
           eq(sellerMeetupLocations.active, true),
+          inArray(sellerMeetupLocations.id, input.meetupLocationIds),
         ))
-        .limit(1);
-      if (location[0] === undefined) throw new Error('Choose one of your active meetup locations.');
+      if (locations.length !== input.meetupLocationIds.length) throw new Error('Choose only your active meetup locations.');
     }
     const selectedRelayStoreIds = [...new Set(relayStoreIds)];
     if (selectedDeliveryOptions.some((option) => option.requiresStore) || fulfillmentPaths.includes('relay')) {
@@ -246,7 +257,8 @@ export async function createListing(
         fulfillmentPaths,
         settlementMethods,
         autoRelistOnRenege: input.autoRelistOnRenege,
-        meetupLocationId: input.meetupLocationId ?? null,
+        // Kept populated for backwards compatibility while reads use the junction.
+        meetupLocationId: input.meetupLocationIds[0] ?? null,
         expiresAt:
           input.saleType === 'straight_sale' && opts.publish === true
             ? sql`now() + (${await getListingExpiryDays(tx)} || ' days')::interval`
@@ -297,6 +309,12 @@ export async function createListing(
             (option.fulfillmentPath === null ? 5 : input.deliveryEstimates[option.fulfillmentPath]) ??
             (option.fulfillmentPath === 'full_service' ? fullServiceDays ?? 14 : 5),
         })),
+      );
+    }
+
+    if (input.meetupLocationIds.length > 0) {
+      await tx.insert(listingMeetupLocations).values(
+        input.meetupLocationIds.map((meetupLocationId, position) => ({ listingId: listing.id, meetupLocationId, position })),
       );
     }
 
@@ -432,7 +450,7 @@ const listingEditSchema = z.object({
   deliveryEstimates: z.record(z.string(), z.number().int().min(1).max(60)).optional(),
   deliveryOptionEstimates: z.record(z.string().uuid(), z.number().int().min(1).max(60)).optional(),
   imageIds: z.array(z.string().uuid()).max(8).default([]),
-  meetupLocationId: z.string().uuid().nullable().optional(),
+  meetupLocationIds: z.array(z.string().uuid()).max(3, 'Choose no more than 3 meetup locations').optional(),
 });
 
 export class ListingLockedError extends Error {
@@ -530,9 +548,14 @@ export async function updateListingBasics(
       throw new Error('Only active or draft listings can be edited.');
     }
     await assertListingUnlocked(tx, listingId);
-    if (input.meetupLocationId !== undefined && input.meetupLocationId !== null) {
-      const location = await tx.select({ id: sellerMeetupLocations.id }).from(sellerMeetupLocations).where(and(eq(sellerMeetupLocations.id, input.meetupLocationId), eq(sellerMeetupLocations.sellerId, sellerId), eq(sellerMeetupLocations.active, true))).limit(1);
-      if (location[0] === undefined) throw new Error('Choose one of your active meetup locations.');
+    if (input.meetupLocationIds !== undefined) {
+      if (current.fulfillment_paths.includes('cash_meetup') && input.meetupLocationIds.length === 0) {
+        throw new Error('Choose at least one public meetup location.');
+      }
+      const uniqueLocationIds = [...new Set(input.meetupLocationIds)];
+      if (uniqueLocationIds.length !== input.meetupLocationIds.length) throw new Error('Choose each meetup location only once.');
+      const locations = uniqueLocationIds.length === 0 ? [] : await tx.select({ id: sellerMeetupLocations.id }).from(sellerMeetupLocations).where(and(inArray(sellerMeetupLocations.id, uniqueLocationIds), eq(sellerMeetupLocations.sellerId, sellerId), eq(sellerMeetupLocations.active, true)));
+      if (locations.length !== uniqueLocationIds.length) throw new Error('Choose only your active meetup locations.');
     }
     assertV1ListingTerms({
       fulfillmentPaths: current.fulfillment_paths,
@@ -558,8 +581,12 @@ export async function updateListingBasics(
     if (input.paymentWindowHours !== undefined && input.paymentWindowHours !== current.payment_window_hours) {
       changes.paymentWindowHours = { from: current.payment_window_hours, to: input.paymentWindowHours };
     }
-    if (input.meetupLocationId !== undefined && input.meetupLocationId !== current.meetup_location_id) {
-      changes.meetupLocationId = { from: current.meetup_location_id, to: input.meetupLocationId };
+    if (input.meetupLocationIds !== undefined) {
+      const previousMeetupRows = await tx.select({ id: listingMeetupLocations.meetupLocationId }).from(listingMeetupLocations).where(eq(listingMeetupLocations.listingId, listingId)).orderBy(listingMeetupLocations.position);
+      const previousMeetupIds = previousMeetupRows.map((row) => row.id);
+      if (JSON.stringify(previousMeetupIds) !== JSON.stringify(input.meetupLocationIds)) {
+        changes.meetupLocationIds = { from: previousMeetupIds, to: input.meetupLocationIds };
+      }
     }
     if (input.deliveryEstimates !== undefined) {
       const previousTerms = await tx
@@ -601,10 +628,19 @@ export async function updateListingBasics(
         ...(current.sale_type === 'straight_sale' ? { priceCents: input.priceCents ?? Number(current.price_cents) } : {}),
         ...(current.sale_type === 'straight_sale' && input.acceptsOffers !== undefined ? { acceptsOffers: input.acceptsOffers } : {}),
         ...(input.paymentWindowHours !== undefined ? { paymentWindowHours: input.paymentWindowHours } : {}),
-        ...(input.meetupLocationId !== undefined ? { meetupLocationId: input.meetupLocationId } : {}),
+        ...(input.meetupLocationIds !== undefined ? { meetupLocationId: input.meetupLocationIds[0] ?? null } : {}),
         updatedAt: sql`now()`,
       })
       .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)));
+
+    if (input.meetupLocationIds !== undefined) {
+      await tx.delete(listingMeetupLocations).where(eq(listingMeetupLocations.listingId, listingId));
+      if (input.meetupLocationIds.length > 0) {
+        await tx.insert(listingMeetupLocations).values(
+          input.meetupLocationIds.map((meetupLocationId, position) => ({ listingId, meetupLocationId, position })),
+        );
+      }
+    }
 
     if (input.imageIds.length > 0) {
       const existingRows = await tx
@@ -1344,11 +1380,19 @@ export async function getListing(id: string, viewerId?: string) {
     .from(listingRelayStores)
     .where(eq(listingRelayStores.listingId, id));
 
-  const meetupRows = row.listing.meetupLocationId === null
-    ? []
-    : await db.select({ id: sellerMeetupLocations.id, label: sellerMeetupLocations.label, area: sellerMeetupLocations.area, instructions: sellerMeetupLocations.instructions }).from(sellerMeetupLocations).where(eq(sellerMeetupLocations.id, row.listing.meetupLocationId)).limit(1);
+  let meetupRows = await db
+    .select({ id: sellerMeetupLocations.id, label: sellerMeetupLocations.label, area: sellerMeetupLocations.area, instructions: sellerMeetupLocations.instructions })
+    .from(listingMeetupLocations)
+    .innerJoin(sellerMeetupLocations, eq(sellerMeetupLocations.id, listingMeetupLocations.meetupLocationId))
+    .where(eq(listingMeetupLocations.listingId, id))
+    .orderBy(listingMeetupLocations.position);
+  // Legacy rows are also backfilled by the migration; this fallback keeps partially
+  // migrated/dev databases readable during deployment.
+  if (meetupRows.length === 0 && row.listing.meetupLocationId !== null) {
+    meetupRows = await db.select({ id: sellerMeetupLocations.id, label: sellerMeetupLocations.label, area: sellerMeetupLocations.area, instructions: sellerMeetupLocations.instructions }).from(sellerMeetupLocations).where(eq(sellerMeetupLocations.id, row.listing.meetupLocationId)).limit(1);
+  }
 
-  return { ...row, images: imageRows, fulfillmentTerms, deliveryOptions, paymentOptions, relayStoreIds: listingStoreRows.map((store) => store.storeId), meetupLocation: meetupRows[0] ?? null };
+  return { ...row, images: imageRows, fulfillmentTerms, deliveryOptions, paymentOptions, relayStoreIds: listingStoreRows.map((store) => store.storeId), meetupLocations: meetupRows, meetupLocation: meetupRows[0] ?? null };
 }
 
 export async function listingsBySeller(sellerId: string) {

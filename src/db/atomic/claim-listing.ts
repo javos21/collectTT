@@ -33,6 +33,7 @@ import { assertMarketplaceEligible } from '../../services/marketplace-eligibilit
 import { assertV1ListingTerms } from '../../lib/launch-scope';
 import { isLegacyFeatureAllowed } from '../../lib/launch-scope';
 import { recordAnalyticsEvent } from '../../services/analytics';
+import { assertListingMeetupLocation } from '../../services/meetup-selection';
 
 export interface ClaimResult {
   outcome: 'claimed';
@@ -49,6 +50,8 @@ export async function claimListing(opts: {
   settlementMethod?: SettlementMethod;
   /** Which relay store the buyer will use. Required when path === 'relay'. */
   relayStoreId?: string | null;
+  /** Which of the seller's public meetup points the buyer selected. */
+  meetupLocationId?: string | null;
   /** Cancel this buyer's pending offer as part of the same atomic claim. */
   cancelPendingOfferId?: string;
   /** Deliberate acknowledgement of the v1 purchase commitment. */
@@ -78,12 +81,14 @@ export async function claimListing(opts: {
     let deliveryOptionId = opts.deliveryOptionId;
     let settlementMethod = opts.settlementMethod;
     let relayStoreId = opts.relayStoreId;
+    let selectedMeetupLocationId = opts.meetupLocationId;
     let offerToCancel: {
       id: string;
       fulfillmentPath: FulfillmentPath;
       settlementMethod: SettlementMethod | null;
       relayStoreId: string | null;
       deliveryOptionId: string | null;
+      meetupLocationId: string | null;
     } | null = null;
 
     const offersEnabled = isLegacyFeatureAllowed('offers');
@@ -92,7 +97,7 @@ export async function claimListing(opts: {
     }
     if (opts.cancelPendingOfferId !== undefined) {
       const pendingOfferRows = await tx.execute(sql`
-        select id, fulfillment_path, delivery_option_id, settlement_method, relay_store_id
+        select id, fulfillment_path, delivery_option_id, meetup_location_id, settlement_method, relay_store_id
           from offers
          where id = ${opts.cancelPendingOfferId}
            and listing_id = ${opts.listingId}
@@ -104,6 +109,7 @@ export async function claimListing(opts: {
         id: string;
         fulfillment_path: FulfillmentPath;
         delivery_option_id: string | null;
+        meetup_location_id: string | null;
         settlement_method: SettlementMethod | null;
         relay_store_id: string | null;
       } | undefined;
@@ -114,12 +120,14 @@ export async function claimListing(opts: {
       deliveryOptionId = pendingOffer.delivery_option_id ?? undefined;
       if (settlementMethod === undefined) settlementMethod = pendingOffer.settlement_method ?? undefined;
       if (relayStoreId === undefined) relayStoreId = pendingOffer.relay_store_id;
+      if (selectedMeetupLocationId === undefined) selectedMeetupLocationId = pendingOffer.meetup_location_id;
       offerToCancel = {
         id: pendingOffer.id,
         fulfillmentPath: pendingOffer.fulfillment_path,
         settlementMethod: pendingOffer.settlement_method,
         relayStoreId: pendingOffer.relay_store_id,
         deliveryOptionId: pendingOffer.delivery_option_id,
+        meetupLocationId: pendingOffer.meetup_location_id,
       };
     } else if (offersEnabled) {
       const pendingOfferRows = await tx.execute(sql`
@@ -156,6 +164,9 @@ export async function claimListing(opts: {
     if (!listing.fulfillmentPaths.includes(fulfillmentPath)) {
       throw new ConflictError('The seller does not accept that fulfillment method');
     }
+    const meetupLocationId = fulfillmentPath === 'cash_meetup'
+      ? await assertListingMeetupLocation(tx, opts.listingId, selectedMeetupLocationId ?? listing.meetupLocationId)
+      : null;
 
     // Objective-record gates. A restricted buyer is told why, not silently failed.
     const restrictions = await activeRestrictions(tx, opts.claimantId);
@@ -240,7 +251,7 @@ export async function claimListing(opts: {
           status: 'active',
           fulfillmentPath,
           deliveryOptionId: deliveryOptionId ?? null,
-          meetupLocationId: listing.meetupLocationId,
+          meetupLocationId,
           settlementMethod,
           relayStoreId: relayStoreId ?? null,
         })
@@ -257,7 +268,7 @@ export async function claimListing(opts: {
         amountCents: price,
         fulfillmentPath,
         deliveryOptionId: deliveryOptionId ?? null,
-        meetupLocationId: listing.meetupLocationId,
+        meetupLocationId,
         source: 'claim',
         claimId: claim.id,
         listingTitle: listing.title,

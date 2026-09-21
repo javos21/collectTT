@@ -51,6 +51,7 @@ export async function claimAction(formData: FormData): Promise<void> {
   const settlementMethod = String(formData.get('settlementMethod') ?? '');
   const storeIdRaw = String(formData.get('relayStoreId') ?? '');
   const relayStoreId = storeIdRaw === '' ? null : storeIdRaw;
+  const meetupLocationId = String(formData.get('meetupLocationId') ?? '').trim() || null;
   const commitmentAcknowledged = formData.get('commitmentAcknowledged') === 'yes';
 
   if (deliveryOptionId === '') {
@@ -71,6 +72,7 @@ export async function claimAction(formData: FormData): Promise<void> {
       deliveryOptionId,
       settlementMethod,
       relayStoreId,
+      meetupLocationId,
       commitmentAcknowledged,
     });
   } catch (error) {
@@ -121,6 +123,7 @@ export async function bidAction(formData: FormData): Promise<void> {
   const deliveryOptionId = String(formData.get('deliveryOptionId') ?? '');
   const settlementMethod = String(formData.get('settlementMethod') ?? '');
   const storeIdRaw = String(formData.get('relayStoreId') ?? '');
+  const meetupLocationId = String(formData.get('meetupLocationId') ?? '').trim() || null;
 
   if (deliveryOptionId === '') {
     redirect(`/listings/${listingId}?error=${encodeURIComponent(`Choose a ${optionLabel()} option`)}`);
@@ -142,6 +145,7 @@ export async function bidAction(formData: FormData): Promise<void> {
       deliveryOptionId,
       settlementMethod,
       relayStoreId: storeIdRaw === '' ? null : storeIdRaw,
+      meetupLocationId,
       commitmentAcknowledged: true,
     });
   } catch (error) {
@@ -215,6 +219,7 @@ export async function submitOfferAction(formData: FormData): Promise<void> {
   const deliveryOptionId = String(formData.get('offerDeliveryOptionId') ?? formData.get('deliveryOptionId') ?? '');
   const settlementMethod = String(formData.get('offerSettlementMethod') ?? formData.get('settlementMethod') ?? '');
   const storeIdRaw = String(formData.get('offerRelayStoreId') ?? formData.get('relayStoreId') ?? '');
+  const meetupLocationId = String(formData.get('offerMeetupLocationId') ?? formData.get('meetupLocationId') ?? '').trim() || null;
 
   if (amountCents === null || amountCents <= 0) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent('Enter a valid offer amount')}`);
@@ -235,6 +240,7 @@ export async function submitOfferAction(formData: FormData): Promise<void> {
       deliveryOptionId,
       settlementMethod,
       relayStoreId: storeIdRaw === '' ? null : storeIdRaw,
+      meetupLocationId,
     });
   } catch (error) {
     redirect(`/listings/${listingId}?error=${encodeURIComponent(message(error))}`);
