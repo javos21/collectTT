@@ -3,7 +3,7 @@ import { ArrowRight, Gavel, Plus, Search, Tag } from 'lucide-react';
 
 import { browseListings, recentlyClaimedListings } from '@/services/listings';
 import { HomeListingCarousel, type HomeListingRow } from './home-listing-carousel';
-import { isV1Launch } from '@/lib/launch-scope';
+import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,7 +131,7 @@ export default async function HomePage() {
         )}
       </section>
 
-      {!isV1Launch() && <section className="home-sell-prompt home-store-prompt" aria-labelledby="store-prompt-title">
+      {isLegacyFeatureAllowed('store_custody') && <section className="home-sell-prompt home-store-prompt" aria-labelledby="store-prompt-title">
         <div>
           <h2 id="store-prompt-title">Have a storefront?</h2>
           <p>Want to join the community? Create a Store application here.</p>

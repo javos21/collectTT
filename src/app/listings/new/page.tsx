@@ -119,7 +119,7 @@ export default async function NewListingPage({
           area: store.area,
         }))}
         deliveryOptions={formDeliveryOptions}
-        paymentOptions={paymentOptions.filter((option) => !isV1Launch() || ['cash', 'bank_transfer'].includes(option.key)).map((option) => ({ key: option.key, label: option.label }))}
+        paymentOptions={paymentOptions.map((option) => ({ key: option.key, label: option.label }))}
         categories={categories}
         meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area }))}
         defaultDeliveryOptionIds={duplicateSource?.deliveryOptions.map((option) => option.id) ?? sellerPreferences.defaultDeliveryOptionIds}

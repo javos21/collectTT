@@ -3440,6 +3440,22 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 .conditional-field { margin-top: 1.1rem; padding-top: 1.1rem; border-top: 1px solid var(--brand-line); }
 .conditional-field h3 { margin: 0 0 .65rem; color: var(--brand-ink); font-size: .8rem; }
 .conditional-field .choice-grid { margin-top: 0; }
+.meetup-location-picker { display: grid; gap: .8rem; margin-top: 1.1rem; padding-top: 1.1rem; border-top: 1px solid var(--brand-line); }
+.meetup-location-picker .form-field--compact { margin-top: 0; }
+.inline-meetup-location { display: grid; gap: .7rem; }
+.inline-meetup-location__toggle { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; width: fit-content; min-height: 44px; margin: 0; padding: .55rem .75rem; border: 1px solid var(--brand-line); border-radius: 9px; color: var(--brand-blue); background: #fff; box-shadow: none; font-size: .76rem; }
+.inline-meetup-location__toggle:hover { border-color: var(--brand-blue); background: var(--brand-pale); box-shadow: none; }
+.inline-meetup-location__toggle:focus-visible { outline: 3px solid rgba(79,70,229,.24); outline-offset: 2px; }
+.inline-meetup-location__form { display: grid; gap: .8rem; padding: .95rem; border: 1px solid var(--brand-line); border-radius: 12px; background: #fbfeff; }
+.inline-meetup-location__heading { display: grid; gap: .2rem; }
+.inline-meetup-location__heading strong { color: var(--brand-ink); font-size: .82rem; }
+.inline-meetup-location__heading span { color: #527683; font-size: .72rem; line-height: 1.4; }
+.inline-meetup-location__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.inline-meetup-location__fields .form-field + .form-field { margin-top: 0; }
+.inline-meetup-location__instructions { grid-column: 1 / -1; }
+.inline-meetup-location__error { margin: 0; }
+.inline-meetup-location__actions { display: flex; align-items: center; gap: .5rem; }
+.inline-meetup-location__actions button { min-height: 44px; margin: 0; padding: .55rem .8rem; font-size: .76rem; }
 .payment-step__hint { display: block; width: 100%; max-width: none; color: #527683; font-size: .76rem; line-height: 1.5; }
 .payment-step__hint--options { margin: 0 0 .55rem; }
 .payment-step__period { margin-top: 1.25rem; padding-top: 1.15rem; border-top: 1px solid var(--brand-line); }
@@ -5377,6 +5393,24 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 .profile-listing-table__empty-row strong, .profile-listing-table__empty-row span { display: block; }
 .profile-listing-table__empty-row strong { color: var(--profile-ink); font-size: .86rem; }
 .profile-listing-table__empty-row span { margin-top: .25rem; font-size: .74rem; line-height: 1.4; }
+.profile-drafts-card {
+  min-width: 0; padding: 1.15rem; border: 1px solid var(--profile-primary-line);
+  border-radius: 14px; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.04);
+}
+.profile-drafts-card__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.profile-drafts-card__header p { margin: .35rem 0 0; color: var(--profile-muted); font-size: .74rem; line-height: 1.45; }
+.profile-drafts-card__count { flex: none; color: var(--profile-primary-strong); font-size: .72rem; font-weight: 800; white-space: nowrap; }
+.profile-drafts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; margin-top: 1rem; }
+.profile-draft-card { display: grid; gap: .7rem; min-width: 0; padding: .95rem; border: 1px solid var(--profile-primary-line); border-radius: 12px; background: var(--profile-primary-wash); }
+.profile-draft-card__meta { display: flex; align-items: center; justify-content: space-between; gap: .5rem; color: var(--profile-muted); font-size: .68rem; font-weight: 700; }
+.profile-draft-card h4 { margin: 0; overflow-wrap: anywhere; color: var(--profile-ink); font-size: .9rem; line-height: 1.3; }
+.profile-draft-card h4 a { color: inherit; text-decoration: none; }
+.profile-draft-card h4 a:hover { color: var(--profile-primary-strong); }
+.profile-draft-card > p { min-height: 2.7em; margin: 0; color: var(--profile-muted); font-size: .7rem; line-height: 1.45; }
+.profile-draft-card__actions { display: flex; align-items: center; gap: .45rem; margin-top: auto; }
+.profile-draft-card__actions form { margin: 0; }
+.profile-draft-card__actions .button,
+.profile-draft-card__actions button { min-height: 40px; margin: 0; padding: .5rem .7rem; font-size: .72rem; }
 .profile-listing-pagination { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .4rem; padding: 0 .15rem; color: var(--profile-muted); font-size: .74rem; }
 .profile-listing-pagination > div { display: flex; align-items: center; gap: .4rem; }
 .profile-listing-pagination button { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; min-height: 40px; margin: 0; padding: .45rem .7rem; border: 1px solid var(--profile-primary-line); border-radius: 9px; color: var(--profile-primary-strong); background: #fff; box-shadow: none; font: inherit; font-weight: 750; }
@@ -5390,6 +5424,15 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   .profile-listing-table { min-width: 620px; }
   .profile-listing-pagination { align-items: flex-start; flex-direction: column; }
   .profile-listing-pagination > div { width: 100%; justify-content: space-between; }
+  .profile-drafts-card { padding: .9rem; }
+  .profile-drafts-card__header { flex-direction: column; }
+}
+
+@media (max-width: 560px) {
+  .inline-meetup-location__fields { grid-template-columns: 1fr; }
+  .inline-meetup-location__instructions { grid-column: auto; }
+  .inline-meetup-location__actions { align-items: stretch; flex-direction: column; }
+  .inline-meetup-location__actions button { width: 100%; }
 }
 
 /* CollectTT home hero — compact, search-first, and grounded in the logo's forward ribbons. */

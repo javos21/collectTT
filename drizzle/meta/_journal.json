@@ -288,6 +288,13 @@
       "when": 1789831593923,
       "tag": "0040_add_terms_acceptance",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789998603157,
+      "tag": "0041_many_mariko_yashida",
+      "breakpoints": true
     }
   ]
 }

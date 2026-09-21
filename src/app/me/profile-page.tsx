@@ -54,6 +54,7 @@ type OfferData = { id: string; title: string; amount: string; status: string; cr
 type DealData = { id: string; title: string; role: string; amount: string; state: string; fulfillmentPath: string; createdAt: string; completedAt: string | null };
 type ReputationEventData = { id: string; type: string; title: string | null; occurredAt: string; transactionId: string | null; amount: string | null; role: string | null };
 type DeliveryOptionData = { id: string; key: string; label: string; description: string | null; requiresStore: boolean };
+type PaymentOptionData = { key: string; label: string };
 type RelayStoreData = { id: string; name: string; area: string };
 type MeetupLocationData = { id: string; label: string; area: string; instructions: string | null; active: boolean };
 
@@ -69,6 +70,7 @@ interface ProfilePageProps {
   deals: DealData[];
   reputationEvents: ReputationEventData[];
   deliveryOptions: DeliveryOptionData[];
+  paymentOptions: PaymentOptionData[];
   relayStores: RelayStoreData[];
   identity: {
     userId: string;
@@ -212,8 +214,9 @@ function AccountPanel(props: ProfilePageProps) {
           <div className="profile-form-section">
             <h4>Default payment methods</h4>
             <div className="profile-choice-row">
-              <label><input type="checkbox" name="defaultPaymentMethods" value="cash" defaultChecked={props.sellerPreferences.defaultPaymentMethods.includes('cash')} /><span>Cash</span></label>
-              <label><input type="checkbox" name="defaultPaymentMethods" value="bank_transfer" defaultChecked={props.sellerPreferences.defaultPaymentMethods.includes('bank_transfer')} /><span>Bank transfer</span></label>
+              {props.paymentOptions.map((option) => (
+                <label key={option.key}><input type="checkbox" name="defaultPaymentMethods" value={option.key} defaultChecked={props.sellerPreferences.defaultPaymentMethods.includes(option.key)} /><span>{option.label}</span></label>
+              ))}
             </div>
           </div>
           <button type="submit">Save seller defaults</button>
@@ -441,7 +444,7 @@ function ListingsTable({ listings, saleType, deleteListingAction }: ListingTable
   const [page, setPage] = useState(1);
   const isAuction = saleType === 'auction';
   const tableId = isAuction ? 'active-auctions' : 'active-straight-sales';
-  const typeListings = listings.filter((listing) => listing.saleType === saleType);
+  const typeListings = listings.filter((listing) => listing.saleType === saleType && listing.status !== 'draft');
   const activeListings = typeListings.filter((listing) => listing.status === 'active');
   const visibleListings = showInactive ? typeListings : activeListings;
   const pageCount = Math.max(1, Math.ceil(visibleListings.length / 5));
@@ -531,10 +534,50 @@ function ListingsTable({ listings, saleType, deleteListingAction }: ListingTable
   );
 }
 
+function DraftsGrid({ listings, deleteListingAction }: Pick<ListingTableProps, 'listings' | 'deleteListingAction'>) {
+  const drafts = listings.filter((listing) => listing.status === 'draft');
+  if (drafts.length === 0) return null;
+
+  return (
+    <section className="profile-drafts-card" aria-labelledby="profile-drafts-title">
+      <div className="profile-drafts-card__header">
+        <div>
+          <div className="profile-listings-table-card__title">
+            <span className="profile-listings-table-card__icon" aria-hidden="true"><Pencil size={18} /></span>
+            <h3 id="profile-drafts-title">Drafts</h3>
+          </div>
+          <p>Finish and publish listings you saved for later.</p>
+        </div>
+        <span className="profile-drafts-card__count">{drafts.length} saved</span>
+      </div>
+      <div className="profile-drafts-grid">
+        {drafts.map((listing) => (
+          <article className="profile-draft-card" key={listing.id}>
+            <div className="profile-draft-card__meta">
+              <StatusPill value="draft" />
+              <span>{listing.saleType === 'auction' ? 'Auction' : 'Straight sale'}</span>
+            </div>
+            <h4><Link href={`/listings/${listing.id}/edit`}>{listing.title}</Link></h4>
+            <p>Continue adding details, photos, and delivery choices before publishing.</p>
+            <div className="profile-draft-card__actions">
+              <Link className="button" href={`/listings/${listing.id}/edit`}>Continue editing</Link>
+              <form action={deleteListingAction} onSubmit={(event) => { if (!window.confirm('Delete this draft?')) event.preventDefault(); }}>
+                <input type="hidden" name="listingId" value={listing.id} />
+                <button className="secondary" type="submit">Delete</button>
+              </form>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ListingsPanel({ listings, deleteListingAction, identity }: Pick<ProfilePageProps, 'listings' | 'deleteListingAction' | 'identity'>) {
   const activeCount = listings.filter((listing) => listing.status === 'active').length;
   return (
     <div className="profile-content-stack">
+      <DraftsGrid listings={listings} deleteListingAction={deleteListingAction} />
       <section className="profile-seller-share" aria-labelledby="profile-seller-share-title">
         <div>
           <h3 id="profile-seller-share-title">Promote your active listings</h3>

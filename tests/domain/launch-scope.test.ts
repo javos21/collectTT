@@ -48,4 +48,12 @@ describe('v1 launch scope', () => {
       buyoutCents: 1000,
     })).toThrow('Auction buyouts');
   });
+
+  it('allows any admin-configured payment method in v1', () => {
+    delete process.env.COLLECTTT_LAUNCH_SCOPE;
+    expect(() => assertV1ListingTerms({
+      fulfillmentPaths: ['cash_meetup'],
+      settlementMethods: ['wam'],
+    })).not.toThrow();
+  });
 });

@@ -24,6 +24,6 @@ export const sellerMarketplacePreferences = pgTable('seller_marketplace_preferen
   sellerId: text('seller_id').primaryKey().references(() => profiles.userId, { onDelete: 'cascade' }),
   defaultDeliveryOptionIds: uuid('default_delivery_option_ids').array().notNull().default(sql`ARRAY[]::uuid[]`),
   defaultRelayStoreIds: uuid('default_relay_store_ids').array().notNull().default(sql`ARRAY[]::uuid[]`),
-  defaultPaymentMethods: text('default_payment_methods').array().notNull().default(sql`ARRAY['cash']::text[]`),
+  defaultPaymentMethods: text('default_payment_methods').array().notNull().default(sql`ARRAY[]::text[]`),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "seller_marketplace_preferences" ALTER COLUMN "default_payment_methods" SET DEFAULT ARRAY[]::text[];

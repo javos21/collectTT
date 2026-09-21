@@ -112,7 +112,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
   if (user === null) redirect('/sign-in');
   const params = await searchParams;
 
-  const [identityRows, countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows, reputationEventRows, meetupLocations, sellerPreferences, deliveryOptions, relayStores, notificationPreferences] =
+  const [identityRows, countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows, reputationEventRows, meetupLocations, sellerPreferences, deliveryOptions, paymentOptions, relayStores, notificationPreferences] =
     await Promise.all([
       db.select({ accountName: users.name, displayName: profiles.displayName, phoneE164: profiles.phoneE164 })
         .from(users).innerJoin(profiles, eq(profiles.userId, users.id)).where(eq(users.id, user.userId)).limit(1),
@@ -163,6 +163,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
       sellerMeetupLocationsFor(user.userId),
       sellerMarketplacePreferencesFor(user.userId),
       listMarketplaceOptions('delivery', { activeOnly: true }),
+      listMarketplaceOptions('payment', { activeOnly: true }),
       listRelayStores(db),
       notificationPreferencesFor(user.userId),
     ]);
@@ -248,6 +249,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         feedback={{ error: params.error, success: params.success }}
         savePhoneNumberAction={savePhoneNumberAction}
         deliveryOptions={deliveryOptions.map((option) => ({ id: option.id, key: option.key, label: option.label, description: option.description, requiresStore: option.requiresStore }))}
+        paymentOptions={paymentOptions.map((option) => ({ key: option.key, label: option.label }))}
         relayStores={relayStores.map((store) => ({ id: store.id, name: store.name, area: store.area }))}
         meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area, instructions: location.instructions, active: location.active }))}
         sellerPreferences={{ defaultDeliveryOptionIds: sellerPreferences.defaultDeliveryOptionIds, defaultRelayStoreIds: sellerPreferences.defaultRelayStoreIds, defaultPaymentMethods: sellerPreferences.defaultPaymentMethods }}

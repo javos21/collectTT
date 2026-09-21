@@ -5,7 +5,6 @@ import { ChevronRight, CircleCheck, Clock3, HandCoins, UserRound } from 'lucide-
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
 import { formatMoney } from '@/domain/money';
-import { SETTLEMENT_METHOD_LABELS } from '@/domain/policy/settlement';
 import { activeDealsForUser, type ActiveDealSummary } from '@/services/deals';
 import { pendingOffersReceivedBySeller } from '@/services/offers';
 import { acceptReceivedOfferAction, rejectReceivedOfferAction } from './actions';
@@ -248,7 +247,7 @@ export default async function DealsPage({
                       </div>
                       <div>
                         <dt>Payment</dt>
-                        <dd>{offer.settlementMethod === null ? 'Not recorded' : paymentOption?.label ?? SETTLEMENT_METHOD_LABELS[offer.settlementMethod] ?? offer.settlementMethod}</dd>
+                        <dd>{offer.settlementMethod === null ? 'Not recorded' : paymentOption?.label ?? offer.settlementMethod}</dd>
                       </div>
                       <div>
                         <dt>Received</dt>

@@ -35,10 +35,7 @@ import { getFullServiceDeliveryDays, getListingExpiryDays, UnavailableMarketplac
 import { assertMarketplaceEligible } from './marketplace-eligibility';
 import { assertV1ListingTerms, V1_PAYMENT_WINDOW_HOURS, isV1Launch } from '@/lib/launch-scope';
 
-import { SETTLEMENT_METHODS } from '../domain/policy/settlement';
 import { recordAnalyticsEvent } from './analytics';
-
-export { SETTLEMENT_METHODS };
 
 /** Everything except the category attributes, which are validated separately. */
 export const listingInputSchema = z
@@ -749,7 +746,19 @@ export async function saveSellerMeetupLocation(
 
 export async function sellerMarketplacePreferencesFor(sellerId: string) {
   const rows = await db.select().from(sellerMarketplacePreferences).where(eq(sellerMarketplacePreferences.sellerId, sellerId)).limit(1);
-  return rows[0] ?? { sellerId, defaultDeliveryOptionIds: [], defaultRelayStoreIds: [], defaultPaymentMethods: ['cash'], updatedAt: new Date() };
+  if (rows[0] !== undefined) return rows[0];
+  const paymentOptions = await db
+    .select({ key: marketplaceOptions.key })
+    .from(marketplaceOptions)
+    .where(and(eq(marketplaceOptions.kind, 'payment'), eq(marketplaceOptions.active, true)))
+    .orderBy(asc(marketplaceOptions.sortOrder), asc(marketplaceOptions.label));
+  return {
+    sellerId,
+    defaultDeliveryOptionIds: [],
+    defaultRelayStoreIds: [],
+    defaultPaymentMethods: paymentOptions[0] === undefined ? [] : [paymentOptions[0].key],
+    updatedAt: new Date(),
+  };
 }
 
 export async function saveSellerMarketplacePreferences(
@@ -772,8 +781,14 @@ export async function saveSellerMarketplacePreferences(
     ));
     if (stores.length !== relayStoreIds.length) throw new Error('Choose only active pickup stores.');
   }
-  const methods = [...new Set(input.defaultPaymentMethods)].filter((method) => ['cash', 'bank_transfer'].includes(method));
+  const methods = [...new Set(input.defaultPaymentMethods)].filter((method) => method.trim() !== '');
   if (methods.length === 0) throw new Error('Choose at least one default payment method.');
+  const paymentOptions = await db.select({ key: marketplaceOptions.key }).from(marketplaceOptions).where(and(
+    eq(marketplaceOptions.kind, 'payment'),
+    eq(marketplaceOptions.active, true),
+    inArray(marketplaceOptions.key, methods),
+  ));
+  if (paymentOptions.length !== methods.length) throw new Error('Choose only active payment methods.');
   await db.insert(sellerMarketplacePreferences).values({ sellerId, defaultDeliveryOptionIds: deliveryOptionIds, defaultRelayStoreIds: relayStoreIds, defaultPaymentMethods: methods }).onConflictDoUpdate({ target: sellerMarketplacePreferences.sellerId, set: { defaultDeliveryOptionIds: deliveryOptionIds, defaultRelayStoreIds: relayStoreIds, defaultPaymentMethods: methods, updatedAt: sql`now()` } });
 }
 
