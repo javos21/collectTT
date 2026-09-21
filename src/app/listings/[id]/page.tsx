@@ -581,7 +581,7 @@ export default async function ListingPage({
               )}
             </form>
           ) : (
-            <div className="buybox__state">This listing is no longer available for new reservations.</div>
+            <div className="buybox__state">This listing is no longer available.</div>
           )}
 
           <div className="trust">

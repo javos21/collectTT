@@ -7,6 +7,8 @@ import { AttributeFields } from './attribute-fields';
 import { DeliveryFields } from './delivery-fields';
 import { ImageUploader } from './image-uploader';
 import { SaleTypeFields, type SaleType } from './sale-type-fields';
+import { InlineMeetupLocationForm } from '@/app/listings/meetup-location-form';
+import type { InlineMeetupLocation } from '@/app/listings/meetup-location-actions';
 
 type RelayStore = { id: string; name: string; area: string };
 type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; fulfillmentPath: string; defaultDays: number };
@@ -84,6 +86,8 @@ export function ListingForm({
   const [imageIds, setImageIds] = useState<string[]>(initialImages.map((image) => image.id));
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
   const [selectedDeliveryOptionIds, setSelectedDeliveryOptionIds] = useState<string[]>([]);
+  const [availableMeetupLocations, setAvailableMeetupLocations] = useState<MeetupLocation[]>([...meetupLocations]);
+  const [selectedMeetupLocationId, setSelectedMeetupLocationId] = useState(initialMeetupLocationId ?? '');
   const steps = STEPS;
 
   useEffect(() => {
@@ -95,6 +99,11 @@ export function ListingForm({
     setSelectedDeliveryOptionIds(ids);
   }, []);
   const hasMeetupDelivery = deliveryOptions.some((option) => option.fulfillmentPath === 'cash_meetup' && selectedDeliveryOptionIds.includes(option.id));
+
+  function handleMeetupLocationCreated(location: InlineMeetupLocation) {
+    setAvailableMeetupLocations((current) => [location, ...current.filter((item) => item.id !== location.id)]);
+    setSelectedMeetupLocationId(location.id);
+  }
 
   function validateStep(stepToValidate: number): boolean {
     const form = formRef.current;
@@ -237,14 +246,17 @@ export function ListingForm({
         <legend>Delivery</legend>
         {stepError?.target === 'delivery' && <div className="create-error" role="alert">{stepError.message}</div>}
         <DeliveryFields deliveryOptions={deliveryOptions} relayStoreOptions={relayStoreOptions} defaultDeliveryOptionIds={defaultDeliveryOptionIds} defaultRelayStoreIds={defaultRelayStoreIds} onSelectionChange={handleDeliverySelectionChange} />
-        {hasMeetupDelivery && meetupLocations.length > 0 && (
-          <div className="form-field form-field--compact">
-            <label htmlFor="meetupLocationId">Meetup location</label>
-            <select id="meetupLocationId" name="meetupLocationId" defaultValue={initialMeetupLocationId ?? ''}>
-              <option value="">Choose a saved meetup location</option>
-              {meetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
-            </select>
-            <small>One saved location is preselected automatically. If you have multiple, choose the one for this listing.</small>
+        {hasMeetupDelivery && (
+          <div className="meetup-location-picker">
+            <div className="form-field form-field--compact">
+              <label htmlFor="meetupLocationId">Meetup location</label>
+              <select id="meetupLocationId" name="meetupLocationId" value={selectedMeetupLocationId} onChange={(event) => setSelectedMeetupLocationId(event.target.value)}>
+                <option value="">Choose a saved meetup location</option>
+                {availableMeetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
+              </select>
+              <small>{availableMeetupLocations.length === 0 ? 'Add a location here without leaving your listing.' : 'Choose the location buyers should use for this listing.'}</small>
+            </div>
+            <InlineMeetupLocationForm onCreated={handleMeetupLocationCreated} />
           </div>
         )}
       </fieldset>

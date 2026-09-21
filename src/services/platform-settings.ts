@@ -212,9 +212,6 @@ export async function saveMarketplaceOption(
   if (isV1Launch() && input.kind === 'delivery' && input.requiresStore === true) {
     assertLegacyFeatureAllowed('store_custody');
   }
-  if (isV1Launch() && input.kind === 'payment' && !['cash', 'bank_transfer'].includes(input.key)) {
-    assertLegacyFeatureAllowed('seller_payment_window');
-  }
   const requiresStore = input.kind === 'delivery' && input.requiresStore === true;
   const fulfillmentPath: FulfillmentPath | null = input.kind === 'delivery'
     ? requiresStore ? 'relay' : 'cash_meetup'
@@ -299,9 +296,6 @@ export async function removeMarketplaceOption(id: string, adminUserId: string): 
     const rows = await tx.select().from(marketplaceOptions).where(eq(marketplaceOptions.id, id)).limit(1);
     const option = rows[0];
     if (option === undefined) throw new Error('Option not found.');
-    if (isV1Launch() && option.kind === 'payment' && ['cash', 'bank_transfer'].includes(option.key)) {
-      throw new Error('Cash and bank transfer are required payment options for v1.');
-    }
     if (isV1Launch() && option.kind === 'delivery' && option.fulfillmentPath === 'cash_meetup') {
       throw new Error('Cash meetup is required as the v1 delivery option.');
     }

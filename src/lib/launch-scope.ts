@@ -21,7 +21,6 @@ export const LEGACY_FEATURES = [
 export type LegacyFeature = (typeof LEGACY_FEATURES)[number];
 
 export const V1_ALLOWED_FULFILLMENT_PATHS = ['cash_meetup', 'remote_ship', 'relay', 'full_service'] as const;
-export const V1_ALLOWED_SETTLEMENT_METHODS = ['cash', 'bank_transfer'] as const;
 
 /** Provisional platform policy from the product scope; keep it centralized. */
 export const V1_PAYMENT_WINDOW_HOURS = 72;
@@ -82,16 +81,6 @@ export function assertV1ListingTerms(input: {
     throw new V1ScopeError(
       'store_custody',
       'This delivery method is not currently available for new listings.',
-    );
-  }
-
-  const unsupportedPayment = input.settlementMethods.find(
-    (method) => !(V1_ALLOWED_SETTLEMENT_METHODS as readonly string[]).includes(method),
-  );
-  if (unsupportedPayment !== undefined) {
-    throw new V1ScopeError(
-      'seller_payment_window',
-      'v1 listings support cash and direct bank transfer only.',
     );
   }
 

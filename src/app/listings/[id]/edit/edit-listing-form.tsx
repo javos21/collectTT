@@ -3,6 +3,8 @@
 import { FormEvent, useState } from 'react';
 
 import { ImageUploader } from '@/app/listings/new/image-uploader';
+import { InlineMeetupLocationForm } from '@/app/listings/meetup-location-form';
+import type { InlineMeetupLocation } from '@/app/listings/meetup-location-actions';
 
 type ServerAction = (formData: FormData) => Promise<void>;
 
@@ -38,7 +40,7 @@ export function EditListingForm({
   meetupLocationId: string | null;
   acceptsOffers: boolean;
   paymentWindowHours: number;
-  deliveryOptions: readonly { id: string; label: string; expectedDeliveryDays: number }[];
+  deliveryOptions: readonly { id: string; label: string; expectedDeliveryDays: number; fulfillmentPath?: string | null }[];
   locked: boolean;
   error?: string;
   v1?: boolean;
@@ -46,6 +48,14 @@ export function EditListingForm({
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
   const [formError, setFormError] = useState('');
+  const [availableMeetupLocations, setAvailableMeetupLocations] = useState(meetupLocations);
+  const [selectedMeetupLocationId, setSelectedMeetupLocationId] = useState(meetupLocationId ?? '');
+  const hasMeetupDelivery = deliveryOptions.some((option) => option.fulfillmentPath === 'cash_meetup');
+
+  function handleMeetupLocationCreated(location: InlineMeetupLocation) {
+    setAvailableMeetupLocations((current) => [location, ...current.filter((item) => item.id !== location.id)]);
+    setSelectedMeetupLocationId(location.id);
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
@@ -95,13 +105,14 @@ export function EditListingForm({
             <span><strong>Accept offers</strong><small>Let buyers propose a price below your asking price.</small></span>
           </label>
         )}
-        {meetupLocations.length > 0 && (
+        {hasMeetupDelivery && (
           <div className="form-field form-field--compact">
             <label htmlFor="edit-meetup-location">Meetup location</label>
-            <select id="edit-meetup-location" name="meetupLocationId" defaultValue={meetupLocationId ?? ''}>
+            <select id="edit-meetup-location" name="meetupLocationId" value={selectedMeetupLocationId} onChange={(event) => setSelectedMeetupLocationId(event.target.value)}>
               <option value="">No saved location</option>
-              {meetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
+              {availableMeetupLocations.map((location) => <option key={location.id} value={location.id}>{location.label} — {location.area}</option>)}
             </select>
+            <InlineMeetupLocationForm onCreated={handleMeetupLocationCreated} />
           </div>
         )}
         {!v1 && <div className="form-field form-field--compact">
