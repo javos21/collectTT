@@ -1,7 +1,7 @@
 'use client';
 
 import { Plus } from 'lucide-react';
-import { type FormEvent, useEffect, useId, useRef, useState, useTransition } from 'react';
+import { useEffect, useId, useRef, useState, useTransition } from 'react';
 
 import { createMeetupLocationAction, type InlineMeetupLocation } from './meetup-location-actions';
 
@@ -14,6 +14,7 @@ export function InlineMeetupLocationForm({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const labelInputRef = useRef<HTMLInputElement>(null);
+  const fieldsRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const labelId = `${id}-label`;
   const areaId = `${id}-area`;
@@ -24,11 +25,14 @@ export function InlineMeetupLocationForm({
     if (open) labelInputRef.current?.focus();
   }, [open]);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function submit() {
     setError(null);
-    const form = event.currentTarget;
-    const formData = new FormData(form);
+    const fields = fieldsRef.current;
+    if (fields === null) return;
+    const formData = new FormData();
+    for (const input of fields.querySelectorAll<HTMLInputElement>('input[name]')) {
+      formData.append(input.name, input.value);
+    }
 
     startTransition(async () => {
       const result = await createMeetupLocationAction(formData);
@@ -37,7 +41,9 @@ export function InlineMeetupLocationForm({
         return;
       }
       onCreated(result.location);
-      form.reset();
+      for (const input of fields.querySelectorAll<HTMLInputElement>('input[name]')) {
+        input.value = '';
+      }
       setOpen(false);
     });
   }
@@ -59,7 +65,7 @@ export function InlineMeetupLocationForm({
       </button>
 
       {open && (
-        <form id={`${id}-form`} className="inline-meetup-location__form" onSubmit={submit}>
+        <div ref={fieldsRef} id={`${id}-form`} className="inline-meetup-location__form">
           <div className="inline-meetup-location__heading">
             <strong>Add a meetup location</strong>
             <span>This will be saved for future listings too.</span>
@@ -80,10 +86,10 @@ export function InlineMeetupLocationForm({
             </div>
           </div>
           <div className="inline-meetup-location__actions">
-            <button type="submit" disabled={isPending}>{isPending ? 'Saving location…' : 'Save location'}</button>
+            <button type="button" disabled={isPending} onClick={submit}>{isPending ? 'Saving location…' : 'Save location'}</button>
             <button className="secondary" type="button" disabled={isPending} onClick={() => { setOpen(false); setError(null); }}>Cancel</button>
           </div>
-        </form>
+        </div>
       )}
     </div>
   );
