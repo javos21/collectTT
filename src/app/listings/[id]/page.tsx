@@ -42,7 +42,7 @@ export default async function ListingPage({
   const result = await getListing(id, viewer?.userId);
   if (result === null) notFound();
 
-  const { listing, sellerName, sellerSince, images, deliveryOptions, paymentOptions } = result;
+  const { listing, sellerName, sellerSince, images, deliveryOptions, paymentOptions, meetupLocations } = result;
   const [category, sellerSnapshots] = await Promise.all([
     categoryDefinitionWithCatalogValues(listing.category),
     trustSnapshotsForMembers(db, [listing.sellerId]),
@@ -142,6 +142,7 @@ export default async function ListingPage({
       deliveryOptions={choosableDeliveryOptions}
       paymentOptions={paymentOptions}
       relayCandidates={relayCandidates}
+      meetupLocations={meetupLocations}
       v1={v1}
     />
   );
@@ -322,21 +323,18 @@ export default async function ListingPage({
                               </span>
                             )}
                             {option.fulfillmentPath === 'cash_meetup' && (
-                              <span className="settle-list__locations" aria-label="Meetup location">
-                                <span className="settle-list__locations-label">Meetup location</span>
+                              <span className="settle-list__locations" aria-label="Meetup locations">
+                                <span className="settle-list__locations-label">Choose from these public meetup locations</span>
                                 <span className="settle-list__locations-list">
-                                  {result.meetupLocation === null ? (
+                                  {meetupLocations.length === 0 ? (
                                     <span className="settle-list__location settle-list__location--missing">Not specified on this listing</span>
                                   ) : (
-                                    <>
-                                      <span className="settle-list__location">
-                                        {result.meetupLocation.label}{' '}
-                                        <span className="settle-list__location-area">({result.meetupLocation.area})</span>
+                                    meetupLocations.map((location) => (
+                                      <span className="settle-list__location" key={location.id}>
+                                        {location.label}{' '}<span className="settle-list__location-area">({location.area})</span>
+                                        {location.instructions !== null && <span className="settle-list__location-instructions">{location.instructions}</span>}
                                       </span>
-                                      {result.meetupLocation.instructions !== null && (
-                                        <span className="settle-list__location-instructions">{result.meetupLocation.instructions}</span>
-                                      )}
-                                    </>
+                                    ))
                                   )}
                                 </span>
                               </span>

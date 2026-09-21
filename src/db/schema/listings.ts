@@ -210,6 +210,25 @@ export const listingDeliveryOptions = pgTable(
   ],
 );
 
+/** Up to three public meetup choices the buyer may select for a listing. */
+export const listingMeetupLocations = pgTable(
+  'listing_meetup_locations',
+  {
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    meetupLocationId: uuid('meetup_location_id')
+      .notNull()
+      .references(() => sellerMeetupLocations.id, { onDelete: 'restrict' }),
+    position: integer('position').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listingId, t.meetupLocationId] }),
+    uniqueIndex('listing_meetup_locations_position').on(t.listingId, t.position),
+    check('listing_meetup_location_position', sql`${t.position} between 0 and 2`),
+  ],
+);
+
 /**
  * Fixed-price claim history. A listing has one active claim at a time; terminal rows
  * remain for transaction linkage, audit history, and activity reporting. Legacy queue
@@ -287,6 +306,8 @@ export const bids = pgTable(
      */
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path'),
     deliveryOptionId: uuid('delivery_option_id').references(() => marketplaceOptions.id, { onDelete: 'set null' }),
+    /** The public meetup point selected by this bidder. */
+    meetupLocationId: uuid('meetup_location_id').references(() => sellerMeetupLocations.id, { onDelete: 'set null' }),
     relayStoreId: uuid('relay_store_id'),
     status: bidStatusEnum('status').notNull().default('active'),
     /** True if this bid triggered an anti-snipe extension. Shown in the live feed. */

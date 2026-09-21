@@ -70,7 +70,7 @@ export async function createListingAction(formData: FormData): Promise<void> {
       autoRelistOnRenege: formData.get('autoRelistOnRenege') !== null,
       imageIds: formData.getAll('imageIds').map(String),
       attributes: collectAttributes(definition, formData),
-      meetupLocationId: String(formData.get('meetupLocationId') ?? '').trim() || undefined,
+      meetupLocationIds: formData.getAll('meetupLocationIds').map(String),
     }, { publish: formData.get('intent') !== 'draft' });
 
     redirect(formData.get('intent') === 'draft' ? `/listings/${listing.id}/edit` : `/listings/${listing.id}`);

@@ -24,7 +24,7 @@ export default async function EditListingPage({
 
   const result = await getListing(id, user.userId);
   if (result === null) notFound();
-  const { listing, images, deliveryOptions } = result;
+  const { listing, images, deliveryOptions, meetupLocations: listingMeetupLocations } = result;
   if (listing.sellerId !== user.userId) redirect(`/listings/${id}`);
   if (listing.status !== 'active' && listing.status !== 'draft') redirect(`/listings/${id}`);
   const [activity, auditEvents, meetupLocations] = await Promise.all([
@@ -87,7 +87,7 @@ export default async function EditListingPage({
         saleType={listing.saleType}
         status={listing.status}
         meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area }))}
-        meetupLocationId={listing.meetupLocationId}
+        meetupLocationIds={listingMeetupLocations.map((location) => location.id)}
         acceptsOffers={listing.acceptsOffers}
         paymentWindowHours={listing.paymentWindowHours}
         deliveryOptions={deliveryOptions}
