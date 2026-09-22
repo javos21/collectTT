@@ -23,7 +23,9 @@ export async function GET(
     const url = await presignDownload(key);
     return NextResponse.redirect(url, {
       status: 307,
-      headers: { 'Cache-Control': 'public, max-age=300' },
+      // The Location contains an expiring signature. A shared/public cache can
+      // replay a stale redirect on mobile browsers after the R2 URL has expired.
+      headers: { 'Cache-Control': 'private, no-store' },
     });
   } catch {
     return NextResponse.json({ error: 'Image is not available' }, { status: 404 });
