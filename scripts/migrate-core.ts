@@ -21,6 +21,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool, type PoolClient } from 'pg';
 
 import { sslConfig } from '../src/db/ssl';
+import { CATEGORY_LIST } from '../src/domain/categories/definitions';
 import { connectForMigration } from './migration-connection';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -49,6 +50,45 @@ export function describeTarget(raw: string | undefined): string {
 
 interface MigrationExecutor {
   execute: (query: ReturnType<typeof sql>) => Promise<{ rows: unknown[] }>;
+}
+
+/**
+ * Keep the category foreign-key mirror in sync while the migration connection is
+ * already open. Running this as a second startup process can exceed Supabase's
+ * session-pool limit during a rolling deploy.
+ */
+async function syncCategories(executor: MigrationExecutor): Promise<void> {
+  for (const definition of CATEGORY_LIST) {
+    await executor.execute(sql`
+      insert into categories (key, label, schema_version, sort_order, active)
+      values (${definition.key}, ${definition.label}, ${definition.version}, ${definition.sortOrder}, true)
+      on conflict (key) do update set
+        label = excluded.label,
+        schema_version = excluded.schema_version,
+        sort_order = excluded.sort_order,
+        active = true,
+        updated_at = now()
+    `);
+    console.log(
+      `[categories] ${definition.key.padEnd(14)} v${definition.version}  ` +
+      `${definition.attributes.length} attributes (${definition.attributes.filter((attribute) => attribute.filterable === true).length} filterable)`,
+    );
+  }
+
+  const keys = CATEGORY_LIST.map((definition) => sql`${definition.key}`);
+  if (keys.length > 0) {
+    const deactivated = await executor.execute(sql`
+      update categories
+      set active = false, updated_at = now()
+      where key not in (${sql.join(keys, sql`, `)})
+      returning key
+    `);
+    for (const row of deactivated.rows as Array<{ key?: string }>) {
+      if (typeof row.key === 'string') console.log(`[categories] ${row.key.padEnd(14)} deactivated (no longer declared)`);
+    }
+  }
+
+  console.log(`[categories] ${CATEGORY_LIST.length} categories synced. No migration required.`);
 }
 
 /**
@@ -110,6 +150,8 @@ export async function runMigrations(connectionString: string, label: string): Pr
       console.log('[migrate] applying circular foreign keys…');
       await migrationDb.execute(sql.raw(readFileSync(FOLLOW_UP, 'utf8')));
     }
+
+    await syncCategories(migrationDb);
 
     console.log('[migrate] done');
   } finally {
