@@ -9,6 +9,8 @@ describe('home listing carousel', () => {
 
     expect(finalImageRule).toContain('width: 100%');
     expect(finalImageRule).toContain('height: 100%');
+    expect(finalImageRule).toContain('min-width: 0');
+    expect(finalImageRule).toContain('min-height: 0');
     expect(finalImageRule).toContain('object-fit: contain');
     expect(finalImageRule).not.toContain('object-fit: cover');
   });
