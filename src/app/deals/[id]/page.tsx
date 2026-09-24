@@ -39,6 +39,7 @@ import {
 import { serializeTrustSnapshot } from '../buyer-snapshot-data';
 import { BuyerSnapshotLink } from '../buyer-snapshot-link';
 import { EvidenceUpload } from './evidence-upload';
+import { CopyPhoneButton } from './copy-phone-button';
 import { evidenceForViewer } from '@/services/transaction-evidence';
 import {
   DISPUTE_REASONS,
@@ -326,7 +327,10 @@ export default async function DealPage({
       {contact !== null && (
         <section className="deal-contact-card" aria-labelledby="deal-contact-title">
           <div><Phone aria-hidden="true" /><h2 id="deal-contact-title">Contact {contact.displayName}</h2></div>
-          <a href={`tel:${contact.phoneE164}`}>{contact.phoneE164}</a>
+          <div className="deal-contact-card__actions">
+            <a href={`tel:${contact.phoneE164}`}>{contact.phoneE164}</a>
+            <CopyPhoneButton phoneNumber={contact.phoneE164} />
+          </div>
           <p>This number is private and available only because this transaction connects you.</p>
         </section>
       )}

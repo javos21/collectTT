@@ -84,7 +84,26 @@
 }
 .deal-contact-card > div { display: flex; align-items: center; gap: .55rem; color: #065f46; }
 .deal-contact-card h2 { margin: 0; font-size: 1rem; }
-.deal-contact-card a { width: fit-content; color: #3730a3; font-size: 1.05rem; font-weight: 800; }
+.deal-contact-card__actions { flex-wrap: wrap; }
+.deal-contact-card__actions > a { width: fit-content; align-self: center; color: #3730a3; font-size: 1.05rem; font-weight: 800; }
+.deal-contact-card__copy {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: .35rem;
+  padding: .55rem .75rem;
+  border: 1px solid #a5b4fc;
+  border-radius: 9px;
+  color: #3730a3;
+  background: #fff;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.deal-contact-card__copy:hover { border-color: #4f46e5; background: #eef2ff; }
+.deal-contact-card__copy:focus-visible { outline: 3px solid rgba(67,56,202,.22); outline-offset: 2px; }
+.deal-contact-card__copy svg { width: 16px; height: 16px; }
 .deal-contact-card p { margin: 0; color: #3f6212; font-size: .82rem; }
 
 /* ---------------------------------------------------------------- public member profile */
