@@ -95,6 +95,7 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
       currency: transactions.currency,
       source: transactions.source,
       attemptNumber: transactions.attemptNumber,
+      fulfillmentPath: transactions.fulfillmentPath,
       state: transactions.state,
       paymentState: transactions.paymentState,
       custodyState: transactions.custodyState,
@@ -189,7 +190,7 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
                       <td>{amount(deal.amountCents, deal.currency)}</td>
                       <td><span className={`admin-status admin-status--${deal.disputeState === 'open' ? 'pending' : statusTone(deal.state)}`}>{deal.disputeState === 'open' ? 'Under review' : label(deal.state)}</span><small>Payment: {label(deal.paymentState)}<br />Custody: {label(deal.custodyState)}</small></td>
                       <td>{deal.hasOpenDispute ? <span className="admin-status admin-status--pending">Needs review</span> : <span className="admin-muted-action">No open dispute</span>}</td>
-                      <td><span className={deal.state === 'open' && deal.paymentDeadlineAt < now ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>Payment {date(deal.paymentDeadlineAt)}</span><small>{deal.sellerDropoffDeadlineAt === null ? 'No drop-off deadline' : `Drop-off ${date(deal.sellerDropoffDeadlineAt)}`}</small></td>
+                      <td><span className={deal.state === 'open' && deal.paymentDeadlineAt < now ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{deal.fulfillmentPath === 'cash_meetup' ? 'Meetup' : 'Payment'} {date(deal.paymentDeadlineAt)}</span><small>{deal.sellerDropoffDeadlineAt === null ? 'No drop-off deadline' : `Drop-off ${date(deal.sellerDropoffDeadlineAt)}`}</small></td>
                       <td><Link className="admin-row-link" href={`/admin/deals/${encodeURIComponent(deal.id)}`}>View deal</Link></td>
                     </tr>
                   ))}

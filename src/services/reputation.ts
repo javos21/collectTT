@@ -33,7 +33,6 @@ import { getRestrictionPolicy } from './platform-settings';
 const COUNTER_COLUMN: Partial<Record<ReputationEventType, keyof typeof reputationCounters.$inferSelect>> = {
   purchase_completed: 'buyCompleted',
   sale_completed: 'sellCompleted',
-  buyer_paid_on_time: 'buyPaidOnTime',
   buyer_reneged_nonpayment: 'buyRenegedTotal',
   buyer_no_show: 'buyNoShows',
   seller_reneged_no_dropoff: 'sellRenegedTotal',
@@ -54,8 +53,6 @@ export interface RecordEventInput {
 const PUBLIC_REPUTATION_EVENT_TYPES: ReputationEventType[] = [
   'purchase_completed',
   'sale_completed',
-  'buyer_paid_on_time',
-  'buyer_paid_late',
   'buyer_reneged_nonpayment',
   'buyer_no_show',
   'seller_delivered_on_time',
@@ -106,19 +103,6 @@ export async function recordEvent(input: RecordEventInput): Promise<boolean> {
 
 export async function ensureCounters(tx: Tx, userId: string): Promise<void> {
   await tx.insert(reputationCounters).values({ userId }).onConflictDoNothing();
-}
-
-/** Bump a counter that has no corresponding event (e.g. claims attempted). */
-export async function incrementCounter(
-  tx: Tx,
-  userId: string,
-  column: 'buyClaimsTotal' | 'sellListingsResolved',
-): Promise<void> {
-  await ensureCounters(tx, userId);
-  await tx
-    .update(reputationCounters)
-    .set({ [column]: sql`${reputationCounters[column]} + 1` })
-    .where(eq(reputationCounters.userId, userId));
 }
 
 /**
@@ -327,10 +311,8 @@ export type TrustSnapshot = {
   area: string | null;
   memberSince: Date;
   counters: {
-    buyClaimsTotal: number;
     buyCompleted: number;
     buyReneged90d: number;
-    buyPaidOnTime: number;
     sellCompleted: number;
     sellReneged90d: number;
     successfulAuctions: number;
@@ -362,10 +344,8 @@ export async function trustSnapshotsForMembers(
         displayName: profiles.displayName,
         area: profiles.area,
         memberSince: profiles.memberSince,
-        buyClaimsTotal: reputationCounters.buyClaimsTotal,
         buyCompleted: reputationCounters.buyCompleted,
         buyReneged90d: reputationCounters.buyReneged90d,
-        buyPaidOnTime: reputationCounters.buyPaidOnTime,
         sellCompleted: reputationCounters.sellCompleted,
         sellReneged90d: reputationCounters.sellReneged90d,
       })
@@ -418,10 +398,8 @@ export async function trustSnapshotsForMembers(
         area: profile.area,
         memberSince: profile.memberSince,
         counters: {
-          buyClaimsTotal: profile.buyClaimsTotal ?? 0,
           buyCompleted: profile.buyCompleted ?? 0,
           buyReneged90d: profile.buyReneged90d ?? 0,
-          buyPaidOnTime: profile.buyPaidOnTime ?? 0,
           sellCompleted: profile.sellCompleted ?? 0,
           sellReneged90d: profile.sellReneged90d ?? 0,
           successfulAuctions: auctionCountByUser.get(profile.userId) ?? 0,

@@ -14,7 +14,6 @@ export const LEGACY_FEATURES = [
   'store_custody',
   'reserve_price',
   'auction_buyout',
-  'seller_payment_window',
   'pro',
   'raffle',
 ] as const;
@@ -70,7 +69,6 @@ export function assertV1ListingTerms(input: {
   acceptsOffers?: boolean;
   reserveCents?: number | null;
   buyoutCents?: number | null;
-  paymentWindowHours?: number;
 }): void {
   if (!isV1Launch()) return;
 
@@ -89,11 +87,5 @@ export function assertV1ListingTerms(input: {
   }
   if (input.buyoutCents !== undefined && input.buyoutCents !== null) {
     throw new V1ScopeError('auction_buyout', 'Auction buyouts are not available in v1.');
-  }
-  if (input.paymentWindowHours !== undefined && input.paymentWindowHours !== V1_PAYMENT_WINDOW_HOURS) {
-    throw new V1ScopeError(
-      'seller_payment_window',
-      `v1 uses the platform payment window of ${V1_PAYMENT_WINDOW_HOURS} hours.`,
-    );
   }
 }

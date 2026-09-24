@@ -6,10 +6,8 @@ export type BuyerSnapshotData = {
   area: string | null;
   memberSince: string;
   counters: {
-    buyClaimsTotal: number;
     buyCompleted: number;
     buyReneged90d: number;
-    buyPaidOnTime: number;
     sellCompleted: number;
     sellReneged90d: number;
     successfulAuctions: number;

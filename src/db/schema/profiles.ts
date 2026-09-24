@@ -94,11 +94,9 @@ export const reputationCounters = pgTable('reputation_counters', {
     .primaryKey()
     .references(() => profiles.userId, { onDelete: 'cascade' }),
 
-  buyClaimsTotal: integer('buy_claims_total').notNull().default(0),
   buyCompleted: integer('buy_completed').notNull().default(0),
   buyRenegedTotal: integer('buy_reneged_total').notNull().default(0),
   buyReneged90d: integer('buy_reneged_90d').notNull().default(0),
-  buyPaidOnTime: integer('buy_paid_on_time').notNull().default(0),
   buyNoShows: integer('buy_no_shows').notNull().default(0),
 
   sellListingsResolved: integer('sell_listings_resolved').notNull().default(0),

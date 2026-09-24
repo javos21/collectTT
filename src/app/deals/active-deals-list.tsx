@@ -145,7 +145,7 @@ export function ActiveDealsList({
         <div className="active-deals__empty">
           <CircleCheck aria-hidden="true" />
           <strong>{mode === 'physical' ? physicalEmptyLabel(task) : 'No active deals match this filter.'}</strong>
-          <span>{mode === 'physical' ? 'Your other open deals are still available in In action.' : 'Accepted deals will appear here while payment or fulfilment is in progress.'}</span>
+            <span>{mode === 'physical' ? 'Your other open deals are still available in In action.' : 'Accepted deals will appear here while the transaction is in progress.'}</span>
         </div>
       ) : (
         <ol className="active-deals__list" aria-label={mode === 'physical' ? 'Collect and drop-off hand-offs' : 'Active deals'}>
@@ -171,11 +171,13 @@ export function ActiveDealsList({
                       <span>{deal.currentState}</span>
                       <strong>{deal.nextStep}</strong>
                     </div>
-                    <div className="active-deal__deadline">
-                      <Clock3 aria-hidden="true" />
-                      <span>Due</span>
-                      <time dateTime={deal.deadlineAt}>{formatDeadline(deal.deadlineAt)}</time>
-                    </div>
+                    {deal.deadlineAt !== null && (
+                      <div className="active-deal__deadline">
+                        <Clock3 aria-hidden="true" />
+                        <span>Due</span>
+                        <time dateTime={deal.deadlineAt}>{formatDeadline(deal.deadlineAt)}</time>
+                      </div>
+                    )}
                     <button
                       className="active-deal__toggle"
                       type="button"
@@ -196,7 +198,7 @@ export function ActiveDealsList({
                       <div><dt>Payment</dt><dd>{deal.paymentStatus}</dd></div>
                       <div><dt>Delivery</dt><dd>{deal.deliveryStatus}</dd></div>
                       <div><dt>Next step</dt><dd>{deal.nextStep}</dd></div>
-                      <div><dt>Deadline</dt><dd><time dateTime={deal.deadlineAt}>{formatDeadline(deal.deadlineAt)}</time></dd></div>
+                      {deal.deadlineAt !== null && <div><dt>Deadline</dt><dd><time dateTime={deal.deadlineAt}>{formatDeadline(deal.deadlineAt)}</time></dd></div>}
                       {deal.location !== null && <div><dt>Location</dt><dd><MapPin aria-hidden="true" />{deal.location.name}{deal.location.area ? ` · ${deal.location.area}` : ''}</dd></div>}
                     </dl>
                     <div className="active-deal__detail-actions">

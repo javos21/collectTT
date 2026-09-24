@@ -32,7 +32,6 @@ export async function updateListingAction(formData: FormData): Promise<void> {
       description: String(formData.get('description') ?? '') || undefined,
       priceCents: money(formData),
       acceptsOffers: formData.get('acceptsOffers') !== null,
-      paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
       ...(Object.keys(deliveryOptionEstimates).length > 0 ? { deliveryOptionEstimates } : {}),
       imageIds: formData.getAll('imageIds').map(String),
       meetupLocationIds: formData.getAll('meetupLocationIds').map(String),

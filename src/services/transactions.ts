@@ -27,7 +27,7 @@ import { disputes } from '../db/schema/notifications';
 import { enqueue } from '../jobs/enqueue';
 import { notify } from '../notifications/dispatch';
 import { recordAnalyticsEvent } from './analytics';
-import { recordEvent, evaluateRestrictions, incrementCounter } from './reputation';
+import { recordEvent, evaluateRestrictions } from './reputation';
 import {
   openOrRelinkHolding,
   markPickedUp,
@@ -121,7 +121,7 @@ export interface OpenTransactionInput {
   winningBidId?: string | null;
   offerId?: string | null;
   listingTitle: string;
-  /** Listing-wide seller choice; omitted for legacy rows, which use policy defaults. */
+  /** Internal transaction deadline override; cash meetups use it as the meetup-completion window. */
   paymentWindowHours?: number;
   /** Which relay store the buyer chose. Required for the `relay` path only. */
   relayStoreId?: string | null;
@@ -206,30 +206,12 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
     metadata: { attemptNumber, amountCents: input.amountCents },
   });
 
-  await incrementCounter(tx, input.buyerId, 'buyClaimsTotal');
-
   // ★ Deadline jobs enqueued in the SAME transaction that opened the deal.
   await enqueue(
     tx,
     'transaction:payment_window',
     { transactionId: created.id },
     { jobKey: `payment_window:${created.id}`, runAt: deadlines.paymentDeadlineAt },
-  );
-
-  // Two policy reminders: halfway through the payment window and two hours before it.
-  const halfwayAt = new Date(now.getTime() + (deadlines.paymentDeadlineAt.getTime() - now.getTime()) * 0.5);
-  const twoHoursAt = new Date(deadlines.paymentDeadlineAt.getTime() - 2 * 60 * 60 * 1000);
-  await enqueue(
-    tx,
-    'transaction:payment_reminder',
-    { transactionId: created.id, reminderKind: 'halfway' },
-    { jobKey: `payment_reminder:halfway:${created.id}`, runAt: halfwayAt },
-  );
-  await enqueue(
-    tx,
-    'transaction:payment_reminder',
-    { transactionId: created.id, reminderKind: 'two_hours' },
-    { jobKey: `payment_reminder:two_hours:${created.id}`, runAt: twoHoursAt > now ? twoHoursAt : halfwayAt, jobKeyMode: 'preserve_run_at' },
   );
 
   if (deadlines.sellerDropoffDeadlineAt !== null) {
@@ -241,7 +223,6 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
     );
   }
 
-  const deadlineText = deadlines.paymentDeadlineAt.toLocaleString('en-TT');
   const buyerEvent =
     input.source === 'auction_win'
       ? 'auction_won'
@@ -257,8 +238,8 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
     event: buyerEvent,
     data: {
       listingTitle: input.listingTitle,
-      deadline: deadlineText,
       amount: formatMoney(input.amountCents),
+      fulfillmentPath: input.fulfillmentPath,
     },
     linkUrl: `/deals/${created.id}`,
     idempotencyKey: `tx_opened_buyer:${created.id}`,
@@ -272,8 +253,8 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
     data: {
       listingTitle: input.listingTitle,
       buyerName: buyer,
-      deadline: deadlineText,
       amount: formatMoney(input.amountCents),
+      fulfillmentPath: input.fulfillmentPath,
     },
     linkUrl: `/deals/${created.id}`,
     idempotencyKey: `tx_opened_seller:${created.id}`,
@@ -298,6 +279,9 @@ export async function markPaid(tx: Tx, transactionId: string, buyerId: string): 
   const row = await load(tx, transactionId);
   if (row.buyerId !== buyerId) throw new ForbiddenError('Only the buyer can mark a deal paid');
   if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
+  if (row.fulfillmentPath === 'cash_meetup' && row.handoffState === 'awaiting_handoff') {
+    throw new ConflictError('Meetup payment is confirmed when the item is handed over.');
+  }
 
   if (row.paymentState === 'confirmed') return;
   assertPaymentTransition(row.paymentState, 'confirmed');
@@ -392,17 +376,6 @@ async function afterPaymentConfirmed(
   row: Awaited<ReturnType<typeof load>>,
   notifyBuyer = false,
 ): Promise<void> {
-  // Objective fact: on time, or late? Measured against the server-set deadline.
-  const now = await dbNow(tx);
-  const onTime = now.getTime() <= row.paymentDeadlineAt.getTime();
-  await recordEvent({
-    tx,
-    userId: row.buyerId,
-    type: onTime ? 'buyer_paid_on_time' : 'buyer_paid_late',
-    transactionId,
-    counterpartyUserId: row.sellerId,
-  });
-
   if (notifyBuyer) {
     await notify({
       tx,
@@ -591,6 +564,12 @@ export async function completeCashMeetup(
   if (row.handoffState === 'buyer_received') return;
   if (row.state !== 'open' || row.disputeState === 'open') throw new ConflictError('This deal is no longer actionable');
   if (row.fulfillmentPath !== 'cash_meetup') throw new ConflictError('This deal is not a meetup');
+  if (row.handoffState !== 'awaiting_handoff' && row.handoffState !== 'seller_handed_over') {
+    throw new ConflictError('This meetup is not awaiting completion');
+  }
+  if ((await dbNow(tx)).getTime() >= row.paymentDeadlineAt.getTime()) {
+    throw new ConflictError('The meetup window has ended');
+  }
 
   if (row.paymentState !== 'confirmed') {
     assertPaymentTransition(row.paymentState, 'confirmed');
@@ -611,6 +590,7 @@ export async function completeCashMeetup(
         eq(transactions.id, transactionId),
         eq(transactions.state, 'open'),
         eq(transactions.fulfillmentPath, 'cash_meetup'),
+        gt(transactions.paymentDeadlineAt, sql`now()`),
         inArray(transactions.paymentState, ['pending', 'buyer_marked_paid', 'confirmed']),
         inArray(transactions.handoffState, ['awaiting_handoff', 'seller_handed_over']),
       ),
@@ -640,10 +620,8 @@ export async function completeCashMeetup(
     reason: 'cash meetup completed',
   });
 
-  // Records buyer_paid_on_time/late, closes competing offers on an accepted-offer
-  // source, and — through completeIfBothTracksDone — finishes the deal now that both
-  // tracks are settled. recordEvent is idempotent, so a legacy row whose payment was
-  // already confirmed does not double-count.
+  // Closes competing offers on an accepted-offer source and — through
+  // completeIfBothTracksDone — finishes the deal now that both tracks are settled.
   await afterPaymentConfirmed(tx, transactionId, row);
 
   await notify({
@@ -725,10 +703,7 @@ export async function disputePayment(
     tx,
     userId: row.buyerId,
     event: 'payment_disputed_buyer',
-    data: {
-      listingTitle: row.listingTitle,
-      deadline: row.paymentDeadlineAt.toLocaleString('en-TT'),
-    },
+    data: { listingTitle: row.listingTitle },
     linkUrl: `/deals/${transactionId}`,
     idempotencyKey: `payment_disputed:${transactionId}:${Date.now()}`,
   });
@@ -767,18 +742,6 @@ export async function extendPaymentDeadline(input: {
     metadata: { previousDeadlineAt: row.paymentDeadlineAt.toISOString(), extendedHours: input.hours },
   });
   await enqueue(input.tx, 'transaction:payment_window', { transactionId: input.transactionId }, { jobKey: `payment_window:${input.transactionId}`, runAt: nextDeadline });
-  await enqueue(input.tx, 'transaction:payment_reminder', { transactionId: input.transactionId, reminderKind: 'halfway' }, { jobKey: `payment_reminder:halfway:${input.transactionId}`, runAt: new Date(now.getTime() + (nextDeadline.getTime() - now.getTime()) * 0.5) });
-  await enqueue(input.tx, 'transaction:payment_reminder', { transactionId: input.transactionId, reminderKind: 'two_hours' }, { jobKey: `payment_reminder:two_hours:${input.transactionId}`, runAt: new Date(nextDeadline.getTime() - 2 * 60 * 60 * 1000) });
-  for (const userId of [row.buyerId, row.sellerId]) {
-    await notify({
-      tx: input.tx,
-      userId,
-      event: 'payment_deadline_extended',
-      data: { listingTitle: row.listingTitle, deadline: nextDeadline.toLocaleString('en-TT') },
-      linkUrl: `/deals/${input.transactionId}`,
-      idempotencyKey: `payment_deadline_extended:${input.transactionId}:${userId}:${nextDeadline.toISOString()}`,
-    });
-  }
   return updated[0]!.paymentDeadlineAt;
 }
 
@@ -919,7 +882,7 @@ export interface TerminateInput {
   /** Skip auction runner-up promotion when the seller is at fault. */
   promoteNext?: boolean;
   /** Require the relevant deadline to have elapsed at the final mutation. */
-  dueAt?: 'payment' | 'seller_dropoff';
+  dueAt?: 'payment' | 'meetup' | 'seller_dropoff';
 }
 
 /**
@@ -951,7 +914,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
 
   // The payment expiry handler may have read "not confirmed" before a concurrent
   // confirmation committed. Re-check the current locked row before assigning blame.
-  if (input.dueAt === 'payment' && row.paymentState === 'confirmed') return false;
+  if ((input.dueAt === 'payment' || input.dueAt === 'meetup') && row.paymentState === 'confirmed') return false;
   if (
     input.dueAt === 'seller_dropoff'
     && (row.paymentState !== 'confirmed' || row.custodyState !== 'awaiting_dropoff')
@@ -960,7 +923,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
   const toState = REASON_TO_STATE[reason];
   assertTransactionTransition('open', toState);
 
-  const duePredicate = input.dueAt === 'payment'
+  const duePredicate = input.dueAt === 'payment' || input.dueAt === 'meetup'
     ? lte(transactions.paymentDeadlineAt, sql`now()`)
     : input.dueAt === 'seller_dropoff'
       ? lte(transactions.sellerDropoffDeadlineAt, sql`now()`)
@@ -1018,16 +981,17 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
     },
   });
 
-  // Keep the payment track visible in the audit trail when a deal ends before payment
-  // is confirmed. The overall renege says who lost the deal; this row says exactly why.
-  if (row.paymentState !== 'confirmed') {
+  // A meetup no-show is not a payment-timing event. The terminal payment state still
+  // records that no money was settled, but the overall no-show transition is the only
+  // audit fact needed for the meetup expiry.
+  if (row.paymentState !== 'confirmed' && reason !== 'buyer_no_show') {
     await recordTransition(tx, {
       transactionId,
       track: 'payment',
       from: row.paymentState,
       to: 'failed',
       actorRole: 'system',
-      reason: reason === 'non_payment' || reason === 'buyer_no_show'
+      reason: reason === 'non_payment'
         ? 'payment deadline expired — no payment was confirmed'
         : 'deal ended before payment was confirmed',
       metadata: {
@@ -1067,21 +1031,27 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
 
   // ---- notify
   if (toState === 'reneged_buyer') {
+    const buyerEvent = reason === 'buyer_no_show'
+      ? 'meetup_window_lapsed_buyer'
+      : 'payment_window_lapsed_buyer';
+    const sellerEvent = reason === 'buyer_no_show'
+      ? 'meetup_window_lapsed_seller'
+      : 'payment_window_lapsed_seller';
     await notify({
       tx,
       userId: row.buyerId,
-      event: 'payment_window_lapsed_buyer',
+      event: buyerEvent,
       data: { listingTitle: row.listingTitle },
       linkUrl: `/deals/${transactionId}`,
-      idempotencyKey: `lapsed_buyer:${transactionId}`,
+      idempotencyKey: `${reason === 'buyer_no_show' ? 'meetup' : 'payment'}_lapsed_buyer:${transactionId}`,
     });
     await notify({
       tx,
       userId: row.sellerId,
-      event: 'payment_window_lapsed_seller',
+      event: sellerEvent,
       data: { listingTitle: row.listingTitle },
       linkUrl: `/deals/${transactionId}`,
-      idempotencyKey: `lapsed_seller_payment:${transactionId}`,
+      idempotencyKey: `${reason === 'buyer_no_show' ? 'meetup' : 'payment'}_lapsed_seller:${transactionId}`,
     });
   }
   if (toState === 'reneged_seller') {
@@ -1357,10 +1327,7 @@ export async function promoteNextCandidate(
           tx: sp,
           userId: candidate.buyerId,
           event: 'auction_runner_up_buyer',
-          data: {
-            listingTitle: listing.title,
-            deadline: (await load(sp, opened.id)).paymentDeadlineAt.toLocaleString('en-TT'),
-          },
+          data: { listingTitle: listing.title, fulfillmentPath: candidate.fulfillmentPath },
           linkUrl: `/deals/${opened.id}`,
           idempotencyKey: `promoted:${opened.id}`,
         });

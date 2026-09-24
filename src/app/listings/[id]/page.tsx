@@ -130,7 +130,6 @@ export default async function ListingPage({
   const choosableDeliveryOptions = deliveryOptions.filter(
     (option) => !option.requiresStore || relayCandidates.length > 0,
   );
-  const paymentWindowDays = Math.ceil(listing.paymentWindowHours / 24);
   const offersEnabled = isLegacyFeatureAllowed('offers');
   const v1 = isV1Launch();
   const canMakeOffer = offersEnabled && !isAuction && viewer !== null && !isSeller && listing.status === 'active' && listing.acceptsOffers;
@@ -355,13 +354,6 @@ export default async function ListingPage({
                     <li key={option.key}>{option.label}</li>
                   ))}
                 </ul>
-                <div className="listing-settlement-panel__notes">
-                  <p>
-                    <strong>
-                      Payment is expected within {paymentWindowDays} day{paymentWindowDays === 1 ? '' : 's'} after a deal opens.
-                    </strong>
-                  </p>
-                </div>
               </div>
             </section>
 

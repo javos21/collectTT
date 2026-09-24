@@ -98,7 +98,7 @@ function historyReason(value: string | null) {
   if (value === 'offer_accept') return 'Offer accepted';
   if (value === 'auction_win') return 'Auction won';
   if (value === 'auction_runner_up') return 'Auction promotion';
-  if (value === 'non_payment') return 'Buyer payment deadline expired';
+  if (value === 'non_payment') return 'Buyer payment was not confirmed';
   if (value === 'buyer_no_show') return 'Buyer did not complete the meetup';
   if (value === 'seller_no_dropoff') return 'Seller drop-off deadline expired';
   if (value === 'seller_no_show') return 'Seller did not complete the meetup';
@@ -120,20 +120,28 @@ function historyDescription(
 
   if (event.track === 'overall' && event.toState === 'open') {
     if (event.reason === 'claim') {
-      return `The buyer reserved the listing. Payment was due by ${formatDateTime(deal.paymentDeadlineAt)}${usesCustodyTrack(deal.fulfillmentPath) ? '; seller drop-off was not required until payment was confirmed' : ''}.`;
+      return deal.fulfillmentPath === 'cash_meetup'
+        ? 'The buyer reserved the listing. Meetup completion is the next step.'
+        : `The buyer reserved the listing. Payment is the next step${usesCustodyTrack(deal.fulfillmentPath) ? '; seller drop-off follows payment confirmation' : ''}.`;
     }
     if (event.reason === 'offer_accept') {
-      return `The seller accepted the offer. Payment was due by ${formatDateTime(deal.paymentDeadlineAt)}.`;
+      return deal.fulfillmentPath === 'cash_meetup'
+        ? 'The seller accepted the offer. Meetup completion is the next step.'
+        : 'The seller accepted the offer. Payment is the next step.';
     }
-    return 'The deal opened and the buyer payment window started.';
+    return deal.fulfillmentPath === 'cash_meetup'
+      ? 'The deal opened and the meetup can now be completed.'
+      : 'The deal opened and the buyer payment step started.';
   }
 
   if (event.track === 'payment' && event.toState === 'failed') {
-    return `Payment was not confirmed by ${formatDateTime(deal.paymentDeadlineAt)}. The buyer non-payment was recorded; seller drop-off was not required.`;
+    return 'Payment was not confirmed. The buyer non-payment was recorded; seller drop-off was not required.';
   }
 
   if (event.track === 'overall' && event.toState === 'reneged_buyer') {
-    return `The buyer did not pay by ${formatDateTime(deal.paymentDeadlineAt)}. The buyer was penalized, and the seller was not penalized because payment was never confirmed.`;
+    return deal.fulfillmentPath === 'cash_meetup'
+      ? 'The buyer did not complete the meetup. The reservation was released and the buyer no-show was recorded.'
+      : 'The buyer did not complete payment. The buyer was penalized, and the seller was not penalized because payment was never confirmed.';
   }
 
   if (event.track === 'overall' && event.toState === 'reneged_seller') {
@@ -263,7 +271,7 @@ export default async function DealPage({
     }
     if (t.fulfillmentPath === 'cash_meetup') {
       return {
-        steps: ['Awaiting payment', 'Paid & collected'],
+        steps: ['Meetup pending', 'Paid & collected'],
         current: t.paymentState === 'confirmed' || t.handoffState === 'buyer_received' ? 1 : 0,
         off: t.paymentState === 'failed',
       };
@@ -363,7 +371,6 @@ export default async function DealPage({
               <dl className="deal-action-card__facts">
                 <div><CircleDollarSign aria-hidden="true" /><dt>Amount</dt><dd className="num">{formatMoney(t.amountCents)}</dd></div>
                 <div><CreditCard aria-hidden="true" /><dt>Payment method</dt><dd>{settlementLabel}</dd></div>
-                <div><CalendarDays aria-hidden="true" /><dt>Payment due</dt><dd><time dateTime={t.paymentDeadlineAt.toISOString()}>{formatDateTime(t.paymentDeadlineAt)}</time></dd></div>
               </dl>
               <p className="deal-action-card__help">
                 Pay using the method you agreed, then mark it here.
@@ -501,7 +508,7 @@ export default async function DealPage({
         {isOpen && isSeller && t.paymentState === 'pending' && custodyPanel?.state === 'awaiting_dropoff' && (
           <section className="deal-dependency" aria-labelledby="deal-dependency-title">
             <Clock3 aria-hidden="true" />
-            <div><p>Waiting on the buyer</p><h2 id="deal-dependency-title">Payment confirmation</h2><strong>Due {formatDateTime(t.paymentDeadlineAt)}</strong><span>The buyer still needs to mark {formatMoney(t.amountCents)} as paid.</span></div>
+            <div><p>Waiting on the buyer</p><h2 id="deal-dependency-title">Payment confirmation</h2><span>The buyer still needs to mark {formatMoney(t.amountCents)} as paid.</span></div>
           </section>
         )}
 

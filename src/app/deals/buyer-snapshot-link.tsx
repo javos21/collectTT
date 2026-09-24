@@ -10,8 +10,6 @@ import type { BuyerSnapshotData } from './buyer-snapshot-data';
 const EVENT_LABELS: Record<string, string> = {
   purchase_completed: 'Purchase completed',
   sale_completed: 'Sale completed',
-  buyer_paid_on_time: 'Payment made on time',
-  buyer_paid_late: 'Payment made late',
   buyer_reneged_nonpayment: 'Buyer did not pay',
   buyer_no_show: 'Buyer no-show',
   seller_delivered_on_time: 'Delivery completed on time',
@@ -61,7 +59,6 @@ export function BuyerSnapshotLink({
   const titleId = `buyer-snapshot-title-${snapshot.userId}`;
   const subject = subjectLabel.toLowerCase();
   const completedDeals = snapshot.counters.buyCompleted + snapshot.counters.sellCompleted;
-  const paidOnTime = `${snapshot.counters.buyPaidOnTime} / ${snapshot.counters.buyClaimsTotal}`;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -168,10 +165,6 @@ export function BuyerSnapshotLink({
               <div className="buyer-snapshot-modal__metric">
                 <strong>{snapshot.counters.successfulAuctions}</strong>
                 <span>Successful auctions</span>
-              </div>
-              <div className="buyer-snapshot-modal__metric">
-                <strong>{paidOnTime}</strong>
-                <span>Paid on time / purchases</span>
               </div>
             </div>
 

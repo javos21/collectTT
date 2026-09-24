@@ -11,6 +11,8 @@ export const REPUTATION_EVENT_TYPES = [
   'purchase_completed',
   'sale_completed',
   // buyer facts
+  // Legacy values remain in the database enum so historical rows stay readable, but
+  // new transactions no longer emit or expose payment-timing facts.
   'buyer_paid_on_time',
   'buyer_paid_late',
   'buyer_reneged_nonpayment',
@@ -131,14 +133,9 @@ export function isNewMember(completedPurchases: number): boolean {
  */
 export function objectiveSummary(c: {
   buyCompleted: number;
-  buyClaimsTotal: number;
-  buyPaidOnTime: number;
   sellCompleted: number;
 }): string[] {
   const lines: string[] = [];
   lines.push(`${c.buyCompleted + c.sellCompleted} completed deals`);
-  if (c.buyClaimsTotal > 0) {
-    lines.push(`paid on time ${c.buyPaidOnTime} / ${c.buyClaimsTotal} purchases`);
-  }
   return lines;
 }

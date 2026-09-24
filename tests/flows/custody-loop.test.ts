@@ -483,7 +483,7 @@ describe('relay auction close', () => {
 });
 
 describe('custody notification strings', () => {
-  it('renders custody notifications with real dates', async () => {
+  it('does not expose the internal payment deadline in custody notifications', async () => {
     const { notifications } = await import('../../src/db/schema/notifications');
     const { markReceived } = await import('../../src/services/custody');
 
@@ -502,8 +502,8 @@ describe('custody notification strings', () => {
     const received = inbox.find((n) => n.eventType === 'custody_received_buyer');
 
     expect(received).toBeDefined();
-    expect(received!.body).not.toMatch(/Pay by \.$/);
-    expect(received!.body).toMatch(/Pay by \S+/);
+    expect(received!.body).not.toMatch(/Pay by/);
+    expect(received!.body).toContain('collect it');
   });
 
   it('extends the collection deadline after payment, not the tight unpaid one', async () => {
@@ -864,7 +864,6 @@ describe('the full custody loop', () => {
     const before = await db
       .select({
         buyerReneged: reputationCounters.buyRenegedTotal,
-        buyerPaidOnTime: reputationCounters.buyPaidOnTime,
       })
       .from(reputationCounters)
       .where(eq(reputationCounters.userId, buyerA));
@@ -895,7 +894,7 @@ describe('the full custody loop', () => {
     expect(sellerFailureBeforePayment).toHaveLength(0);
 
     // The buyer's payment window is the authoritative failure path and records the
-    // buyer renege without creating a paid-on-time event.
+    // buyer renege without creating payment-timing reputation data.
     await db
       .update(transactions)
       .set({ paymentDeadlineAt: sql`now() - interval '1 hour'` })
@@ -909,7 +908,6 @@ describe('the full custody loop', () => {
     const afterBuyer = await db
       .select({
         buyerReneged: reputationCounters.buyRenegedTotal,
-        buyerPaidOnTime: reputationCounters.buyPaidOnTime,
       })
       .from(reputationCounters)
       .where(eq(reputationCounters.userId, buyerA));
@@ -919,7 +917,6 @@ describe('the full custody loop', () => {
       .where(eq(reputationCounters.userId, seller));
 
     expect(afterBuyer[0]?.buyerReneged).toBe((before[0]?.buyerReneged ?? 0) + 1);
-    expect(afterBuyer[0]?.buyerPaidOnTime).toBe(before[0]?.buyerPaidOnTime ?? 0);
     expect(afterSeller[0]?.sellerReneged).toBe(beforeSeller[0]?.sellerReneged ?? 0);
 
     const facts = await db

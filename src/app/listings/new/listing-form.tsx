@@ -286,16 +286,6 @@ export function ListingForm({
             </label>
           ))}
         </div>
-        {!v1 && <div className="payment-step__period">
-          <label htmlFor="paymentWindowHours">Payment period</label>
-          <p className="payment-step__hint payment-step__hint--period">This applies to every payment and fulfillment option on the listing.</p>
-          <select id="paymentWindowHours" name="paymentWindowHours" defaultValue="72">
-            <option value="48">Within 2 days</option>
-            <option value="72">Within 3 days</option>
-            <option value="120">Within 5 days</option>
-            <option value="168">Within 7 days</option>
-          </select>
-        </div>}
       </fieldset>
 
       {imageIds.map((imageId) => <input key={imageId} type="hidden" name="imageIds" value={imageId} />)}

@@ -24,6 +24,8 @@ const str = (data: Record<string, unknown>, key: string, fallback = ''): string 
   return typeof v === 'string' ? v : fallback;
 };
 
+const isCashMeetup = (data: Record<string, unknown>): boolean => data.fulfillmentPath === 'cash_meetup';
+
 export const EVENTS = {
   // ---------------------------------------------------------------- listings
   listing_claimed_seller: {
@@ -31,13 +33,15 @@ export const EVENTS = {
     channels: ['in_app', 'email'],
     title: (d) => `${str(d, 'buyerName', 'Someone')} reserved "${str(d, 'listingTitle')}"`,
     body: (d) =>
-      `${str(d, 'buyerName', 'A buyer')} reserved your listing. They have until ${str(d, 'deadline')} to pay.`,
+      `${str(d, 'buyerName', 'A buyer')} reserved your listing. Open the deal to review the next steps.`,
   },
   claim_confirmed_buyer: {
     type: 'claim_confirmed_buyer',
     channels: ['in_app', 'email'],
     title: (d) => `You reserved "${str(d, 'listingTitle')}"`,
-    body: (d) => `Your purchase commitment is open. Pay the seller by ${str(d, 'deadline')}, then mark it paid in the app.`,
+    body: (d) => isCashMeetup(d)
+      ? `Your purchase commitment is open. Meet the seller, pay at the agreed meetup, and confirm collection in the app.`
+      : `Your purchase commitment is open. Pay the seller, then mark it paid in the app.`,
   },
   offer_received_seller: {
     type: 'offer_received_seller',
@@ -49,7 +53,9 @@ export const EVENTS = {
     type: 'offer_accepted_buyer',
     channels: ['in_app', 'email'],
     title: (d) => `Your offer was accepted for "${str(d, 'listingTitle')}"`,
-    body: (d) => `Pay ${str(d, 'amount')} by ${str(d, 'deadline')}, then mark it paid.`,
+    body: (d) => isCashMeetup(d)
+      ? `Meet the seller, pay ${str(d, 'amount')} at the agreed meetup, and confirm collection.`
+      : `Pay ${str(d, 'amount')}, then mark it paid.`,
   },
   offer_accepted_seller: {
     type: 'offer_accepted_seller',
@@ -79,7 +85,9 @@ export const EVENTS = {
     type: 'auction_runner_up_buyer',
     channels: ['in_app', 'email'],
     title: (d) => `You're up for "${str(d, 'listingTitle')}"`,
-    body: (d) => `The previous auction buyer did not complete the deal. Pay by ${str(d, 'deadline')} to secure it.`,
+    body: (d) => isCashMeetup(d)
+      ? `The previous auction buyer did not complete the deal. Meet the seller, pay at the agreed meetup, and confirm collection to secure it.`
+      : `The previous auction buyer did not complete the deal. Pay to secure it.`,
   },
   auction_fallback_offer_buyer: {
     type: 'auction_fallback_offer_buyer',
@@ -123,7 +131,9 @@ export const EVENTS = {
     type: 'auction_won',
     channels: ['in_app', 'email'],
     title: (d) => `You won "${str(d, 'listingTitle')}"`,
-    body: (d) => `Pay ${str(d, 'amount')} by ${str(d, 'deadline')}, then mark it paid.`,
+    body: (d) => isCashMeetup(d)
+      ? `Meet the seller, pay ${str(d, 'amount')} at the agreed meetup, and confirm collection.`
+      : `Pay ${str(d, 'amount')}, then mark it paid.`,
   },
   auction_ended_seller: {
     type: 'auction_ended_seller',
@@ -155,37 +165,31 @@ export const EVENTS = {
     type: 'payment_disputed_buyer',
     channels: ['in_app', 'email'],
     title: (d) => `The seller hasn't received payment for "${str(d, 'listingTitle')}"`,
-    body: (d) => `Your deadline is still ${str(d, 'deadline')} — it was not extended.`,
-  },
-  payment_reminder: {
-    type: 'payment_reminder',
-    channels: ['in_app', 'email'],
-    title: (d) => `Payment due for "${str(d, 'listingTitle')}"`,
-    body: (d) => `You have until ${str(d, 'deadline')}. After that it goes to the next buyer.`,
-  },
-  payment_deadline_soon: {
-    type: 'payment_deadline_soon',
-    channels: ['in_app', 'email'],
-    title: (d) => `Payment due soon for "${str(d, 'listingTitle')}"`,
-    body: (d) => `Your payment deadline is ${str(d, 'deadline')}.`,
-  },
-  payment_deadline_extended: {
-    type: 'payment_deadline_extended',
-    channels: ['in_app', 'email'],
-    title: (d) => `Payment deadline updated for "${str(d, 'listingTitle')}"`,
-    body: (d) => `CollectTT support extended this deal's payment deadline to ${str(d, 'deadline')}.`,
+    body: () => `The seller reported that payment has not arrived. Review the deal and contact the seller if needed.`,
   },
   payment_window_lapsed_buyer: {
     type: 'payment_window_lapsed_buyer',
     channels: ['in_app', 'email'],
     title: (d) => `You lost "${str(d, 'listingTitle')}"`,
-    body: () => `The payment window closed. This is recorded on your account.`,
+    body: () => `Payment was not confirmed, so the reservation was released. This is recorded on your account.`,
   },
   payment_window_lapsed_seller: {
     type: 'payment_window_lapsed_seller',
     channels: ['in_app', 'email'],
-    title: (d) => `Payment deadline passed for "${str(d, 'listingTitle')}"`,
-    body: () => `The buyer did not confirm payment in time. The reservation was released.`,
+    title: (d) => `The reservation was released for "${str(d, 'listingTitle')}"`,
+    body: () => `The buyer did not confirm payment, so the reservation was released.`,
+  },
+  meetup_window_lapsed_buyer: {
+    type: 'meetup_window_lapsed_buyer',
+    channels: ['in_app', 'email'],
+    title: (d) => `You lost "${str(d, 'listingTitle')}"`,
+    body: () => `The meetup was not completed in time, so the reservation was released. This is recorded on your account.`,
+  },
+  meetup_window_lapsed_seller: {
+    type: 'meetup_window_lapsed_seller',
+    channels: ['in_app', 'email'],
+    title: (d) => `The reservation was released for "${str(d, 'listingTitle')}"`,
+    body: () => `The buyer did not complete the meetup, so the reservation was released.`,
   },
 
   // ---------------------------------------------------------------- disputes
@@ -241,7 +245,7 @@ export const EVENTS = {
     type: 'custody_received_buyer',
     channels: ['in_app', 'email'],
     title: (d) => `"${str(d, 'listingTitle')}" is at ${str(d, 'storeName')}`,
-    body: (d) => `Once you mark payment as sent you can collect it. Pay by ${str(d, 'deadline')}.`,
+    body: () => `Once you mark payment as sent you can collect it.`,
   },
   custody_return_to_seller: {
     type: 'custody_return_to_seller',
@@ -293,7 +297,7 @@ export type EventType = keyof typeof EVENTS;
 
 /**
  * These events are operationally important and cannot be muted by a member. They
- * cover commitment, payment/deadline, dispute, security, and restriction changes.
+ * cover commitment, payment, dispute, security, and restriction changes.
  * Preference rows only affect nonessential events; an absent row means enabled.
  */
 const MANDATORY_EVENT_TYPES = new Set<EventType>([
@@ -305,11 +309,10 @@ const MANDATORY_EVENT_TYPES = new Set<EventType>([
   'payment_marked_paid_seller',
   'payment_confirmed_buyer',
   'payment_disputed_buyer',
-  'payment_reminder',
-  'payment_deadline_soon',
-  'payment_deadline_extended',
   'payment_window_lapsed_buyer',
   'payment_window_lapsed_seller',
+  'meetup_window_lapsed_buyer',
+  'meetup_window_lapsed_seller',
   'item_handed_over_buyer',
   'item_received_seller',
   'dispute_submitted_member',

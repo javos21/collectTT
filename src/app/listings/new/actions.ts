@@ -54,7 +54,6 @@ export async function createListingAction(formData: FormData): Promise<void> {
       saleType,
       priceCents: money(formData, 'price'),
       acceptsOffers: formData.get('acceptsOffers') !== null,
-      paymentWindowHours: Number(formData.get('paymentWindowHours') ?? 72),
       startBidCents: money(formData, 'startBid'),
       buyoutCents: money(formData, 'buyout'),
       durationHours: saleType === 'auction' ? Number(formData.get('durationHours') || 48) : undefined,
