@@ -4,6 +4,7 @@ import { count, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { users } from '@/db/schema/auth';
 import { claims, listings } from '@/db/schema/listings';
+import { profiles } from '@/db/schema/profiles';
 import { transactions } from '@/db/schema/transactions';
 import { adminAccess } from '@/lib/admin';
 import { AdminDenied } from './admin-access';
@@ -14,15 +15,15 @@ export default async function AdminPage() {
   if (viewer === null) return <AdminDenied signedIn={false} />;
   if (!isAdmin) return <AdminDenied signedIn />;
 
-  const [userCount, activeListingCount, openTransactionCount, activeClaimCount] = await Promise.all([
-    db.select({ value: count() }).from(users),
+  const [memberCount, activeListingCount, openTransactionCount, activeClaimCount] = await Promise.all([
+    db.select({ value: count() }).from(profiles).innerJoin(users, eq(users.id, profiles.userId)),
     db.select({ value: count() }).from(listings).where(eq(listings.status, 'active')),
     db.select({ value: count() }).from(transactions).where(eq(transactions.state, 'open')),
     db.select({ value: count() }).from(claims).where(eq(claims.status, 'active')),
   ]);
 
   const stats = [
-    { label: 'Members', value: userCount[0]?.value ?? 0, icon: Users, tone: 'purple' },
+    { label: 'Members', value: memberCount[0]?.value ?? 0, icon: Users, tone: 'purple' },
     { label: 'Active listings', value: activeListingCount[0]?.value ?? 0, icon: ClipboardList, tone: 'blue' },
     { label: 'Open deals', value: openTransactionCount[0]?.value ?? 0, icon: Activity, tone: 'green' },
     { label: 'Active claims', value: activeClaimCount[0]?.value ?? 0, icon: Gavel, tone: 'amber' },
