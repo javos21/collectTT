@@ -138,11 +138,13 @@ export default async function DealsPage({
                           {deal.role === 'buying' ? 'Buying' : 'Selling'}
                         </span>
                       </div>
-                      <div className="attention-deal__due">
-                        <Clock3 aria-hidden="true" />
-                        <span>Due</span>
-                        <time dateTime={deal.deadlineAt}>{formatDealDeadline(deal.deadlineAt)}</time>
-                      </div>
+                      {deal.deadlineAt !== null && (
+                        <div className="attention-deal__due">
+                          <Clock3 aria-hidden="true" />
+                          <span>Due</span>
+                          <time dateTime={deal.deadlineAt}>{formatDealDeadline(deal.deadlineAt)}</time>
+                        </div>
+                      )}
                     </div>
                     <div className="attention-deal__body">
                       <strong className="attention-deal__amount num">{formatMoney(deal.amountCents)}</strong>

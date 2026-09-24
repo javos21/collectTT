@@ -390,7 +390,6 @@ async function main(): Promise<void> {
           status: 'active',
           priceCents: item.fixture.saleType === 'straight_sale' ? item.fixture.priceCents : null,
           acceptsOffers: false,
-          paymentWindowHours: 72,
           startBidCents: item.fixture.saleType === 'auction' ? item.fixture.startBidCents : null,
           reserveCents: null,
           buyoutCents: null,

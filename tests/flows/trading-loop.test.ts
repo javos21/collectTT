@@ -28,7 +28,7 @@ import { transactions, transactionEvents } from '../../src/db/schema/transaction
 import { notificationDeliveries } from '../../src/db/schema/notifications';
 import { claimListing } from '../../src/db/atomic/claim-listing';
 import { placeBid } from '../../src/db/atomic/place-bid';
-import { markPaid, completeCashMeetup, confirmPayment, disputePayment, markItemHandedOver, confirmItemReceived, acceptAuctionFallbackOffer, rescheduleTransactionDeadlineJobs } from '../../src/services/transactions';
+import { markPaid, completeCashMeetup, confirmPayment, disputePayment, acceptAuctionFallbackOffer } from '../../src/services/transactions';
 import { submitDispute } from '../../src/services/disputes';
 import { acceptOffer, rejectOffer, submitOffer } from '../../src/services/offers';
 import { assertMarketplaceEligible } from '../../src/services/marketplace-eligibility';
@@ -37,7 +37,6 @@ import { auctionClose } from '../../src/jobs/tasks/auction-close';
 import {
   paymentWindowExpired,
   promoteNext,
-  receiptWindowExpired,
 } from '../../src/jobs/tasks/transaction-windows';
 
 // Graphile Worker passes a Helpers object; the handlers only use `logger`.
@@ -495,8 +494,7 @@ describe('★ fixed-price offers (v1)', () => {
     expect(acceptanceEmails).toHaveLength(1);
     expect((await db.select().from(offers).where(eq(offers.id, competingOffer.id)))[0]?.status).toBe('pending');
 
-    await db.transaction(async (tx) => markPaid(tx, result.transactionId, buyers[2]!));
-    await db.transaction(async (tx) => confirmPayment(tx, result.transactionId, seller));
+    await db.transaction(async (tx) => completeCashMeetup(tx, result.transactionId, buyers[2]!));
 
     expect((await db.select().from(offers).where(eq(offers.id, competingOffer.id)))[0]?.status).toBe('rejected');
     expect((await db.select().from(offers).where(eq(offers.id, unrelatedOffer.id)))[0]?.status).toBe('pending');
@@ -506,22 +504,25 @@ describe('★ fixed-price offers (v1)', () => {
 // ════════════════════════════════════════════════════════ handshake
 
 describe('★ mark-paid / confirm-received handshake', () => {
-  it('supports the legacy seller hand-off and buyer receipt handshake', async () => {
+  it('does not allow a new meetup deal to be paid before the hand-off', async () => {
     const listingId = await makeListing();
-    const claim = await claimListing({ listingId, claimantId: buyers[4]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const claim = await claimListing({ listingId, claimantId: buyers[3]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
     const txId = claim.transactionId!;
 
-    await db.transaction(async (tx) => markPaid(tx, txId, buyers[4]!));
-    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
-    expect((await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0]).toMatchObject({ state: 'open', handoff: 'awaiting_handoff' });
+    await expect(db.transaction(async (tx) => markPaid(tx, txId, buyers[3]!))).rejects.toThrow(/when the item is handed over/i);
+    const row = (await db.select({ paymentState: transactions.paymentState, handoffState: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(row).toMatchObject({ paymentState: 'pending', handoffState: 'awaiting_handoff' });
+  });
 
-    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
-    expect((await db.select({ handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0]?.handoff).toBe('seller_handed_over');
-    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
-    await db.transaction(async (tx) => confirmItemReceived(tx, txId, buyers[4]!));
-    await db.transaction(async (tx) => confirmItemReceived(tx, txId, buyers[4]!));
-    expect((await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0]).toMatchObject({ state: 'completed', handoff: 'buyer_received' });
-    expect((await db.select().from(transactionEvents).where(and(eq(transactionEvents.transactionId, txId), eq(transactionEvents.fromState, 'seller_handed_over'))))).toHaveLength(1);
+  it('does not complete a meetup after its completion window has ended', async () => {
+    const listingId = await makeListing();
+    const claim = await claimListing({ listingId, claimantId: buyers[2]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
+    const txId = claim.transactionId!;
+    await expirePaymentWindow(txId);
+
+    await expect(db.transaction(async (tx) => completeCashMeetup(tx, txId, buyers[2]!))).rejects.toThrow(/meetup window has ended/i);
+    const row = (await db.select({ state: transactions.state, paymentState: transactions.paymentState }).from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(row).toMatchObject({ state: 'open', paymentState: 'pending' });
   });
 
   it('completes an acknowledged v1 meetup in a single buyer action', async () => {
@@ -579,31 +580,6 @@ describe('★ mark-paid / confirm-received handshake', () => {
     expect(row.disputeState).toBe('open');
   });
 
-  it('does not terminate after a concurrent payment confirmation commits', async () => {
-    const listingId = await makeListing();
-    const claim = await claimListing({ listingId, claimantId: buyers[1]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
-    const txId = claim.transactionId!;
-    await db.transaction(async (tx) => markPaid(tx, txId, buyers[1]!));
-    await expirePaymentWindow(txId);
-
-    let confirmationLocked!: () => void;
-    const confirmationReady = new Promise<void>((resolve) => { confirmationLocked = resolve; });
-    const confirming = db.transaction(async (tx) => {
-      await tx.execute(sql`select id from transactions where id = ${txId} for update`);
-      await confirmPayment(tx, txId, seller);
-      confirmationLocked();
-      await tx.execute(sql`select pg_sleep(1)`);
-    });
-
-    await confirmationReady;
-    const expiring = paymentWindowExpired({ transactionId: txId }, helpers);
-    await Promise.all([confirming, expiring]);
-
-    const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
-    expect(row.state).toBe('open');
-    expect(row.paymentState).toBe('confirmed');
-  });
-
   it('keeps a future-deadline deal open when an old payment job runs', async () => {
     const listingId = await makeListing();
     const claim = await claimListing({ listingId, claimantId: buyers[3]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
@@ -614,66 +590,6 @@ describe('★ mark-paid / confirm-received handshake', () => {
     const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
     expect(row.paymentDeadlineAt.getTime()).toBeGreaterThan(Date.now());
     expect(row.state).toBe('open');
-  });
-
-  it('does not complete a receipt window before its current deadline', async () => {
-    const listingId = await makeListing();
-    const claim = await claimListing({ listingId, claimantId: buyers[4]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
-    const txId = claim.transactionId!;
-    await db.transaction(async (tx) => markPaid(tx, txId, buyers[4]!));
-    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
-    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
-
-    await receiptWindowExpired({ transactionId: txId }, helpers);
-
-    const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
-    expect(row.receiptDeadlineAt!.getTime()).toBeGreaterThan(Date.now());
-    expect(row.state).toBe('open');
-    expect(row.handoffState).toBe('seller_handed_over');
-  });
-
-  it('auto-completes after the receipt window when no problem is reported', async () => {
-    const listingId = await makeListing();
-    const claim = await claimListing({ listingId, claimantId: buyers[3]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
-    const txId = claim.transactionId!;
-    await db.transaction(async (tx) => markPaid(tx, txId, buyers[3]!));
-    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
-    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
-    await db.update(transactions).set({ receiptDeadlineAt: sql`now() - interval '1 hour'` }).where(eq(transactions.id, txId));
-    await receiptWindowExpired({ transactionId: txId }, helpers);
-    const row = (await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0];
-    expect(row).toMatchObject({ state: 'completed', handoff: 'buyer_received' });
-  });
-
-  it('resumes receipt progression after a dispute is resolved', async () => {
-    const listingId = await makeListing();
-    const claim = await claimListing({ listingId, claimantId: buyers[2]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
-    const txId = claim.transactionId!;
-    await db.transaction(async (tx) => markPaid(tx, txId, buyers[2]!));
-    await db.transaction(async (tx) => confirmPayment(tx, txId, seller));
-    await db.transaction(async (tx) => markItemHandedOver(tx, txId, seller));
-    await db.update(transactions).set({
-      disputeState: 'resolved',
-      receiptDeadlineAt: sql`now() - interval '1 hour'`,
-    }).where(eq(transactions.id, txId));
-
-    const receiptJobKey = `receipt_window:${txId}`;
-    await pool.query('select graphile_worker.remove_job($1::text)', [receiptJobKey]);
-    const resumed = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
-    await db.transaction(async (tx) => rescheduleTransactionDeadlineJobs(tx, resumed));
-    const queued = await pool.query<{ task_identifier: string; run_at: Date }>(
-      'select task_identifier, run_at from graphile_worker.jobs where key = $1',
-      [receiptJobKey],
-    );
-    expect(queued.rows).toHaveLength(1);
-    expect(queued.rows[0]?.task_identifier).toBe('transaction:receipt_window');
-    expect(queued.rows[0]?.run_at.getTime()).toBeLessThan(Date.now());
-
-    await receiptWindowExpired({ transactionId: txId }, helpers);
-    await pool.query('select graphile_worker.remove_job($1::text)', [receiptJobKey]);
-
-    const row = (await db.select({ state: transactions.state, handoff: transactions.handoffState }).from(transactions).where(eq(transactions.id, txId)))[0];
-    expect(row).toMatchObject({ state: 'completed', handoff: 'buyer_received' });
   });
 
   it('completes a deal and records the objective facts for both sides', async () => {
@@ -722,7 +638,8 @@ describe('★ mark-paid / confirm-received handshake', () => {
     const types = events.map((e) => e.type);
     expect(types).toContain('purchase_completed');
     expect(types).toContain('sale_completed');
-    expect(types).toContain('buyer_paid_on_time');
+    expect(types).not.toContain('buyer_paid_on_time');
+    expect(types).not.toContain('buyer_paid_late');
   });
 
   it('refuses to let the buyer confirm their own payment', async () => {
@@ -788,6 +705,19 @@ describe('★ fixed-price payment lapse → relist without a backup', () => {
         and(eq(reputationEvents.transactionId, firstTxId), eq(reputationEvents.userId, buyers[0]!)),
       );
     expect(facts.length).toBeGreaterThan(0);
+
+    const transitions = await db
+      .select({ track: transactionEvents.track, reason: transactionEvents.reason })
+      .from(transactionEvents)
+      .where(eq(transactionEvents.transactionId, firstTxId));
+    expect(transitions.some((event) => event.track === 'payment')).toBe(false);
+
+    const buyerNotifications = await db
+      .select({ eventType: notificationDeliveries.eventType })
+      .from(notificationDeliveries)
+      .where(eq(notificationDeliveries.userId, buyers[0]!));
+    expect(buyerNotifications.map((event) => event.eventType)).toContain('meetup_window_lapsed_buyer');
+    expect(buyerNotifications.map((event) => event.eventType)).not.toContain('payment_window_lapsed_buyer');
 
     // Fixed-price claims do not enqueue a promotion job.
     await promoteNext({ listingId, failedTransactionId: firstTxId }, helpers);

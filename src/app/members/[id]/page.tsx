@@ -14,11 +14,7 @@ import { ShareListingsButton } from '@/components/share-listings-button';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * The public trust surface. Deliberately shows denominators — "paid on time 3 / 3"
- * reads honestly for a newcomer in a way "100%" does not, and cold-start trust is the
- * hardest problem this platform has.
- */
+/** The public trust surface for verified transaction outcomes. */
 export default async function MemberPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ reported?: string; error?: string }> }) {
   const { id } = await params;
   const viewer = await currentUser();
@@ -80,9 +76,6 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
   ]);
 
   const completed = (c?.buyCompleted ?? 0) + (c?.sellCompleted ?? 0);
-  const claims = c?.buyClaimsTotal ?? 0;
-  const paidOnTime = c?.buyPaidOnTime ?? 0;
-  const paidOnTimePurchases = `${paidOnTime} / ${claims}`;
   const successfulAuctions = Number(successfulAuctionRows[0]?.count ?? 0);
   const activeListingCount = Number(listingCountRows[0]?.count ?? 0);
 
@@ -158,10 +151,6 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
           <div className="member-metric member-metric--purple">
             <strong>{c?.sellCompleted ?? 0}</strong>
             <span>Sales</span>
-          </div>
-          <div className="member-metric member-metric--green">
-            <strong>{paidOnTimePurchases}</strong>
-            <span>Paid on time / purchases</span>
           </div>
           <div className="member-metric member-metric--purple">
             <strong>{successfulAuctions}</strong>

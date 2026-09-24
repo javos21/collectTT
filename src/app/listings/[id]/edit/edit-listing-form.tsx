@@ -21,11 +21,9 @@ export function EditListingForm({
   meetupLocations,
   meetupLocationIds,
   acceptsOffers,
-  paymentWindowHours,
   deliveryOptions,
   locked,
   error,
-  v1 = false,
 }: {
   action: ServerAction;
   publishAction: ServerAction;
@@ -39,11 +37,9 @@ export function EditListingForm({
   meetupLocations: readonly { id: string; label: string; area: string }[];
   meetupLocationIds: readonly string[];
   acceptsOffers: boolean;
-  paymentWindowHours: number;
   deliveryOptions: readonly { id: string; label: string; expectedDeliveryDays: number; fulfillmentPath?: string | null }[];
   locked: boolean;
   error?: string;
-  v1?: boolean;
 }) {
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [hasImageUploadError, setHasImageUploadError] = useState(false);
@@ -120,12 +116,6 @@ export function EditListingForm({
             <InlineMeetupLocationForm onCreated={handleMeetupLocationCreated} />
           </fieldset>
         )}
-        {!v1 && <div className="form-field form-field--compact">
-          <label htmlFor="edit-payment-window">Payment period</label>
-          <select id="edit-payment-window" name="paymentWindowHours" defaultValue={String(paymentWindowHours)}>
-            <option value="48">Within 2 days</option><option value="72">Within 3 days</option><option value="120">Within 5 days</option><option value="168">Within 7 days</option>
-          </select>
-        </div>}
         <div className="delivery-estimates">
           <h3>Expected delivery</h3>
           {deliveryOptions.map((option) => {

@@ -73,7 +73,7 @@ export interface ActiveDealSummary {
   deliveryStatus: string;
   currentState: string;
   nextStep: string;
-  deadlineAt: string;
+  deadlineAt: string | null;
   physicalTask: PhysicalDealTask;
   location: { name: string; area: string | null } | null;
   /** Whether the canonical deal page can show this viewer a valid counter code. */
@@ -128,6 +128,7 @@ type ActiveDealInput = Pick<
 export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): ActiveDealSummary {
   const isBuyer = deal.buyerId === userId;
   const role: ActiveDealRole = isBuyer ? 'buying' : 'selling';
+  const isCashMeetup = deal.fulfillmentPath === 'cash_meetup';
   const hasCustody = usesCustodyTrack(deal.fulfillmentPath);
   const custodyState = deal.custodyState as CustodyState;
   const paymentState = deal.paymentState as PaymentState;
@@ -135,13 +136,13 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
 
   let currentState = 'In progress';
   let nextStep = 'View full deal';
-  let deadline = deal.paymentDeadlineAt;
+  let deadline: Date | null = null;
 
   if (paymentState === 'pending') {
-    currentState = 'Offer accepted';
+    currentState = isCashMeetup ? 'Meetup pending' : 'Offer accepted';
     nextStep = isBuyer
-      ? (deal.fulfillmentPath === 'cash_meetup' ? 'Pay and collect the item' : 'Pay the seller')
-      : 'Waiting for buyer payment';
+      ? (isCashMeetup ? 'Complete the meetup' : 'Pay the seller')
+      : (isCashMeetup ? 'Waiting for the meetup' : 'Waiting for buyer payment');
   } else if (paymentState === 'buyer_marked_paid') {
     currentState = 'Payment marked';
     nextStep = isBuyer ? 'Continue deal' : 'No action needed';
@@ -149,23 +150,23 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
     currentState = 'Payment confirmed';
     if (custodyState === 'awaiting_dropoff') {
       nextStep = isBuyer ? 'Waiting for seller drop-off' : 'Drop off item';
-      deadline = deal.sellerDropoffDeadlineAt ?? deal.paymentDeadlineAt;
+      deadline = deal.sellerDropoffDeadlineAt;
     } else if (custodyState === 'at_relay') {
       currentState = 'At pickup store';
       nextStep = isBuyer ? 'Collect item' : 'Waiting for buyer pickup';
-      deadline = deal.custodyExpiresAt ?? deal.paymentDeadlineAt;
+      deadline = deal.custodyExpiresAt;
     } else if (custodyState === 'release_authorized') {
       currentState = 'Ready for pickup';
       nextStep = isBuyer ? 'Collect item' : 'Waiting for buyer pickup';
-      deadline = deal.custodyExpiresAt ?? deal.paymentDeadlineAt;
+      deadline = deal.custodyExpiresAt;
     } else if (!hasCustody) {
       if (handoffState === 'awaiting_handoff') {
-        currentState = 'Payment confirmed';
-        nextStep = isBuyer ? 'Pay and collect the item' : 'Waiting for buyer confirmation';
+        currentState = isCashMeetup ? 'Meetup pending' : 'Payment confirmed';
+        nextStep = isBuyer ? 'Complete the meetup' : 'Waiting for the meetup';
       } else if (handoffState === 'seller_handed_over') {
         currentState = 'Item handed over';
         nextStep = isBuyer ? 'Confirm item received' : 'Waiting for buyer receipt';
-        deadline = deal.receiptDeadlineAt ?? deal.paymentDeadlineAt;
+        deadline = deal.receiptDeadlineAt ?? null;
       } else {
         currentState = 'Payment confirmed';
         nextStep = 'Complete the hand-off';
@@ -196,11 +197,17 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
     amountCents: deal.amountCents,
     fulfillmentPath: deal.fulfillmentPath,
     paymentState,
-    paymentStatus: PAYMENT_STATUS_LABELS[paymentState],
-    deliveryStatus: handoffState === 'awaiting_handoff' ? 'Awaiting hand-off' : handoffState === 'seller_handed_over' ? 'Seller handed over' : handoffState === 'buyer_received' ? 'Buyer received' : DELIVERY_STATUS_LABELS[custodyState],
+    paymentStatus: isCashMeetup && paymentState === 'pending' ? 'Pay at meetup' : PAYMENT_STATUS_LABELS[paymentState],
+    deliveryStatus: handoffState === 'awaiting_handoff'
+      ? (isCashMeetup ? 'Awaiting meetup' : 'Awaiting hand-off')
+      : handoffState === 'seller_handed_over'
+        ? 'Seller handed over'
+        : handoffState === 'buyer_received'
+          ? 'Buyer received'
+          : DELIVERY_STATUS_LABELS[custodyState],
     currentState,
     nextStep,
-    deadlineAt: deadline.toISOString(),
+    deadlineAt: deadline?.toISOString() ?? null,
     physicalTask,
     location: deal.storeName === null ? null : { name: deal.storeName, area: deal.storeArea },
     canShowCode,

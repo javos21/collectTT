@@ -223,7 +223,6 @@ export async function markReceived(input: StoreActionInput): Promise<void> {
       data: {
         listingTitle: ctx.listingTitle,
         storeName: ctx.storeName,
-        deadline: ctx.paymentDeadlineAt?.toLocaleString('en-TT') ?? 'your payment deadline',
       },
       linkUrl: `/deals/${ctx.transactionId}`,
       idempotencyKey: `custody_received:${input.holdingId}`,

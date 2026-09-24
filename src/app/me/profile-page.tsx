@@ -29,10 +29,8 @@ import { OPTIONAL_NOTIFICATION_PREFERENCES } from '@/notifications/events';
 import { ShareListingsButton } from '@/components/share-listings-button';
 
 type CounterData = {
-  buyClaimsTotal: number;
   buyCompleted: number;
   buyRenegedTotal: number;
-  buyPaidOnTime: number;
   sellCompleted: number;
   sellRenegedTotal: number;
 };
@@ -95,8 +93,6 @@ const fulfillmentLabel = (value: string) => ({ cash_meetup: 'Meet in person', re
 const reputationEventLabel = (value: string) => ({
   purchase_completed: 'Purchase completed',
   sale_completed: 'Sale completed',
-  buyer_paid_on_time: 'Payment made on time',
-  buyer_paid_late: 'Payment made late',
   buyer_reneged_nonpayment: 'Buyer did not pay',
   buyer_no_show: 'Buyer no-show',
   seller_delivered_on_time: 'Delivery completed on time',
@@ -241,7 +237,7 @@ function AccountPanel(props: ProfilePageProps) {
 
       <section className="profile-panel profile-account-panel" aria-labelledby="profile-notification-title">
         <div className="profile-panel__title"><Bell size={19} aria-hidden="true" /><h3 id="profile-notification-title">Notification preferences</h3></div>
-        <p className="profile-panel__note">You can turn off optional email updates. Commitment, payment, deadline, dispute, security, and restriction emails always remain on.</p>
+        <p className="profile-panel__note">You can turn off optional email updates. Commitment, payment, dispute, security, and restriction emails always remain on.</p>
         <form className="profile-account-form profile-notification-form" action={props.saveNotificationPreferencesAction}>
           {OPTIONAL_NOTIFICATION_PREFERENCES.map(({ eventType, label, description }) => (
             <label className="profile-notification-choice" key={eventType}>
@@ -258,7 +254,6 @@ function AccountPanel(props: ProfilePageProps) {
 
 function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'counters' | 'reputationEvents'>) {
   const completedDeals = (counters?.buyCompleted ?? 0) + (counters?.sellCompleted ?? 0);
-  const paidOnTime = `${counters?.buyPaidOnTime ?? 0} / ${counters?.buyClaimsTotal ?? 0}`;
 
   return (
     <div className="profile-content-stack">
@@ -268,7 +263,6 @@ function TrustPanel({ counters, reputationEvents }: Pick<ProfilePageProps, 'coun
           <div className="trust-summary__primary"><strong>{completedDeals}</strong><span>Completed deals</span></div>
           <div className="trust-summary__metric trust-summary__metric--blue"><strong>{counters?.buyCompleted ?? 0}</strong><span>Purchases</span></div>
           <div className="trust-summary__metric trust-summary__metric--purple"><strong>{counters?.sellCompleted ?? 0}</strong><span>Sales</span></div>
-          <div className="trust-summary__metric trust-summary__metric--green"><strong>{paidOnTime}</strong><span>Paid on time / purchases</span></div>
         </div>
         <p className="profile-panel__note">Built from verified transaction outcomes and used for account protections.</p>
       </section>

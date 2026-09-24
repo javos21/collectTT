@@ -106,7 +106,6 @@ export async function auctionClose(payload: Payload, helpers: Helpers): Promise<
           acceptsOffers: listing.acceptsOffers,
           reserveCents: listing.reserveCents,
           buyoutCents: listing.buyoutCents,
-          paymentWindowHours: listing.paymentWindowHours,
         });
       } catch (error) {
         if (!(error instanceof V1ScopeError)) throw error;

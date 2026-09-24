@@ -21,7 +21,27 @@ const baseDeal = {
 };
 
 describe('shared active-deal summary', () => {
-  it('describes a buyer payment task and uses the payment deadline', () => {
+  it('describes a cash meetup as payment at the physical hand-off', () => {
+    const summary = summarizeActiveDeal(
+      {
+        ...baseDeal,
+        fulfillmentPath: 'cash_meetup' as const,
+        custodyState: 'not_applicable' as const,
+        handoffState: 'awaiting_handoff' as const,
+        sellerDropoffDeadlineAt: null,
+      },
+      'buyer-1',
+    );
+
+    expect(summary.needsAttention).toBe(true);
+    expect(summary.currentState).toBe('Meetup pending');
+    expect(summary.nextStep).toBe('Complete the meetup');
+    expect(summary.paymentStatus).toBe('Pay at meetup');
+    expect(summary.deliveryStatus).toBe('Awaiting meetup');
+    expect(summary.deadlineAt).toBeNull();
+  });
+
+  it('describes a buyer payment task without exposing the internal payment deadline', () => {
     const summary = summarizeActiveDeal(baseDeal, 'buyer-1');
 
     expect(summary.role).toBe('buying');
@@ -29,7 +49,7 @@ describe('shared active-deal summary', () => {
     expect(summary.currentState).toBe('Offer accepted');
     expect(summary.nextStep).toBe('Pay the seller');
     expect(summary.physicalTask).toBeNull();
-    expect(summary.deadlineAt).toBe(baseDeal.paymentDeadlineAt.toISOString());
+    expect(summary.deadlineAt).toBeNull();
     expect(summary.canShowCode).toBe(false);
   });
 

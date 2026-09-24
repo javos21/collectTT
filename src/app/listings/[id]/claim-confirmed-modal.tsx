@@ -52,7 +52,7 @@ export function ClaimConfirmedModal({
       >
         <p className="claim-confirmed-modal__eyebrow">Reservation confirmed</p>
         <h2 id="claim-confirmed-title">Congratulations — you got it!</h2>
-        <p id="claim-confirmed-description">Your deal is ready. Open it to review the payment deadline and next steps.</p>
+        <p id="claim-confirmed-description">Your deal is ready. Open it to review the payment steps.</p>
         <div className="claim-confirmed-modal__actions">
           <Link className="button" href={`/deals/${transactionId}`}>
             Go to deal

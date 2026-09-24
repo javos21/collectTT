@@ -62,6 +62,7 @@ export default async function AdminDealDetailPage({
   const row = dealRows[0];
   if (row === undefined) notFound();
   const transaction = row.transaction;
+  const isCashMeetup = transaction.fulfillmentPath === 'cash_meetup';
   const now = new Date();
 
   const [participantRows, eventRows, notificationRows, disputeRows, custodyRows] = await Promise.all([
@@ -171,7 +172,7 @@ export default async function AdminDealDetailPage({
         <section className="admin-stats admin-deal-stats" aria-label="Deal summary">
           <article className="admin-stat admin-stat--purple"><div className="admin-stat__icon"><CircleDollarSign size={19} aria-hidden="true" /></div><div><strong>{money(transaction.amountCents, transaction.currency)}</strong><span>Agreed amount</span></div></article>
           <article className="admin-stat admin-stat--blue"><div className="admin-stat__icon"><Activity size={19} aria-hidden="true" /></div><div><strong>{transaction.disputeState === 'open' ? 'Under review' : label(transaction.state)}</strong><span>Deal state</span></div></article>
-          <article className="admin-stat admin-stat--green"><div className="admin-stat__icon"><CircleDollarSign size={19} aria-hidden="true" /></div><div><strong>{label(transaction.paymentState)}</strong><span>Payment track</span></div></article>
+          <article className="admin-stat admin-stat--green"><div className="admin-stat__icon"><CircleDollarSign size={19} aria-hidden="true" /></div><div><strong>{label(transaction.paymentState)}</strong><span>{isCashMeetup ? 'Payment at meetup' : 'Payment track'}</span></div></article>
           <article className="admin-stat admin-stat--amber"><div className="admin-stat__icon"><PackageCheck size={19} aria-hidden="true" /></div><div><strong>{label(transaction.custodyState)}</strong><span>Custody track</span></div></article>
         </section>
 
@@ -199,7 +200,7 @@ export default async function AdminDealDetailPage({
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-tracks-title">
           <div className="admin-panel__heading"><div><h2 id="deal-tracks-title">State tracks and deadlines</h2><p className="admin-panel__subcopy">Payment, item custody, and v1 meetup hand-off advance independently; completion requires every applicable track to settle.</p></div><Clock3 size={19} aria-hidden="true" /></div>
           <div className="admin-track-grid">
-            <article className={`admin-track-card admin-track-card--${statusTone(transaction.paymentState)}`}><div className="admin-track-card__heading"><div><span>Payment track</span><h3>{label(transaction.paymentState)}</h3></div><CircleDollarSign size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Deadline</dt><dd className={paymentOverdue ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{dateTime(transaction.paymentDeadlineAt)}{paymentOverdue && <small>Overdue</small>}</dd></div><div><dt>Marked paid</dt><dd>{dateTime(transaction.markedPaidAt)}</dd></div><div><dt>Confirmed</dt><dd>{dateTime(transaction.paymentConfirmedAt)}</dd></div><div><dt>Disputed</dt><dd>{dateTime(transaction.paymentDisputedAt)}</dd></div></dl></article>
+            <article className={`admin-track-card admin-track-card--${statusTone(transaction.paymentState)}`}><div className="admin-track-card__heading"><div><span>{isCashMeetup ? 'Payment at meetup' : 'Payment track'}</span><h3>{label(transaction.paymentState)}</h3></div><CircleDollarSign size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>{isCashMeetup ? 'Meetup deadline' : 'Payment deadline'}</dt><dd className={paymentOverdue ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{dateTime(transaction.paymentDeadlineAt)}{paymentOverdue && <small>Overdue</small>}</dd></div><div><dt>Marked paid</dt><dd>{dateTime(transaction.markedPaidAt)}</dd></div><div><dt>Confirmed</dt><dd>{dateTime(transaction.paymentConfirmedAt)}</dd></div><div><dt>Disputed</dt><dd>{dateTime(transaction.paymentDisputedAt)}</dd></div></dl></article>
             <article className={`admin-track-card admin-track-card--${statusTone(transaction.custodyState)}`}><div className="admin-track-card__heading"><div><span>Custody track</span><h3>{label(transaction.custodyState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Seller drop-off due</dt><dd className={dropoffOverdue ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{dateTime(transaction.sellerDropoffDeadlineAt)}{dropoffOverdue && <small>Overdue</small>}</dd></div><div><dt>Completed</dt><dd>{dateTime(transaction.completedAt)}</dd></div><div><dt>Terminated</dt><dd>{dateTime(transaction.terminatedAt)}<small>{label(transaction.terminatedReason)}</small></dd></div><div><dt>Fulfillment path</dt><dd>{label(transaction.fulfillmentPath)}</dd></div></dl></article>
             <article className={`admin-track-card admin-track-card--${statusTone(transaction.handoffState)}`}><div className="admin-track-card__heading"><div><span>Meetup hand-off</span><h3>{label(transaction.handoffState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Handed over</dt><dd>{dateTime(transaction.handedOverAt)}</dd></div><div><dt>Received</dt><dd>{dateTime(transaction.receivedAt)}</dd></div><div><dt>Receipt deadline</dt><dd>{dateTime(transaction.receiptDeadlineAt)}</dd></div><div><dt>Dispute track</dt><dd>{label(transaction.disputeState)}</dd></div></dl></article>
           </div>
@@ -207,7 +208,7 @@ export default async function AdminDealDetailPage({
 
         {transaction.state === 'open' && (
           <section className="admin-panel admin-detail-section" aria-labelledby="deal-deadline-action-title">
-            <div className="admin-panel__heading"><div><h2 id="deal-deadline-action-title">Extend payment deadline</h2><p className="admin-panel__subcopy">Support-only override. Every extension is recorded in the transaction timeline and audit log.</p></div><Clock3 size={19} aria-hidden="true" /></div>
+            <div className="admin-panel__heading"><div><h2 id="deal-deadline-action-title">Extend {isCashMeetup ? 'meetup' : 'payment'} deadline</h2><p className="admin-panel__subcopy">Support-only override. Every extension is recorded in the transaction timeline and audit log.</p></div><Clock3 size={19} aria-hidden="true" /></div>
             <form action={extendDealDeadlineAction} className="admin-dispute-action__form">
               <input type="hidden" name="transactionId" value={transaction.id} />
               <label htmlFor="deadline-hours">Additional hours</label>

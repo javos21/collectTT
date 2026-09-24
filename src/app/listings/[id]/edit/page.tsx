@@ -6,7 +6,6 @@ import { getListing, getListingActivity, listingAuditForSeller, sellerMeetupLoca
 import { imageVariants } from '@/services/images';
 import { EditListingForm } from './edit-listing-form';
 import { cancelListingAction, updateListingAction, publishListingAction } from './actions';
-import { isV1Launch } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,11 +88,9 @@ export default async function EditListingPage({
         meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area }))}
         meetupLocationIds={listingMeetupLocations.map((location) => location.id)}
         acceptsOffers={listing.acceptsOffers}
-        paymentWindowHours={listing.paymentWindowHours}
         deliveryOptions={deliveryOptions}
         locked={activity.locked}
         error={error}
-        v1={isV1Launch()}
       />
     </main>
   );

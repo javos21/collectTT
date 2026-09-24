@@ -7,6 +7,18 @@ import {
 import { EVENTS, isEssentialEvent, OPTIONAL_NOTIFICATION_PREFERENCES } from '../../src/notifications/events';
 
 describe('notification email CTAs', () => {
+  it('describes meetup payment at the hand-off instead of before it', () => {
+    const meetupBody = EVENTS.claim_confirmed_buyer.body({
+      listingTitle: 'Card',
+      fulfillmentPath: 'cash_meetup',
+    });
+    const remoteBody = EVENTS.claim_confirmed_buyer.body({ listingTitle: 'Card', fulfillmentPath: 'remote_ship' });
+
+    expect(meetupBody).toContain('pay at the agreed meetup');
+    expect(meetupBody).not.toContain('mark it paid');
+    expect(remoteBody).toContain('mark it paid');
+  });
+
   it('routes every event only to in-app and email in the beta', () => {
     const channels = new Set(Object.values(EVENTS).flatMap((event) => event.channels));
     expect([...channels].sort()).toEqual(['email', 'in_app']);
@@ -18,7 +30,7 @@ describe('notification email CTAs', () => {
 
   it('keeps preference controls limited to nonessential events', () => {
     expect(OPTIONAL_NOTIFICATION_PREFERENCES.every(({ eventType }) => !isEssentialEvent(eventType))).toBe(true);
-    expect(isEssentialEvent('payment_deadline_soon')).toBe(true);
+    expect('payment_deadline_soon' in EVENTS).toBe(false);
     expect(isEssentialEvent('restriction_applied')).toBe(true);
     expect(isEssentialEvent('auction_outbid')).toBe(false);
   });

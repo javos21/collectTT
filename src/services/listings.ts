@@ -34,7 +34,7 @@ import { AUCTION_DURATION_HOURS, WINDOWS } from '../domain/policy/windows';
 import { enqueue } from '../jobs/enqueue';
 import { getFullServiceDeliveryDays, getListingExpiryDays, UnavailableMarketplaceOptionError } from './platform-settings';
 import { assertMarketplaceEligible } from './marketplace-eligibility';
-import { assertV1ListingTerms, V1_PAYMENT_WINDOW_HOURS, isV1Launch } from '@/lib/launch-scope';
+import { assertV1ListingTerms, V1_PAYMENT_WINDOW_HOURS } from '@/lib/launch-scope';
 
 import { recordAnalyticsEvent } from './analytics';
 
@@ -47,7 +47,6 @@ export const listingInputSchema = z
     saleType: z.enum(['straight_sale', 'auction']),
     priceCents: z.number().int().positive().optional(),
     acceptsOffers: z.boolean().default(false),
-    paymentWindowHours: z.number().int().min(48).max(168).default(72),
     startBidCents: z.number().int().positive().optional(),
     reserveCents: z.number().int().positive().optional(),
     buyoutCents: z.number().int().positive().optional(),
@@ -187,7 +186,6 @@ export async function createListing(
     acceptsOffers: input.acceptsOffers,
     reserveCents: input.reserveCents,
     buyoutCents: input.buyoutCents,
-    paymentWindowHours: input.paymentWindowHours,
   });
   if ((selectedDeliveryOptions.some((option) => option.requiresStore) || fulfillmentPaths.includes('relay')) && relayStoreIds.length === 0) {
     throw new Error('Nominate at least one relay pickup store for store delivery');
@@ -239,9 +237,8 @@ export async function createListing(
         status: opts.publish === true ? 'active' : 'draft',
         priceCents: input.saleType === 'straight_sale' ? (input.priceCents ?? null) : null,
         acceptsOffers: input.saleType === 'straight_sale' ? input.acceptsOffers : false,
-        // v1 uses a platform policy window. Seller-authored windows remain readable
-        // on legacy rows but cannot be written onto a new v1 listing.
-        paymentWindowHours: isV1Launch() ? V1_PAYMENT_WINDOW_HOURS : input.paymentWindowHours,
+        // The internal deadline remains platform-controlled and is not seller-authored.
+        paymentWindowHours: V1_PAYMENT_WINDOW_HOURS,
         startBidCents: input.saleType === 'auction' ? (input.startBidCents ?? null) : null,
         reserveCents: input.saleType === 'auction' ? (input.reserveCents ?? null) : null,
         buyoutCents: input.saleType === 'auction' ? (input.buyoutCents ?? null) : null,
@@ -446,7 +443,6 @@ const listingEditSchema = z.object({
   description: z.string().trim().max(4000).optional(),
   priceCents: z.number().int().positive().optional(),
   acceptsOffers: z.boolean().optional(),
-  paymentWindowHours: z.number().int().min(48).max(168).optional(),
   deliveryEstimates: z.record(z.string(), z.number().int().min(1).max(60)).optional(),
   deliveryOptionEstimates: z.record(z.string().uuid(), z.number().int().min(1).max(60)).optional(),
   imageIds: z.array(z.string().uuid()).max(8).default([]),
@@ -561,7 +557,6 @@ export async function updateListingBasics(
       fulfillmentPaths: current.fulfillment_paths,
       settlementMethods: [],
       acceptsOffers: input.acceptsOffers,
-      paymentWindowHours: input.paymentWindowHours,
     });
     if (current.sale_type === 'straight_sale' && input.priceCents === undefined) {
       throw new Error('A price is required for a fixed-price listing.');
@@ -577,9 +572,6 @@ export async function updateListingBasics(
     }
     if (current.sale_type === 'straight_sale' && input.acceptsOffers !== undefined && input.acceptsOffers !== current.accepts_offers) {
       changes.acceptsOffers = { from: current.accepts_offers, to: input.acceptsOffers };
-    }
-    if (input.paymentWindowHours !== undefined && input.paymentWindowHours !== current.payment_window_hours) {
-      changes.paymentWindowHours = { from: current.payment_window_hours, to: input.paymentWindowHours };
     }
     if (input.meetupLocationIds !== undefined) {
       const previousMeetupRows = await tx.select({ id: listingMeetupLocations.meetupLocationId }).from(listingMeetupLocations).where(eq(listingMeetupLocations.listingId, listingId)).orderBy(listingMeetupLocations.position);
@@ -627,7 +619,6 @@ export async function updateListingBasics(
         description: input.description ?? null,
         ...(current.sale_type === 'straight_sale' ? { priceCents: input.priceCents ?? Number(current.price_cents) } : {}),
         ...(current.sale_type === 'straight_sale' && input.acceptsOffers !== undefined ? { acceptsOffers: input.acceptsOffers } : {}),
-        ...(input.paymentWindowHours !== undefined ? { paymentWindowHours: input.paymentWindowHours } : {}),
         ...(input.meetupLocationIds !== undefined ? { meetupLocationId: input.meetupLocationIds[0] ?? null } : {}),
         updatedAt: sql`now()`,
       })
@@ -855,7 +846,7 @@ export async function duplicateListingToDraft(sellerId: string, sourceListingId:
       currency: source.currency,
       priceCents: source.priceCents,
       acceptsOffers: source.acceptsOffers,
-      paymentWindowHours: source.paymentWindowHours,
+      paymentWindowHours: V1_PAYMENT_WINDOW_HOURS,
       startBidCents: source.startBidCents,
       reserveCents: source.reserveCents,
       buyoutCents: source.buyoutCents,

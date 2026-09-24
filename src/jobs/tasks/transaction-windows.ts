@@ -1,5 +1,5 @@
 /**
- * Deadline handlers: payment window, seller drop-off window, payment reminder,
+ * Deadline handlers: payment/meetup completion window, seller drop-off window,
  * fallback-offer expiry, and candidate advancement.
  *
  * ★ Every one is IDEMPOTENT — the first thing each does is a conditional read or write
@@ -13,7 +13,6 @@ import type { Helpers } from 'graphile-worker';
 
 import { db } from '../../db/client';
 import { transactions, transactionEvents } from '../../db/schema/transactions';
-import { listings } from '../../db/schema/listings';
 import {
   terminateTransaction,
   promoteNextCandidate,
@@ -21,19 +20,18 @@ import {
   expireAuctionFallbackOffer,
 } from '../../services/transactions';
 import { recomputeRollingWindows, evaluateRestrictions } from '../../services/reputation';
-import { notify } from '../../notifications/dispatch';
 import { profiles } from '../../db/schema/profiles';
 
-// ---------------------------------------------------------------- payment window
+// ------------------------------------------------ payment / meetup completion window
 
 interface TxPayload {
   transactionId: string;
 }
 
 /**
- * The buyer's payment window lapsed. Terminate, record the fact, and advance an
- * auction to its next explicit fallback offer. On a cash-meetup deal the same lapse
- * means "never showed".
+ * The transaction's completion window lapsed. Terminate, record the fact, and advance
+ * an auction to its next explicit fallback offer. Cash meetups use this same internal
+ * clock as a meetup-completion window, not as a prepayment deadline.
  */
 export async function paymentWindowExpired(payload: TxPayload, helpers: Helpers): Promise<void> {
   await db.transaction(async (tx) => {
@@ -67,7 +65,7 @@ export async function paymentWindowExpired(payload: TxPayload, helpers: Helpers)
       transactionId: payload.transactionId,
       reason,
       actorRole: 'system',
-      dueAt: 'payment',
+      dueAt: row.fulfillmentPath === 'cash_meetup' ? 'meetup' : 'payment',
     });
 
     helpers.logger.info(
@@ -130,40 +128,13 @@ export async function dropoffWindowExpired(payload: TxPayload, helpers: Helpers)
   });
 }
 
-/** One terse nudge before the deadline. Not a drip campaign. */
+/**
+ * Compatibility no-op for reminder jobs already queued before the mechanic was
+ * removed. New transactions never enqueue this task; retaining the handler prevents
+ * old jobs from retrying or failing as unknown tasks during deployment.
+ */
 export async function paymentReminder(payload: TxPayload & { reminderKind?: 'halfway' | 'two_hours' | 'deadline' }, helpers: Helpers): Promise<void> {
-  await db.transaction(async (tx) => {
-    const rows = await tx
-      .select()
-      .from(transactions)
-      .where(and(eq(transactions.id, payload.transactionId), eq(transactions.state, 'open')))
-      .limit(1);
-
-    const row = rows[0];
-    if (row === undefined) return;
-    // Already paid or confirmed — no nagging.
-    if (row.paymentState !== 'pending') return;
-
-    const titles = await tx
-      .select({ title: listings.title })
-      .from(listings)
-      .where(eq(listings.id, row.listingId))
-      .limit(1);
-
-    await notify({
-      tx,
-      userId: row.buyerId,
-      event: payload.reminderKind === 'two_hours' ? 'payment_deadline_soon' : 'payment_reminder',
-      data: {
-        listingTitle: titles[0]?.title ?? 'your deal',
-        deadline: row.paymentDeadlineAt.toLocaleString('en-TT'),
-      },
-      linkUrl: `/deals/${row.id}`,
-      idempotencyKey: `payment_reminder:${payload.reminderKind ?? 'halfway'}:${row.id}`,
-    });
-
-    helpers.logger.info(`reminder sent for ${payload.transactionId}`);
-  });
+  helpers.logger.info(`payment reminder task retired for ${payload.transactionId}`);
 }
 
 /** Auto-complete a cash meetup after the receipt window if no problem was reported. */

@@ -164,7 +164,6 @@ export default async function AdminMemberDetailPage({
               <div><dt>Purchases completed</dt><dd>{counters?.buyCompleted ?? 0}</dd></div>
               <div><dt>Sales completed</dt><dd>{counters?.sellCompleted ?? 0}</dd></div>
               <div><dt>Successful auctions</dt><dd>{successfulAuctions}</dd></div>
-              <div><dt>Paid on time</dt><dd>{counters?.buyPaidOnTime ?? 0} / {counters?.buyClaimsTotal ?? 0}</dd></div>
               <div><dt>Buyer reneges</dt><dd>{counters?.buyRenegedTotal ?? 0}</dd></div>
               <div><dt>Seller reneges</dt><dd>{counters?.sellRenegedTotal ?? 0}</dd></div>
             </dl>

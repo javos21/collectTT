@@ -1,4 +1,4 @@
-import { desc, eq, or } from 'drizzle-orm';
+import { and, desc, eq, notInArray, or } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
@@ -157,7 +157,10 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         .from(reputationEvents)
         .leftJoin(transactions, eq(transactions.id, reputationEvents.transactionId))
         .leftJoin(listings, eq(listings.id, transactions.listingId))
-        .where(eq(reputationEvents.userId, user.userId))
+        .where(and(
+          eq(reputationEvents.userId, user.userId),
+          notInArray(reputationEvents.type, ['buyer_paid_on_time', 'buyer_paid_late']),
+        ))
         .orderBy(desc(reputationEvents.occurredAt))
         .limit(30),
       sellerMeetupLocationsFor(user.userId),
@@ -178,10 +181,8 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         deleteListingAction={deleteListingAction}
         initialTab={params.tab}
         counters={counters === undefined ? null : {
-          buyClaimsTotal: counters.buyClaimsTotal,
           buyCompleted: counters.buyCompleted,
           buyRenegedTotal: counters.buyRenegedTotal,
-          buyPaidOnTime: counters.buyPaidOnTime,
           sellCompleted: counters.sellCompleted,
           sellRenegedTotal: counters.sellRenegedTotal,
         }}

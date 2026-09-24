@@ -19,9 +19,9 @@ const DAY = 24 * HOUR;
 export const AUCTION_DURATION_HOURS = [24, 48, 72, 168] as const;
 
 export const WINDOWS = {
-  /** How long a buyer has to pay (or to complete the meetup) once a deal opens. */
+  /** Internal completion clocks: payment for fulfillment paths, meetup completion for cash_meetup. */
   payment: {
-    cash_meetup: 72 * HOUR, // meetup window — needs slack for both schedules
+    cash_meetup: 72 * HOUR, // meetup-completion window — needs slack for both schedules
     remote_ship: 48 * HOUR,
     relay: 72 * HOUR,
     full_service: 72 * HOUR,
@@ -69,6 +69,7 @@ export function sellerDropoffWindowMs(path: FulfillmentPath): number | null {
 }
 
 export interface Deadlines {
+  /** Legacy column name; for cash_meetup this is the meetup-completion deadline. */
   paymentDeadlineAt: Date;
   sellerDropoffDeadlineAt: Date | null;
 }
