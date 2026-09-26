@@ -1,9 +1,9 @@
 # CollectTT v1 route and state inventory
 
-Milestone 0 establishes this as the route-level quarantine map. The attached
-`COLLECTTT_PRODUCT_SCOPE.md` is the product authority; `V1_IMPLEMENTATION_PLAN.md`
-is the execution sequence. Legacy routes and data are retained for inspection or
-controlled rollback, but they are not allowed to create new v1 activity.
+This is the v1 route-level quarantine map. `COLLECTTT_PRODUCT_SCOPE.md` is the product
+authority. Legacy routes and data are retained for inspection or controlled rollback,
+but they are not allowed to create new v1 activity. v1.5 work must not reactivate a
+legacy route unless the product scope explicitly approves it.
 
 ## Public and member routes
 
@@ -12,7 +12,7 @@ controlled rollback, but they are not allowed to create new v1 activity.
 | `/` | Keep | loading, empty marketplace, active inventory, unavailable/error | Marketplace discovery and disclaimer surface. |
 | `/listings` | Keep | query, filters, pagination, no results, stale result, error | Newest default; no recommendation feed. |
 | `/listings/new` | Keep | signed out, phone-unverified, restricted, validation error, upload failure, draft/publish success | Only fixed-price/auction, cash meetup, cash/bank transfer. Server gate is authoritative. |
-| `/listings/[id]` | Keep | active, reserved, sold, expired, sold outside, draft owner-only, unauthorized, bid/claim unavailable | Public display name only; fixed-price offers are available when the seller opts in, while legacy custody controls remain hidden in v1. |
+| `/listings/[id]` | Keep | active, reserved, sold, expired, sold outside, draft owner-only, unauthorized, bid/reservation unavailable | Public display name only; fixed-price offers are available when the seller opts in, while legacy custody controls remain hidden in v1. |
 | `/listings/[id]/edit` | Keep | owner, locked after commitment/bid, invalid input, cancelled, legacy read-only refusal | v1 exposes the seller's offer opt-in and hides seller-authored payment-window controls. |
 | `/deals` | Keep | no deals, action-needed, completed, expired/cancelled, disputed, authorization failure | Transaction inbox; direct-payment disclaimer. |
 | `/deals/[id]` | Keep | buyer/seller party view, pre-commitment denial, open, milestone confirmation, disputed, completed, expired | Phone disclosure only after valid commitment and only to counterparties. |

@@ -1,9 +1,11 @@
-# CollectTT product contract
+# CollectTT product summary
 
 <!-- impeccable:product-schema 1 -->
 
-This file is the concise product contract for the v1 marketplace. The complete,
-normative requirements and acceptance scenarios live in
+**Status:** Non-normative summary
+
+This file is a concise overview of the v1 marketplace. The complete, authoritative
+requirements, release boundaries, and acceptance scenarios live in
 [COLLECTTT_PRODUCT_SCOPE.md](COLLECTTT_PRODUCT_SCOPE.md).
 
 ## Platform
@@ -62,6 +64,9 @@ counterfeit detection/takedown; and administrator impersonation.
 
 Featured Listings are v1.5. Collect Protect and SMS are v2 candidates. Deferred features
 must not be placed on the v1 critical path.
+
+The v1.5 scope is defined only in `COLLECTTT_PRODUCT_SCOPE.md`; this summary does not
+approve additional v1.5 features.
 
 ## Legacy compatibility
 
