@@ -16,6 +16,10 @@ const EVENT_LABELS: Record<string, string> = {
   transaction_completed: 'Transactions completed',
   transaction_terminated: 'Transactions terminated',
   support_case_created: 'Support cases opened',
+  listing_share_clicked: 'Share menus opened',
+  listing_share_whatsapp: 'WhatsApp shares',
+  listing_share_native: 'Native shares',
+  listing_share_copy_link: 'Listing links copied',
 };
 
 export default async function AdminAnalyticsPage() {

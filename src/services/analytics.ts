@@ -4,6 +4,10 @@ import { analyticsEvents } from '@/db/schema/analytics';
 export const ANALYTICS_EVENTS = [
   'listing_created',
   'listing_published',
+  'listing_share_clicked',
+  'listing_share_whatsapp',
+  'listing_share_native',
+  'listing_share_copy_link',
   'reservation_created',
   'bid_placed',
   'transaction_completed',

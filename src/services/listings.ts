@@ -1386,6 +1386,47 @@ export async function getListing(id: string, viewerId?: string) {
   return { ...row, images: imageRows, fulfillmentTerms, deliveryOptions, paymentOptions, relayStoreIds: listingStoreRows.map((store) => store.storeId), meetupLocations: meetupRows, meetupLocation: meetupRows[0] ?? null };
 }
 
+/** Minimal, public-only data for server-rendered social metadata and share analytics. */
+export async function getPublicListingShareData(id: string) {
+  const rows = await db
+    .select({
+      id: listings.id,
+      title: listings.title,
+      saleType: listings.saleType,
+      status: listings.status,
+      currency: listings.currency,
+      priceCents: listings.priceCents,
+      startBidCents: listings.startBidCents,
+      currentBidCents: listings.currentBidCents,
+      category: listings.category,
+      attributes: listings.attributes,
+      sellerId: listings.sellerId,
+      sellerName: profiles.displayName,
+    })
+    .from(listings)
+    .innerJoin(profiles, eq(profiles.userId, listings.sellerId))
+    .where(and(eq(listings.id, id), sql`${listings.status} <> 'draft'`))
+    .limit(1);
+
+  const listing = rows[0];
+  if (listing === undefined) return null;
+
+  const firstImages = await db
+    .select({
+      id: images.id,
+      variants: images.variants,
+      r2KeyOriginal: images.r2KeyOriginal,
+      status: images.status,
+    })
+    .from(listingImages)
+    .innerJoin(images, eq(images.id, listingImages.imageId))
+    .where(eq(listingImages.listingId, id))
+    .orderBy(asc(listingImages.position))
+    .limit(1);
+
+  return { ...listing, firstImage: firstImages[0] ?? null };
+}
+
 export async function listingsBySeller(sellerId: string) {
   return db
     .select({

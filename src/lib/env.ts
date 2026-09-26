@@ -71,6 +71,12 @@ export function env(): Env {
   if (parsed.data.NODE_ENV === 'production' && process.env.APP_URL === undefined) {
     throw new Error('Production requires APP_URL to be set explicitly.');
   }
+  if (parsed.data.NODE_ENV === 'production' && new URL(parsed.data.APP_URL).protocol !== 'https:') {
+    throw new Error('Production APP_URL must use HTTPS.');
+  }
+  if (parsed.data.NODE_ENV === 'production' && new URL(parsed.data.STORAGE_PUBLIC_URL).protocol !== 'https:') {
+    throw new Error('Production STORAGE_PUBLIC_URL must use HTTPS so listing images work in social previews.');
+  }
 
   cached = parsed.data;
   return cached;
