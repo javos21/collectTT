@@ -1,14 +1,21 @@
 # CollectTT Product Scope and Implementation Specification
 
-**Status:** Product scope baseline for codebase gap analysis  
-**Version:** 1.0  
-**Date:** 2026-09-12  
-**Primary audience:** CollectTT product owner and implementation agents  
+**Status:** Authoritative product source of truth — v1 baseline and v1.5 planning
+**Version:** 1.1
+**Last updated:** 2026-09-26
+**Primary audience:** CollectTT product owner and implementation agents
 **Market context:** Trinidad and Tobago collectibles marketplace
 
 ## 1. Purpose
 
-This document freezes the agreed CollectTT product direction and translates it into implementation-ready requirements. It is intended to be compared against the existing CollectTT codebase so that implemented behavior, partial implementations, gaps, conflicts, and obsolete features can be identified before an execution plan is created.
+This document is the single authority for CollectTT product behavior, release scope,
+requirements, and acceptance scenarios. When another repository document disagrees with
+it, this document controls. Supporting documents may describe implementation, routes,
+terminology, design, or operations, but they must not introduce product requirements.
+
+v1 is the active marketplace baseline. v1.5 is the next planning target and begins with
+Featured Listings. A v1.5 feature is not implementation-ready until its decisions and
+acceptance scenarios are approved in this document.
 
 The v1 product loop is:
 
@@ -528,6 +535,10 @@ The exact legal wording should be reviewed before launch.
 
 Featured Listings are paid placement attached to an individual listing, not a seller subscription.
 
+The placement and lifecycle baseline below is defined. Paid activation is not
+implementation-ready until the open purchase and administration decisions in Section
+18.4 are resolved here.
+
 ### 18.1 Initial packages
 
 | Duration | Launch price |
@@ -554,6 +565,22 @@ Prices must be configurable rather than hardcoded and may be revised after launc
 - The clock does not pause.
 - No automatic refund is issued when the listing ends early.
 - Purchase, payment-provider, refund-exception, and admin-override details require a separate v1.5 payment specification.
+
+### 18.4 Decisions required before paid activation
+
+The following decisions remain open and must be resolved in this document rather than
+inferred from provider research or implementation details:
+
+1. Which payment rail CollectTT will use for its own Featured Listing charges.
+2. Which verified payment event activates the feature period and how duplicate or
+   delayed confirmations are handled.
+3. The user experience for abandoned, failed, cancelled, and expired payment attempts.
+4. Refund exceptions for duplicate charges, activation failures, administrator removal,
+   and other platform-caused failures.
+5. Administrator grant, revoke, refund, and correction actions and their audit history.
+6. The exact featured-to-organic placement cap on each eligible surface.
+
+Provider research is evidence for these decisions, not product authority.
 
 ## 19. Collect Protect v2 direction
 

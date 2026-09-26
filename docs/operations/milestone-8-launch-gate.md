@@ -1,10 +1,11 @@
 # Milestone 8 launch-candidate gate
 
-Milestone 8 is locally hardening-complete. The repository now has a repeatable HTTP
-preflight, the local browser smoke matrix has been exercised at desktop and mobile
-viewports, and the real worker/image queue has been verified. This document separates
-those local exits from gates that require staging credentials, production-like data,
-or a human owner.
+Milestone 8 implementation hardening is locally complete, while verification still has
+open gates. The repository has a repeatable HTTP preflight; the local browser smoke
+matrix has been exercised at desktop and mobile viewports; and the real worker/image
+queue has been verified. This document separates completed local evidence from checks
+that still require a running web process, staging credentials, production-like data, or
+a human owner.
 
 Verification note (2026-09-19): the database-free preflight is passing (17/17), the
 focused unit/security set is passing (107 tests), and the Next 16 production build is

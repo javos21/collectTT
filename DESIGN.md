@@ -1,10 +1,14 @@
 # CollectTT Design System
 
 **Status:** Current implementation contract
-**Last updated:** 17 September 2026
-**Scope:** Marketplace, member workspace, Store workspace, and platform-admin surfaces
+**Last updated:** 26 September 2026
+**Scope:** Active marketplace, member workspace, and platform-admin surfaces
 
 This document records the visual language already present in CollectTT. It is a guardrail for incremental work, not a request to redesign the product from scratch. New UI should reuse these tokens, proportions, component treatments, and interaction rules before introducing a new pattern.
+
+`COLLECTTT_PRODUCT_SCOPE.md` controls product behavior and release scope. This document
+controls presentation only. Legacy Store/custody surfaces are not v1 or v1.5 design
+precedents and must remain hidden when `COLLECTTT_LAUNCH_SCOPE=v1`.
 
 ## Product character
 
@@ -20,9 +24,10 @@ CollectTT should feel like a calm, trustworthy marketplace for real purchases an
 
 Page titles lead every surface. Use a heading followed by concise supporting copy and then the primary action or content. Do not add decorative text above a page title or section heading.
 
-Use sentence case for user-facing labels and actions. Prefer concrete verbs such as `Browse`, `Sell`, `Claim`, `Bid`, `Receive item`, `Release item`, `Open listing`, and `View deal`.
+Use sentence case for user-facing labels and actions. Prefer concrete verbs such as
+`Browse`, `Sell`, `Reserve`, `Bid`, `Open listing`, and `View transaction`.
 
-Use short status labels when they identify a real state, such as `Live`, `Claimed`, `Ended`, `Pending`, `Failed`, or `Read-only`. Do not use small uppercase labels as decoration or as a substitute for a meaningful heading.
+Use short status labels when they identify a real state, such as `Live`, `Reserved`, `Ended`, `Pending`, `Failed`, or `Read-only`. Do not use small uppercase labels as decoration or as a substitute for a meaningful heading.
 
 Onboarding must collect every field required to use the marketplace in the initial account form. Explain public/private visibility beside the relevant field, and do not defer required identity or contact fields to a second settings flow. Email verification is the sole contact-verification step; a phone number is required but is not presented as verified.
 
@@ -89,7 +94,7 @@ The admin console uses a slightly denser indigo-and-neutral palette while retain
 | `--admin-amber` | `#a16207` | Pending, overdue, or caution state |
 | `--admin-danger` | `#b91c1c` | Failed or destructive state |
 
-Store and member-specific components may use local semantic aliases, but they should remain legible against the shared neutral and white surfaces.
+Member-specific components may use local semantic aliases, but they should remain legible against the shared neutral and white surfaces.
 
 ### Shape and elevation
 
@@ -123,7 +128,6 @@ Common compositions:
 - **Detail pages:** primary content and a clear action panel; the action panel must remain understandable when stacked.
 - **Member workspace:** focused navigation plus stacked panels, metrics, activity, and listing management.
 - **Admin workspace:** fixed-width sidebar on desktop, dense but readable panels and tables, and stacked detail sections on small screens.
-- **Store workspace:** task-first flow ordered as lookup, matched item, summary, active custody, incoming items, and history.
 
 Do not allow horizontal overflow. Long titles, handles, IDs, URLs, and user-provided content must wrap or truncate with a visible recovery path.
 
@@ -137,11 +141,12 @@ The shared header is sticky, light, and quiet:
 - White translucent background with light blur and a bottom border.
 - CollectTT logo at approximately 138 × 42px.
 - Desktop navigation links include an icon and a text label, with 44px minimum height in the current compact pass.
-- `Store` appears when the signed-in profile is attached to a Store.
 - `Admin` appears when the signed-in profile has the administrator role.
 - The profile control is the authenticated account entry point; signed-out users see `Sign in`.
 
-Navigation visibility is a convenience, not a security boundary. Every Store and Admin route/action must still enforce access on the server.
+Navigation visibility is a convenience, not a security boundary. Every Admin route/action
+must still enforce access on the server. Legacy Store routes must remain server-gated and
+unreachable in the active v1 scope.
 
 ### Mobile navigation
 
@@ -151,7 +156,7 @@ At widths up to 720px, the header keeps the logo and exposes a 44px menu trigger
 - Primary drawer links have a 52px minimum height and at least 8px separation.
 - Links use both an icon and a visible text label.
 - Signed-in users see Profile and Sign out.
-- Store and Admin remain conditional on the same server-resolved access state as desktop navigation.
+- Admin remains conditional on the same server-resolved access state as desktop navigation.
 - Sign out is separated from navigation links by a divider and remains visually destructive.
 - Escape, the close button, and the backdrop close the drawer; focus returns to the trigger.
 
@@ -237,7 +242,7 @@ Use dialogs for focused confirmations or short forms, not primary navigation. De
 
 Contextual reports should use a compact in-context trigger and move the longer form into a modal. Keep the privacy explanation with the form, preserve the listing context behind the dialog, and provide keyboard focus trapping, Escape-to-close, and focus return.
 
-## Marketplace, member, Store, and admin emphasis
+## Marketplace, member, and admin emphasis
 
 ### Marketplace
 
@@ -246,10 +251,6 @@ Listing discovery should privilege the image, title, seller trust cue, price, sa
 ### Member workspace
 
 The member area uses indigo for navigation and profile structure, with teal, blue, and purple metric variations only when they communicate distinct verified facts. Activity, bids and offers, trust, and listings are separate jobs. Make the next action and its deadline explicit.
-
-### Store workspace
-
-The Store is a counter tool first. Lead with the lookup and the safe next action. Receive, release, return, payment gating, shelf status, and history must be distinguishable by copy and state, not color alone. Keep operational content more compact than marketing content.
 
 ### Platform admin
 
@@ -307,6 +308,9 @@ Animate `transform` and `opacity` where possible. Every transition must be inter
 6. Add empty, loading, error, permission, and success states with each new critical route.
 7. Record visual changes in the relevant QA notes and verify desktop, mobile, keyboard, and reduced-motion behavior.
 8. Treat the server as the access boundary; conditional navigation only improves discoverability.
+9. Reuse existing components before adding a new visual treatment. When an Ultimate UI
+   component is appropriate, adapt it to the active CollectTT tokens and accessibility
+   rules rather than importing a disconnected theme.
 
 ## Current technical note
 

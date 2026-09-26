@@ -4,27 +4,29 @@ CollectTT is a free, structured collectibles marketplace for Trinidad & Tobago.
 
 The v1 loop is **List → Discover → Commit → Transact → Build Trust → Repeat**. Buyers and
 sellers use one account, choose fixed-price or auction listings, select seller-defined
-delivery and direct cash/bank-transfer options, and coordinate the transaction without
+meetup and direct cash/bank-transfer options, and coordinate the transaction without
 CollectTT holding ordinary funds.
 
 ## Source of truth
 
-- [Product scope](COLLECTTT_PRODUCT_SCOPE.md) — authoritative v1 requirements and acceptance scenarios.
-- [V1 implementation plan](V1_IMPLEMENTATION_PLAN.md) — dependency-ordered delivery milestones.
-- [Route/state inventory](V1_ROUTE_STATE_INVENTORY.md) — route treatment and state coverage.
-- [Domain context](CONTEXT.md) — codebase vocabulary and invariants.
-- [Operations runbook](docs/operations/v1-operations-runbook.md) — readiness, metrics, retention, and restore checks.
-- [Milestone 8 launch gate](docs/operations/milestone-8-launch-gate.md) — repeatable launch-candidate checks and remaining staging exits.
+- [Product scope](COLLECTTT_PRODUCT_SCOPE.md) is the single authority for product
+  behavior, release scope, requirements, and acceptance scenarios.
 
-Older custody/Pro/raffle documents are retained as historical archives. They do not
-override the v1 scope.
+Supporting documents have narrower responsibilities:
+
+- [Product summary](PRODUCT.md) — concise, non-normative overview.
+- [Domain context](CONTEXT.md) — codebase vocabulary and invariants.
+- [Design system](DESIGN.md) — current visual and interaction contract.
+- [Route/state inventory](V1_ROUTE_STATE_INVENTORY.md) — v1 route treatment and state coverage.
+- [Operations runbook](docs/operations/v1-operations-runbook.md) — readiness, metrics, retention, and restore checks.
+- [Milestone 8 launch gate](docs/operations/milestone-8-launch-gate.md) — launch-candidate evidence and remaining staging exits.
 
 ## v1 boundaries
 
 v1 includes:
 
 - private account name plus public display name;
-- verified email and phone before selling, reserving, or bidding;
+- verified email and a required private phone number before selling, reserving, or bidding;
 - manual fixed-price and auction listings, drafts, duplication, expiration, relisting,
   and Sold outside CollectTT;
 - fixed-price listings with optional buyer offers below the asking price;
@@ -32,7 +34,7 @@ v1 includes:
 - global search, practical filters, deterministic sorting, and factual Trust Snapshots;
 - atomic reservations, binding bids, repeated two-minute anti-sniping, deadlines,
   reminders, disputes, progressive restrictions, and audited admin intervention;
-- structured seller-configured delivery and direct bank-transfer workflows;
+- seller-configured meetup and direct bank-transfer workflows;
 - transactional email and contextual reporting/support.
 
 v1 does not include reserve prices, auction buyouts, proxy bids, bid retraction, seller-authored payment
@@ -40,6 +42,17 @@ windows, ratings/reviews, Pro subscriptions, raffles, Featured Listings, Collect
 Protect, SMS/WhatsApp, in-app chat, or payment holding. Legacy tables and records remain
 available for controlled inspection; `COLLECTTT_LAUNCH_SCOPE=v1` prevents new writes into
 those legacy paths.
+
+## v1.5 direction
+
+Featured Listings are the first planned v1.5 feature. Eligibility, placement, ranking,
+lifecycle, disclosure, payment, refund, and administration rules must be approved in
+`COLLECTTT_PRODUCT_SCOPE.md` before implementation. Pro subscriptions, raffles, Store
+custody, Collect Protect, and payment holding do not become v1.5 scope unless that
+document is explicitly amended.
+
+The [Wam integration research](docs/integrations/wam-payment-provider-research.md) is a
+non-normative input to the unresolved Featured Listings payment decision.
 
 ## Run locally
 
