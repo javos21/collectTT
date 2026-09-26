@@ -52,7 +52,8 @@ describe('GET /api/images/[id]', () => {
       r2KeyOriginal: 'images/image-1/source.webp',
     });
     imageVariants.mockReturnValue({ full: 'images/image-1/variants/full.webp' });
-    getObject.mockResolvedValue(Buffer.from('webp-image'));
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    getObject.mockResolvedValue(pngBytes);
 
     const { GET } = await import('../../src/app/api/images/[id]/social/route');
     const response = await GET(
@@ -61,9 +62,9 @@ describe('GET /api/images/[id]', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('content-type')).toBe('image/webp');
+    expect(response.headers.get('content-type')).toBe('image/png');
     expect(response.headers.get('cache-control')).toContain('public');
-    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe('webp-image');
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(pngBytes);
     expect(presignDownload).not.toHaveBeenCalled();
   });
 });
