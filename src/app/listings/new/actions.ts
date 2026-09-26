@@ -72,7 +72,7 @@ export async function createListingAction(formData: FormData): Promise<void> {
       meetupLocationIds: formData.getAll('meetupLocationIds').map(String),
     }, { publish: formData.get('intent') !== 'draft' });
 
-    redirect(formData.get('intent') === 'draft' ? `/listings/${listing.id}/edit` : `/listings/${listing.id}`);
+    redirect(formData.get('intent') === 'draft' ? `/listings/${listing.id}/edit` : `/listings/${listing.id}?published=1`);
   } catch (error) {
     if (error instanceof z.ZodError) {
       const detail = error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(' | ');

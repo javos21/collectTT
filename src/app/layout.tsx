@@ -16,10 +16,29 @@ import { storesForStaff } from '@/services/custody';
 import { countDealsNeedingAttention } from '@/services/deals';
 import { countPendingOffersReceivedBySeller } from '@/services/offers';
 import { isV1Launch } from '@/lib/launch-scope';
+import { env } from '@/lib/env';
 
 export const metadata: Metadata = {
-  title: 'CollectTT — Collect with confidence',
+  metadataBase: new URL(env().APP_URL),
+  title: {
+    default: 'CollectTT — Collect with confidence',
+    template: '%s | CollectTT',
+  },
   description: 'A trusted, peer-to-peer home for trading cards, comics and collectibles in Trinidad & Tobago.',
+  openGraph: {
+    type: 'website',
+    siteName: 'CollectTT',
+    title: 'CollectTT — Collect with confidence',
+    description: 'A trusted, peer-to-peer home for trading cards, comics and collectibles in Trinidad & Tobago.',
+    url: '/',
+    images: [{ url: '/assets/collecttt-hero-v2.png', alt: 'CollectTT — Collect with confidence' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'CollectTT — Collect with confidence',
+    description: 'A trusted, peer-to-peer home for trading cards, comics and collectibles in Trinidad & Tobago.',
+    images: ['/assets/collecttt-hero-v2.png'],
+  },
 };
 
 // Navigation is session-sensitive. Keep the shared shell fresh after auth changes.

@@ -1,9 +1,10 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ImageOff, Pencil } from 'lucide-react';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
-import { getListing, getListingActivity } from '@/services/listings';
+import { getListing, getListingActivity, getPublicListingShareData } from '@/services/listings';
 import { candidateStoresFor } from '@/services/relay-stores';
 import { categoryDefinitionWithCatalogValues } from '@/services/catalog';
 import { formatMoney, minimumNextBid } from '@/domain/money';
@@ -26,15 +27,63 @@ import { BuyerSnapshotLink } from '../../deals/buyer-snapshot-link';
 import { isLegacyFeatureAllowed, isV1Launch } from '@/lib/launch-scope';
 import { auctionFallbackOffers } from '@/db/schema/auction-fallback-offers';
 import { SUPPORT_CASE_CATEGORIES } from '@/services/support-cases';
+import { ListingShare } from '@/components/listing-share';
+import { env } from '@/lib/env';
+import { publicUrl } from '@/lib/storage';
+import { listingConditionLabel, listingPriceLabel, listingSocialDescription } from '@/lib/listing-sharing';
 
 export const dynamic = 'force-dynamic';
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const listing = await getPublicListingShareData(id);
+  if (listing === null) {
+    return {
+      title: 'Listing not found',
+      robots: { index: false, follow: false },
+    };
+  }
+
+  const canonicalUrl = new URL(`/listings/${listing.id}`, env().APP_URL).toString();
+  const priceLabel = listingPriceLabel(listing);
+  const title = `${listing.title} — ${priceLabel}`;
+  const description = listingSocialDescription(listing);
+  const variants = listing.firstImage === null ? {} : imageVariants(listing.firstImage.variants);
+  const imageKey = listing.firstImage === null
+    ? null
+    : variants.full ?? variants.card ?? variants.thumb ?? listing.firstImage.r2KeyOriginal;
+  const imageUrl = imageKey === null
+    ? new URL('/assets/collecttt-hero-v2.png', env().APP_URL).toString()
+    : publicUrl(imageKey);
+  const imageAlt = listing.firstImage === null ? 'CollectTT — Collect with confidence' : listing.title;
+
+  return {
+    title,
+    description,
+    alternates: { canonical: canonicalUrl },
+    openGraph: {
+      type: 'website',
+      siteName: 'CollectTT',
+      title: `${title} | CollectTT`,
+      description,
+      url: canonicalUrl,
+      images: [{ url: imageUrl, alt: imageAlt }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${title} | CollectTT`,
+      description,
+      images: [imageUrl],
+    },
+  };
+}
 
 export default async function ListingPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; errorCode?: string; claimed?: string; bid?: string; offer?: string; auth?: string; reported?: string }>;
+  searchParams: Promise<{ error?: string; errorCode?: string; claimed?: string; bid?: string; offer?: string; auth?: string; reported?: string; published?: string }>;
 }) {
   const { id } = await params;
   const flash = await searchParams;
@@ -149,6 +198,16 @@ export default async function ListingPage({
   const attributeRows = category.attributes.filter(
     (attr) => attributes[attr.key] !== undefined,
   );
+  const sharePriceLabel = listingPriceLabel(listing);
+  const shareConditionLabel = listingConditionLabel(listing);
+  const shareProps = {
+    listingId: listing.id,
+    title: listing.title,
+    priceLabel: sharePriceLabel,
+    conditionLabel: shareConditionLabel,
+    saleType: listing.saleType,
+    path: `/listings/${listing.id}`,
+  } as const;
 
   return (
     <main>
@@ -172,7 +231,10 @@ export default async function ListingPage({
           </svg>
           Browse
         </Link>
-        <h1>{listing.title}</h1>
+        <div className="listing-head__title-row">
+          <h1>{listing.title}</h1>
+          {listing.status !== 'draft' && <ListingShare {...shareProps} />}
+        </div>
       </div>
 
       {flash.error !== undefined && (
@@ -202,6 +264,9 @@ export default async function ListingPage({
         <div className="alert alert--info" role="status">Offer rejected.</div>
       )}
       {flash.reported === '1' && <div className="alert alert--info" role="status">Thanks — your report was sent privately to CollectTT support.</div>}
+      {flash.published === '1' && isSeller && listing.status === 'active' && (
+        <ListingShare {...shareProps} success />
+      )}
 
       <div className="listing-body">
         {/* ------------------------------------------------ gallery */}
