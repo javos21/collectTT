@@ -7,7 +7,7 @@
 - Images upload directly from the browser to the configured S3-compatible bucket (MinIO locally, Cloudflare R2 in production) using a short-lived signed PUT. The worker then creates 320px, 800px, and 1600px WebP variants.
 - Listing-to-image ordering is authoritative in `listing_images.position`. New listings write the submitted `imageIds` in order, starting at position 0. Gallery, card, member, and admin reads sort by this column. The first gallery image is therefore the row at position 0. Editing currently preserves existing order and appends new images; there is no reorder UI.
 - Browser image rendering uses `/api/images/[id]`, which redirects to a one-hour signed object URL with `private, no-store`. That is intentionally safe for a private bucket, but is not a strong Open Graph target because a crawler may retain the expiring redirect destination.
-- The deployment already requires `STORAGE_PUBLIC_URL`, described by the code and deployment configuration as the public MinIO/R2 CDN base URL. Social metadata should use the first image's 1600px WebP key at this public base URL, falling back to the source WebP while processing. Production configuration must use HTTPS and allow unauthenticated GET/HEAD requests with the correct `image/webp` content type. No image duplication is needed.
+- The deployment requires `STORAGE_PUBLIC_URL`, but staging verification found that its `r2.dev` domain can return `404` for objects that remain available through the private bucket. Social metadata must therefore not assume this public-domain mapping exposes the listing-image bucket.
 - Root metadata currently has only a site title and description. There is no metadata base, canonical URL, Open Graph configuration, Twitter card configuration, robots route, sitemap, middleware, or image hotlink rule in this repository.
 - First-party analytics already stores allow-listed events in `analytics_events`, with a subject, optional signed-in user ID, metadata, and an idempotency key. No browser analytics endpoint exists yet.
 - A native-share/copy component exists for sharing a seller's listings, but no reusable single-listing share component exists.
@@ -53,15 +53,15 @@
 
 ### Public social image
 
-- Use the existing public object/CDN base (`STORAGE_PUBLIC_URL`) with the stored variant key. This avoids signed redirects, cookies, and app authentication, and adds no duplicate storage.
-- Validate that production `APP_URL` and `STORAGE_PUBLIC_URL` are HTTPS.
-- Deployment verification must confirm the CDN returns `200`, `Content-Type: image/webp`, and does not block WhatsApp/Facebook user agents. If the current R2 bucket is not exposed through the configured public/custom domain, the smallest infrastructure change is to attach an R2 public/custom domain to the existing listing-image bucket; transaction evidence remains in its separate private bucket.
+- Add a stable, unauthenticated `/api/images/[id]/social` response that reads the preferred existing variant from the private listing-image bucket and returns the actual bytes with the correct content type and public crawler cache headers. The URL contains no signature and does not redirect.
+- Validate that production `APP_URL` is HTTPS. The evidence bucket remains separate and is never exposed by this route.
+- Deployment verification must confirm this endpoint returns `200`, `Content-Type: image/webp`, and the item bytes to WhatsApp/Facebook user agents.
 
 ### First-image selection
 
 - Reuse `listing_images.position`; do not add `primaryImage` or another source of truth.
 - Select the social image with `ORDER BY listing_images.position ASC LIMIT 1`, identical to the gallery/card convention.
-- A processing image may fall back to its original WebP key. A missing/deleted object will cause the crawler to fail that image request, so metadata falls back only when the database image row/usable key is absent. Operations should treat an object missing behind a retained row as storage corruption.
+- A processing image may fall back to its original WebP object. A missing/deleted object returns `404`; operations should treat an object missing behind a retained row as storage corruption.
 
 ### Analytics and attribution
 
@@ -80,6 +80,7 @@ No schema or migration is required. Existing image positions and analytics JSON 
 ## API changes
 
 - New `POST /api/analytics/share` endpoint for lightweight share events.
+- New `GET /api/images/[id]/social` endpoint for stable crawler-safe listing image bytes.
 - No social-network API and no WhatsApp Business API.
 - Existing image upload and display APIs remain unchanged.
 
@@ -92,6 +93,7 @@ No schema or migration is required. Existing image positions and analytics JSON 
 - `src/services/listings.ts` — minimal public listing/share metadata query.
 - `src/services/analytics.ts` — share event definitions.
 - `src/app/api/analytics/share/route.ts` — share-event ingestion.
+- `src/app/api/images/[id]/social/route.ts` — stable public social-image response.
 - `src/lib/env.ts` — production HTTPS validation.
 - `src/app/globals.css` — responsive, accessible share modal/callout styles.
 - `src/app/admin/analytics/page.tsx` — labels for new events.
@@ -140,5 +142,5 @@ No schema or migration is required. Existing image positions and analytics JSON 
 ## Cost and scope
 
 - No paid API, dependency, additional image copy, database migration, or scheduled job.
-- Share events add one small database row per interaction. Direct CDN image requests add only normal listing-image bandwidth; R2 has no egress charge in the current architecture, although request counts still follow the storage provider's normal pricing.
+- Share events add one small database row per interaction. Social crawler requests pass through the web service before being cached, adding a small amount of Render bandwidth/compute. No new storage is used; R2 has no egress charge in the current architecture, and public cache headers minimize repeat origin work.
 - Checkout, payments, delivery, stores, messaging, notifications, authentication, and feed behavior are unchanged.

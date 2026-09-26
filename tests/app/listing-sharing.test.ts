@@ -11,7 +11,7 @@ describe('listing social sharing integration', () => {
     expect(page).toContain('export async function generateMetadata');
     expect(page).toContain('alternates: { canonical: canonicalUrl }');
     expect(page).toContain("card: 'summary_large_image'");
-    expect(page).toContain('publicUrl(imageKey)');
+    expect(page).toContain('`/api/images/${listing.firstImage.id}/social`');
     expect(listings).toContain('.orderBy(asc(listingImages.position))');
     expect(listings).toContain('.limit(1)');
     expect(listings).toContain("sql`${listings.status} <> 'draft'`");

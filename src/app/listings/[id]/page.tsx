@@ -29,7 +29,6 @@ import { auctionFallbackOffers } from '@/db/schema/auction-fallback-offers';
 import { SUPPORT_CASE_CATEGORIES } from '@/services/support-cases';
 import { ListingShare } from '@/components/listing-share';
 import { env } from '@/lib/env';
-import { publicUrl } from '@/lib/storage';
 import { listingConditionLabel, listingPriceLabel, listingSocialDescription } from '@/lib/listing-sharing';
 
 export const dynamic = 'force-dynamic';
@@ -48,13 +47,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const priceLabel = listingPriceLabel(listing);
   const title = `${listing.title} — ${priceLabel}`;
   const description = listingSocialDescription(listing);
-  const variants = listing.firstImage === null ? {} : imageVariants(listing.firstImage.variants);
-  const imageKey = listing.firstImage === null
-    ? null
-    : variants.full ?? variants.card ?? variants.thumb ?? listing.firstImage.r2KeyOriginal;
-  const imageUrl = imageKey === null
+  const imageUrl = listing.firstImage === null
     ? new URL('/assets/collecttt-hero-v2.png', env().APP_URL).toString()
-    : publicUrl(imageKey);
+    : new URL(`/api/images/${listing.firstImage.id}/social`, env().APP_URL).toString();
   const imageAlt = listing.firstImage === null ? 'CollectTT — Collect with confidence' : listing.title;
 
   return {
