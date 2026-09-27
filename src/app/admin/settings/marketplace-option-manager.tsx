@@ -71,7 +71,14 @@ function OptionSection({
         {options.map((option) => (
           <article className={`admin-option-row${option.active ? '' : ' is-removed'}`} key={option.id}>
             <div className="admin-option-row__copy">
-              <div><strong>{option.label}</strong>{option.requiresStore && <span>Store required</span>}</div>
+              <div>
+                <strong>{option.label}</strong>
+                {kind === 'delivery' && (option.requiresStore
+                  ? <span>Store required</span>
+                  : option.requiresMeetupLocation
+                    ? <span>Meetup location required</span>
+                    : <span>No location required</span>)}
+              </div>
               {option.description !== null && option.description !== '' && <p>{option.description}</p>}
             </div>
             <div className="admin-option-row__actions">
@@ -107,6 +114,7 @@ function OptionForm({
   onClose: () => void;
 }) {
   const noun = kind === 'delivery' ? 'delivery option' : 'payment option';
+  const [requiresStore, setRequiresStore] = useState(option?.requiresStore ?? false);
   return (
     <div className="catalog-form-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.currentTarget === event.target) onClose();
@@ -125,8 +133,14 @@ function OptionForm({
           <label>Display order<input name="sortOrder" type="number" min="0" step="1" defaultValue={option?.sortOrder ?? 10} required /></label>
           {kind === 'delivery' && (
             <label className="admin-option-store-toggle">
-              <input name="requiresStore" type="checkbox" defaultChecked={option?.requiresStore ?? false} />
+              <input name="requiresStore" type="checkbox" checked={requiresStore} onChange={(event) => setRequiresStore(event.target.checked)} />
               <span><strong>Requires a pickup store</strong><small>Buyers must choose one of the stores attached to the listing.</small></span>
+            </label>
+          )}
+          {kind === 'delivery' && !requiresStore && (
+            <label className="admin-option-store-toggle">
+              <input name="requiresMeetupLocation" type="checkbox" defaultChecked={option?.requiresMeetupLocation ?? true} />
+              <span><strong>Buyer must choose a meetup location</strong><small>Turn this off for event collection or another handoff where the option itself identifies where to collect.</small></span>
             </label>
           )}
           <p className="catalog-form__hint">The key is a stable internal identifier. Existing listings keep working when an option is renamed or removed.</p>

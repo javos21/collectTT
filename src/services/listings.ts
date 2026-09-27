@@ -25,6 +25,7 @@ import { images } from '../db/schema/images';
 import { profiles } from '../db/schema/profiles';
 import { transactions } from '../db/schema/transactions';
 import { marketplaceOptions } from '../db/schema/settings';
+import { selectionRequiresMeetupLocation } from '../domain/policy/meetup-location';
 import { parseAttributesWithCatalogValues } from './catalog';
 import { CATEGORY_LIST } from '../domain/categories/definitions';
 import { FULFILLMENT_PATHS, type FulfillmentPath } from '../domain/states/transaction';
@@ -163,9 +164,10 @@ export async function createListing(
   const fulfillmentPaths = requestedDeliveryIds.length > 0
     ? [...new Set(selectedDeliveryOptions.map((option) => option.fulfillmentPath).filter((path): path is FulfillmentPath => path !== null))]
     : parsedInput.fulfillmentPaths;
+  const requiresMeetupLocation = selectionRequiresMeetupLocation(selectedDeliveryOptions, fulfillmentPaths);
   const input = {
     ...parsedInput,
-    meetupLocationIds: fulfillmentPaths.includes('cash_meetup')
+    meetupLocationIds: requiresMeetupLocation
       ? [...new Set(parsedInput.meetupLocationIds.length > 0
         ? parsedInput.meetupLocationIds
         : meetupLocations.filter((location) => location.active).length === 1
@@ -177,7 +179,7 @@ export async function createListing(
   const relayStoreIds = input.relayStoreIds.length > 0 ? input.relayStoreIds : sellerDefaults.defaultRelayStoreIds;
   if (fulfillmentPaths.length === 0) throw new UnavailableMarketplaceOptionError('delivery');
   if (settlementMethods.length === 0) throw new UnavailableMarketplaceOptionError('payment');
-  if (fulfillmentPaths.includes('cash_meetup') && input.meetupLocationIds.length === 0) {
+  if (requiresMeetupLocation && input.meetupLocationIds.length === 0) {
     throw new Error('Choose at least one public meetup location.');
   }
   assertV1ListingTerms({
@@ -545,7 +547,15 @@ export async function updateListingBasics(
     }
     await assertListingUnlocked(tx, listingId);
     if (input.meetupLocationIds !== undefined) {
-      if (current.fulfillment_paths.includes('cash_meetup') && input.meetupLocationIds.length === 0) {
+      const listingOptionRows = await tx
+        .select({ requiresMeetupLocation: marketplaceOptions.requiresMeetupLocation })
+        .from(listingDeliveryOptions)
+        .innerJoin(marketplaceOptions, eq(marketplaceOptions.id, listingDeliveryOptions.optionId))
+        .where(eq(listingDeliveryOptions.listingId, listingId));
+      const requiresMeetupLocation = listingOptionRows.length > 0
+        ? listingOptionRows.some((option) => option.requiresMeetupLocation)
+        : current.fulfillment_paths.includes('cash_meetup');
+      if (requiresMeetupLocation && input.meetupLocationIds.length === 0) {
         throw new Error('Choose at least one public meetup location.');
       }
       const uniqueLocationIds = [...new Set(input.meetupLocationIds)];
@@ -1321,6 +1331,7 @@ export async function getListing(id: string, viewerId?: string) {
       label: marketplaceOptions.label,
       description: marketplaceOptions.description,
       requiresStore: marketplaceOptions.requiresStore,
+      requiresMeetupLocation: marketplaceOptions.requiresMeetupLocation,
       fulfillmentPath: marketplaceOptions.fulfillmentPath,
       expectedDeliveryDays: listingDeliveryOptions.expectedDeliveryDays,
     })
@@ -1344,6 +1355,7 @@ export async function getListing(id: string, viewerId?: string) {
       label: option.label,
       description: option.description,
       requiresStore: option.requiresStore,
+      requiresMeetupLocation: option.requiresMeetupLocation,
       fulfillmentPath: option.fulfillmentPath,
       expectedDeliveryDays: fulfillmentTerms.find((term) => term.fulfillmentPath === option.fulfillmentPath)?.expectedDeliveryDays ?? 5,
     }));

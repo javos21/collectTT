@@ -38,6 +38,7 @@ export const marketplaceOptions = pgTable(
     label: text('label').notNull(),
     description: text('description'),
     requiresStore: boolean('requires_store').notNull().default(false),
+    requiresMeetupLocation: boolean('requires_meetup_location').notNull().default(false),
     fulfillmentPath: fulfillmentPathEnum('fulfillment_path'),
     sortOrder: integer('sort_order').notNull().default(0),
     active: boolean('active').notNull().default(true),
@@ -50,8 +51,8 @@ export const marketplaceOptions = pgTable(
     check('marketplace_options_kind_valid', sql`${t.kind} in ('delivery', 'payment')`),
     check(
       'marketplace_options_shape',
-      sql`(${t.kind} = 'delivery' and ${t.fulfillmentPath} is not null)
-          or (${t.kind} = 'payment' and ${t.fulfillmentPath} is null and ${t.requiresStore} = false)`,
+      sql`(${t.kind} = 'delivery' and ${t.fulfillmentPath} is not null and not (${t.requiresStore} and ${t.requiresMeetupLocation}))
+          or (${t.kind} = 'payment' and ${t.fulfillmentPath} is null and ${t.requiresStore} = false and ${t.requiresMeetupLocation} = false)`,
     ),
   ],
 );

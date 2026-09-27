@@ -205,6 +205,7 @@ export async function saveMarketplaceOption(
     label: string;
     description?: string | null;
     requiresStore?: boolean;
+    requiresMeetupLocation?: boolean;
     sortOrder: number;
   },
   adminUserId: string,
@@ -213,6 +214,7 @@ export async function saveMarketplaceOption(
     assertLegacyFeatureAllowed('store_custody');
   }
   const requiresStore = input.kind === 'delivery' && input.requiresStore === true;
+  const requiresMeetupLocation = input.kind === 'delivery' && !requiresStore && input.requiresMeetupLocation !== false;
   const fulfillmentPath: FulfillmentPath | null = input.kind === 'delivery'
     ? requiresStore ? 'relay' : 'cash_meetup'
     : null;
@@ -222,7 +224,10 @@ export async function saveMarketplaceOption(
     const option = current[0];
     if (option === undefined) throw new Error('Option not found.');
     if (option.kind !== input.kind) throw new Error('The option type cannot be changed.');
-    if (option.kind === 'delivery' && option.requiresStore !== requiresStore) {
+    if (option.kind === 'delivery' && (
+      option.requiresStore !== requiresStore
+      || option.requiresMeetupLocation !== requiresMeetupLocation
+    )) {
       const used = await db.execute(sql`
         select exists (
           select 1 from listing_delivery_options where option_id = ${option.id}
@@ -230,7 +235,7 @@ export async function saveMarketplaceOption(
       `);
       const usage = used.rows[0] as { used?: boolean | string } | undefined;
       if (usage?.used === true || usage?.used === 't') {
-        throw new Error('Whether a delivery option requires a store cannot change after it has been used on a listing.');
+        throw new Error('A delivery option’s store or meetup-location requirement cannot change after it has been used on a listing.');
       }
     }
     const updated = await db
@@ -239,6 +244,7 @@ export async function saveMarketplaceOption(
         label: input.label,
         description: input.description ?? null,
         requiresStore,
+        requiresMeetupLocation,
         fulfillmentPath,
         sortOrder: input.sortOrder,
         active: true,
@@ -268,6 +274,7 @@ export async function saveMarketplaceOption(
       label: input.label,
       description: input.description ?? null,
       requiresStore,
+      requiresMeetupLocation,
       fulfillmentPath,
       sortOrder: input.sortOrder,
       active: true,
@@ -279,6 +286,7 @@ export async function saveMarketplaceOption(
         label: input.label,
         description: input.description ?? null,
         requiresStore,
+        requiresMeetupLocation,
         fulfillmentPath,
         sortOrder: input.sortOrder,
         active: true,

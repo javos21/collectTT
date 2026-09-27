@@ -51,7 +51,7 @@ type BidData = { id: string; title: string; amount: string; status: string; plac
 type OfferData = { id: string; title: string; amount: string; status: string; createdAt: string };
 type DealData = { id: string; title: string; role: string; amount: string; state: string; fulfillmentPath: string; createdAt: string; completedAt: string | null };
 type ReputationEventData = { id: string; type: string; title: string | null; occurredAt: string; transactionId: string | null; amount: string | null; role: string | null };
-type DeliveryOptionData = { id: string; key: string; label: string; description: string | null; requiresStore: boolean };
+type DeliveryOptionData = { id: string; key: string; label: string; description: string | null; requiresStore: boolean; requiresMeetupLocation: boolean };
 type PaymentOptionData = { key: string; label: string };
 type RelayStoreData = { id: string; name: string; area: string };
 type MeetupLocationData = { id: string; label: string; area: string; instructions: string | null; active: boolean };
@@ -123,7 +123,7 @@ function AccountPanel(props: ProfilePageProps) {
   const initialRelayStoreIds = props.sellerPreferences.defaultRelayStoreIds.filter((id) => activeRelayStoreIds.has(id));
   const [selectedDeliveryOptionIds, setSelectedDeliveryOptionIds] = useState<string[]>(initialDeliveryOptionIds);
   const [selectedRelayStoreIds, setSelectedRelayStoreIds] = useState<string[]>(initialRelayStoreIds);
-  const meetupDeliverySelected = props.deliveryOptions.some((option) => option.key === 'cash_meetup' && selectedDeliveryOptionIds.includes(option.id));
+  const meetupDeliverySelected = props.deliveryOptions.some((option) => option.requiresMeetupLocation && selectedDeliveryOptionIds.includes(option.id));
   const pickupDeliverySelected = props.deliveryOptions.some((option) => (option.requiresStore || option.key === 'relay') && selectedDeliveryOptionIds.includes(option.id));
 
   return (

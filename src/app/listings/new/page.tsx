@@ -89,6 +89,7 @@ export default async function NewListingPage({
     label: option.label,
     description: option.description ?? '',
     requiresStore: option.requiresStore,
+    requiresMeetupLocation: option.requiresMeetupLocation,
     fulfillmentPath: option.fulfillmentPath ?? 'cash_meetup',
     defaultDays: sourceDeliveryOptions.get(option.id) ?? (option.fulfillmentPath === 'full_service'
       ? fullServiceDefaultDays
