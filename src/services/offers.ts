@@ -28,6 +28,7 @@ import {
   openTransaction,
 } from './transactions';
 import { assertListingMeetupLocation } from './meetup-selection';
+import { requiresMeetupLocationForPath } from '@/domain/policy/meetup-location';
 
 export interface SubmitOfferInput {
   listingId: string;
@@ -67,12 +68,14 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
       throw new ConflictError('Your offer must be below the asking price');
     }
     let fulfillmentPath = input.fulfillmentPath;
+    let requiresMeetupLocation = requiresMeetupLocationForPath(fulfillmentPath);
     if (input.deliveryOptionId !== undefined) {
       const option = await getListingDeliveryOption(tx, input.listingId, input.deliveryOptionId);
       if (option === null || option.fulfillmentPath === null) {
         throw new ConflictError('Choose a delivery option offered by the seller');
       }
       fulfillmentPath = option.fulfillmentPath as FulfillmentPath;
+      requiresMeetupLocation = requiresMeetupLocationForPath(fulfillmentPath, option);
       if (option.requiresStore && (input.relayStoreId === undefined || input.relayStoreId === null)) {
         throw new ConflictError('Choose which pickup store you want to collect from');
       }
@@ -90,7 +93,7 @@ export async function submitOffer(input: SubmitOfferInput): Promise<{ id: string
       );
     }
     const relayStoreId = fulfillmentPath === 'relay' ? input.relayStoreId ?? null : null;
-    const meetupLocationId = fulfillmentPath === 'cash_meetup'
+    const meetupLocationId = fulfillmentPath === 'cash_meetup' && requiresMeetupLocation
       ? await assertListingMeetupLocation(tx, input.listingId, input.meetupLocationId)
       : null;
     await assertFulfillmentEligible(tx, {

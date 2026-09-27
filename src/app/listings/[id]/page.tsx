@@ -381,7 +381,7 @@ export default async function ListingPage({
                                 </span>
                               </span>
                             )}
-                            {option.fulfillmentPath === 'cash_meetup' && (
+                            {option.requiresMeetupLocation && (
                               <span className="settle-list__locations" aria-label="Meetup locations">
                                 <span className="settle-list__locations-label">Choose from these public meetup locations</span>
                                 <span className="settle-list__locations-list">

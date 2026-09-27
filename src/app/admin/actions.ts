@@ -178,6 +178,7 @@ export async function saveMarketplaceOptionAction(formData: FormData): Promise<v
   const key = safeKey(text(formData, 'key') || label);
   const sortOrder = Number(text(formData, 'sortOrder') || 0);
   const requiresStore = formData.get('requiresStore') !== null;
+  const requiresMeetupLocation = formData.get('requiresMeetupLocation') !== null;
 
   if ((kind !== 'delivery' && kind !== 'payment') || label === '' || key === '' || !Number.isInteger(sortOrder)) {
     redirect('/admin/settings?settingsError=Add+a+name+and+a+valid+display+order.');
@@ -191,6 +192,7 @@ export async function saveMarketplaceOptionAction(formData: FormData): Promise<v
       label,
       description: description || null,
       requiresStore,
+      requiresMeetupLocation,
       sortOrder,
     }, viewer.userId);
   } catch (error) {

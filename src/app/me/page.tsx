@@ -249,7 +249,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         }}
         feedback={{ error: params.error, success: params.success }}
         savePhoneNumberAction={savePhoneNumberAction}
-        deliveryOptions={deliveryOptions.map((option) => ({ id: option.id, key: option.key, label: option.label, description: option.description, requiresStore: option.requiresStore }))}
+        deliveryOptions={deliveryOptions.map((option) => ({ id: option.id, key: option.key, label: option.label, description: option.description, requiresStore: option.requiresStore, requiresMeetupLocation: option.requiresMeetupLocation }))}
         paymentOptions={paymentOptions.map((option) => ({ key: option.key, label: option.label }))}
         relayStores={relayStores.map((store) => ({ id: store.id, name: store.name, area: store.area }))}
         meetupLocations={meetupLocations.map((location) => ({ id: location.id, label: location.label, area: location.area, instructions: location.instructions, active: location.active }))}

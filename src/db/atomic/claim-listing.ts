@@ -34,6 +34,7 @@ import { assertV1ListingTerms } from '../../lib/launch-scope';
 import { isLegacyFeatureAllowed } from '../../lib/launch-scope';
 import { recordAnalyticsEvent } from '../../services/analytics';
 import { assertListingMeetupLocation } from '../../services/meetup-selection';
+import { requiresMeetupLocationForPath } from '../../domain/policy/meetup-location';
 
 export interface ClaimResult {
   outcome: 'claimed';
@@ -82,6 +83,7 @@ export async function claimListing(opts: {
     let settlementMethod = opts.settlementMethod;
     let relayStoreId = opts.relayStoreId;
     let selectedMeetupLocationId = opts.meetupLocationId;
+    let requiresMeetupLocation = requiresMeetupLocationForPath(fulfillmentPath);
     let offerToCancel: {
       id: string;
       fulfillmentPath: FulfillmentPath;
@@ -149,6 +151,7 @@ export async function claimListing(opts: {
         throw new ConflictError('Choose a delivery option offered by the seller');
       }
       fulfillmentPath = option.fulfillmentPath as FulfillmentPath;
+      requiresMeetupLocation = requiresMeetupLocationForPath(fulfillmentPath, option);
       if (option.requiresStore && (relayStoreId === undefined || relayStoreId === null)) {
         throw new ConflictError('Choose which pickup store you want to collect from');
       }
@@ -164,7 +167,7 @@ export async function claimListing(opts: {
     if (!listing.fulfillmentPaths.includes(fulfillmentPath)) {
       throw new ConflictError('The seller does not accept that fulfillment method');
     }
-    const meetupLocationId = fulfillmentPath === 'cash_meetup'
+    const meetupLocationId = fulfillmentPath === 'cash_meetup' && requiresMeetupLocation
       ? await assertListingMeetupLocation(tx, opts.listingId, selectedMeetupLocationId ?? listing.meetupLocationId)
       : null;
 

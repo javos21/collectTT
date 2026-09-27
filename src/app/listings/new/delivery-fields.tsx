@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 
 type RelayStore = { id: string; name: string; area: string };
-type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; fulfillmentPath: string; defaultDays: number };
+type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; requiresMeetupLocation: boolean; fulfillmentPath: string; defaultDays: number };
 
 export function DeliveryFields({
   deliveryOptions,

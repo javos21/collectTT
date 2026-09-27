@@ -16,7 +16,7 @@ export function SettlementFields({
 }: {
   idPrefix: string;
   fieldPrefix?: string;
-  deliveryOptions: readonly { id: string; label: string; requiresStore: boolean; fulfillmentPath?: string | null }[];
+  deliveryOptions: readonly { id: string; label: string; requiresStore: boolean; requiresMeetupLocation: boolean; fulfillmentPath?: string | null }[];
   paymentOptions: readonly { key: string; label: string }[];
   relayCandidates: readonly RelayStore[];
   meetupLocations: readonly MeetupLocation[];
@@ -91,7 +91,7 @@ export function SettlementFields({
         </>
       )}
 
-      {selectedDelivery?.fulfillmentPath === 'cash_meetup' && (
+      {selectedDelivery?.requiresMeetupLocation === true && (
         <>
           <label htmlFor={meetupId}>
             Meetup location <span className="required-mark" aria-hidden="true">*</span>

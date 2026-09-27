@@ -37,7 +37,7 @@ export function EditListingForm({
   meetupLocations: readonly { id: string; label: string; area: string }[];
   meetupLocationIds: readonly string[];
   acceptsOffers: boolean;
-  deliveryOptions: readonly { id: string; label: string; expectedDeliveryDays: number; fulfillmentPath?: string | null }[];
+  deliveryOptions: readonly { id: string; label: string; expectedDeliveryDays: number; requiresMeetupLocation: boolean; fulfillmentPath?: string | null }[];
   locked: boolean;
   error?: string;
 }) {
@@ -46,7 +46,7 @@ export function EditListingForm({
   const [formError, setFormError] = useState('');
   const [availableMeetupLocations, setAvailableMeetupLocations] = useState(meetupLocations);
   const [selectedMeetupLocationIds, setSelectedMeetupLocationIds] = useState<string[]>([...meetupLocationIds]);
-  const hasMeetupDelivery = deliveryOptions.some((option) => option.fulfillmentPath === 'cash_meetup');
+  const hasMeetupDelivery = deliveryOptions.some((option) => option.requiresMeetupLocation);
 
   function handleMeetupLocationCreated(location: InlineMeetupLocation) {
     setAvailableMeetupLocations((current) => [location, ...current.filter((item) => item.id !== location.id)]);

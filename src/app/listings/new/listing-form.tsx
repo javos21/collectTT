@@ -11,7 +11,7 @@ import { InlineMeetupLocationForm } from '@/app/listings/meetup-location-form';
 import type { InlineMeetupLocation } from '@/app/listings/meetup-location-actions';
 
 type RelayStore = { id: string; name: string; area: string };
-type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; fulfillmentPath: string; defaultDays: number };
+type DeliveryOption = { id: string; label: string; description: string; requiresStore: boolean; requiresMeetupLocation: boolean; fulfillmentPath: string; defaultDays: number };
 type PaymentOption = { key: string; label: string };
 type MeetupLocation = { id: string; label: string; area: string };
 type InitialImage = { id: string; previewUrl: string; alt?: string };
@@ -98,7 +98,7 @@ export function ListingForm({
   const handleDeliverySelectionChange = useCallback((ids: string[]) => {
     setSelectedDeliveryOptionIds(ids);
   }, []);
-  const hasMeetupDelivery = deliveryOptions.some((option) => option.fulfillmentPath === 'cash_meetup' && selectedDeliveryOptionIds.includes(option.id));
+  const hasMeetupDelivery = deliveryOptions.some((option) => option.requiresMeetupLocation && selectedDeliveryOptionIds.includes(option.id));
 
   function handleMeetupLocationCreated(location: InlineMeetupLocation) {
     setAvailableMeetupLocations((current) => [location, ...current.filter((item) => item.id !== location.id)]);

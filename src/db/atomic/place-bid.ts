@@ -34,6 +34,7 @@ import { assertMarketplaceEligible } from '../../services/marketplace-eligibilit
 import { assertV1ListingTerms } from '../../lib/launch-scope';
 import { recordAnalyticsEvent } from '../../services/analytics';
 import { assertListingMeetupLocation } from '../../services/meetup-selection';
+import { requiresMeetupLocationForPath } from '../../domain/policy/meetup-location';
 
 export interface BidResult {
   bidId: string;
@@ -105,12 +106,14 @@ export async function placeBid(opts: {
     }
 
     let fulfillmentPath = opts.fulfillmentPath;
+    let requiresMeetupLocation = requiresMeetupLocationForPath(fulfillmentPath);
     if (opts.deliveryOptionId !== undefined) {
       const option = await getListingDeliveryOption(tx, opts.listingId, opts.deliveryOptionId);
       if (option === null || option.fulfillmentPath === null) {
         throw new ConflictError('Choose a delivery option offered by the seller');
       }
       fulfillmentPath = option.fulfillmentPath as FulfillmentPath;
+      requiresMeetupLocation = requiresMeetupLocationForPath(fulfillmentPath, option);
       if (option.requiresStore && (opts.relayStoreId === undefined || opts.relayStoreId === null)) {
         throw new ConflictError('Choose which pickup store you want to collect from');
       }
@@ -132,7 +135,7 @@ export async function placeBid(opts: {
         buyerRestrictions: restrictions,
       });
     }
-    const meetupLocationId = fulfillmentPath === 'cash_meetup'
+    const meetupLocationId = fulfillmentPath === 'cash_meetup' && requiresMeetupLocation
       ? await assertListingMeetupLocation(tx, opts.listingId, opts.meetupLocationId ?? listing.meetupLocationId)
       : null;
 
