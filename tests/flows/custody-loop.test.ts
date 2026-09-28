@@ -506,7 +506,7 @@ describe('custody notification strings', () => {
     expect(received!.body).toContain('collect it');
   });
 
-  it('extends the collection deadline after payment, not the tight unpaid one', async () => {
+  it('authorizes collection after payment without starting a shelf clock', async () => {
     const { markReceived, onPaymentConfirmed } = await import('../../src/services/custody');
     const { transactions: transactionsTable } = await import('../../src/db/schema/transactions');
 
@@ -523,9 +523,8 @@ describe('custody notification strings', () => {
       await markReceived({ tx, holdingId: held[0]!.id, actorUserId: clerk, actorRole: 'store' });
     });
 
-    // Confirm payment: this extends the shelf clock from the tight unpaid window (3
-    // days) to the paid window (7 days), then automatically moves the item into the
-    // ready-for-collection state.
+    // Confirming payment moves the item into the ready-for-collection state without
+    // attaching an expiry clock.
     await db.transaction(async (tx) => {
       await tx
         .update(transactionsTable)
@@ -541,8 +540,7 @@ describe('custody notification strings', () => {
 
     expect(holdingAfter[0]!.state).toBe('release_authorized');
 
-    expect(holdingAfter[0]!.custodyExpiresAt).not.toBeNull();
-    expect(holdingAfter[0]!.custodyExpiresAt!.getTime()).toBeGreaterThan(Date.now());
+    expect(holdingAfter[0]!.custodyExpiresAt).toBeNull();
   });
 
   it('automatically releases a paid item exactly once', async () => {
@@ -577,10 +575,10 @@ describe('custody notification strings', () => {
 
     expect(holdingAfter[0]!.state).toBe('release_authorized');
 
-    expect(holdingAfter[0]!.custodyExpiresAt).not.toBeNull();
+    expect(holdingAfter[0]!.custodyExpiresAt).toBeNull();
   });
 
-  it('flags an overstayed item and no-ops when the clock has moved', async () => {
+  it('ignores legacy custody-overstay jobs', async () => {
     const { custodyOverstay } = await import('../../src/jobs/tasks/custody-overstay');
     const { markReceived } = await import('../../src/services/custody');
     const helpers = { logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} } } as never;
@@ -607,13 +605,11 @@ describe('custody notification strings', () => {
 
     await custodyOverstay({ holdingId }, helpers);
     row = await db.select().from(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
-    expect(row[0]!.overstayFlaggedAt).not.toBeNull();
+    expect(row[0]!.overstayFlaggedAt).toBeNull();
 
-    // Idempotent: a redelivery must not move the timestamp.
-    const firstFlag = row[0]!.overstayFlaggedAt!.getTime();
     await custodyOverstay({ holdingId }, helpers);
     row = await db.select().from(custodyHoldings).where(eq(custodyHoldings.id, holdingId));
-    expect(row[0]!.overstayFlaggedAt!.getTime()).toBe(firstFlag);
+    expect(row[0]!.overstayFlaggedAt).toBeNull();
   });
 
   it('finds a holding by code, scoped to the store', async () => {
@@ -840,7 +836,7 @@ describe('a deactivated store does not brick the jobs that depend on it', () => 
 });
 
 describe('the full custody loop', () => {
-  it('does not penalize the seller when the buyer never pays before drop-off expires', async () => {
+  it('ignores legacy payment and drop-off expiry jobs without penalizing either party', async () => {
     const { dropoffWindowExpired, paymentWindowExpired } = await import(
       '../../src/jobs/tasks/transaction-windows'
     );
@@ -893,8 +889,7 @@ describe('the full custody loop', () => {
       .where(eq(reputationEvents.transactionId, txId));
     expect(sellerFailureBeforePayment).toHaveLength(0);
 
-    // The buyer's payment window is the authoritative failure path and records the
-    // buyer renege without creating payment-timing reputation data.
+    // A legacy buyer-payment job is also harmless.
     await db
       .update(transactions)
       .set({ paymentDeadlineAt: sql`now() - interval '1 hour'` })
@@ -902,8 +897,8 @@ describe('the full custody loop', () => {
     await paymentWindowExpired({ transactionId: txId }, helpers);
 
     const failed = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
-    expect(failed?.state).toBe('reneged_buyer');
-    expect(failed?.terminatedReason).toBe('non_payment');
+    expect(failed?.state).toBe('open');
+    expect(failed?.terminatedReason).toBeNull();
 
     const afterBuyer = await db
       .select({
@@ -916,15 +911,14 @@ describe('the full custody loop', () => {
       .from(reputationCounters)
       .where(eq(reputationCounters.userId, seller));
 
-    expect(afterBuyer[0]?.buyerReneged).toBe((before[0]?.buyerReneged ?? 0) + 1);
+    expect(afterBuyer[0]?.buyerReneged).toBe(before[0]?.buyerReneged ?? 0);
     expect(afterSeller[0]?.sellerReneged).toBe(beforeSeller[0]?.sellerReneged ?? 0);
 
     const facts = await db
       .select({ type: reputationEvents.type, userId: reputationEvents.userId })
       .from(reputationEvents)
       .where(eq(reputationEvents.transactionId, txId));
-    expect(facts).toContainEqual({ type: 'buyer_reneged_nonpayment', userId: buyerA });
-    expect(facts.some((fact) => fact.type === 'seller_reneged_no_dropoff')).toBe(false);
+    expect(facts).toHaveLength(0);
   });
 
   it('runs the simplified loop: drop-off -> buyer marks paid -> buyer collects -> complete', async () => {
@@ -999,7 +993,7 @@ describe('the full custody loop', () => {
     expect(collected[0]!.pickedUpAt).not.toBeNull();
   });
 
-  it('returns an unpaid item to the seller when the window lapses and nobody is left', async () => {
+  it('keeps an unpaid item reserved when a legacy window job runs', async () => {
     const { markReceived } = await import('../../src/services/custody');
     const { paymentWindowExpired } = await import(
       '../../src/jobs/tasks/transaction-windows'
@@ -1029,8 +1023,8 @@ describe('the full custody loop', () => {
       await markReceived({ tx, holdingId, actorUserId: clerk, actorRole: 'store' });
     });
 
-    // Force both clocks into the past on the DATABASE clock, keeping
-    // tx_dropoff_before_payment satisfied (drop-off deadline < payment deadline).
+    // Populate both legacy clocks in the past to prove old rows and queued jobs are
+    // harmless after the no-deadline migration.
     await db
       .update(transactions)
       .set({
@@ -1041,17 +1035,17 @@ describe('the full custody loop', () => {
 
     await paymentWindowExpired({ transactionId: txId }, helpers);
 
-    // The buyer reneged. With no fixed-price backup queue, the item returns immediately.
+    // Time passing alone does not end the deal or move the item.
     const midway = await db
       .select()
       .from(custodyHoldings)
       .where(eq(custodyHoldings.id, holdingId));
-    expect(midway[0]!.state).toBe('returned_to_seller');
-    expect(midway[0]!.returnedAt).not.toBeNull();
+    expect(midway[0]!.state).toBe('at_relay');
+    expect(midway[0]!.returnedAt).toBeNull();
     expect(midway[0]!.currentTransactionId).toBe(txId);
 
     const failed = await db.select().from(transactions).where(eq(transactions.id, txId));
-    expect(failed[0]!.state).toBe('reneged_buyer');
+    expect(failed[0]!.state).toBe('open');
 
     // Nobody was promoted: no second attempt was opened on this listing.
     const attempts = await db
@@ -1060,8 +1054,7 @@ describe('the full custody loop', () => {
       .where(eq(transactions.listingId, listingId));
     expect(attempts).toHaveLength(1);
 
-    // The seller was actually told where their item is. Matched on linkUrl as well as
-    // event type, so a sibling test's return notice cannot satisfy this assertion.
+    // No automated return notice is sent because the deal remains open.
     const { notifications } = await import('../../src/db/schema/notifications');
     const sellerInbox = await db
       .select()
@@ -1070,6 +1063,6 @@ describe('the full custody loop', () => {
     const returnNotice = sellerInbox.filter(
       (n) => n.eventType === 'custody_return_to_seller' && n.linkUrl === `/listings/${listingId}`,
     );
-    expect(returnNotice).toHaveLength(1);
+    expect(returnNotice).toHaveLength(0);
   });
 });

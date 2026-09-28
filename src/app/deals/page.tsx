@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ChevronRight, CircleCheck, Clock3, HandCoins, UserRound } from 'lucide-react';
+import { ChevronRight, CircleCheck, HandCoins, UserRound } from 'lucide-react';
 
 import { db } from '@/db/client';
 import { currentUser } from '@/lib/session';
@@ -32,14 +32,6 @@ function formatReceivedAt(value: Date): { date: string; time: string } {
 }
 
 type DealsTab = 'attention' | 'active' | 'offers' | 'handoffs';
-
-function formatDealDeadline(value: string): string {
-  return new Date(value).toLocaleDateString('en-TT', {
-    timeZone: 'America/Port_of_Spain',
-    day: 'numeric',
-    month: 'short',
-  });
-}
 
 function attentionSummary(count: number): string {
   if (count === 0) return 'Nothing needs you right now.';
@@ -138,13 +130,6 @@ export default async function DealsPage({
                           {deal.role === 'buying' ? 'Buying' : 'Selling'}
                         </span>
                       </div>
-                      {deal.deadlineAt !== null && (
-                        <div className="attention-deal__due">
-                          <Clock3 aria-hidden="true" />
-                          <span>Due</span>
-                          <time dateTime={deal.deadlineAt}>{formatDealDeadline(deal.deadlineAt)}</time>
-                        </div>
-                      )}
                     </div>
                     <div className="attention-deal__body">
                       <strong className="attention-deal__amount num">{formatMoney(deal.amountCents)}</strong>

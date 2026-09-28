@@ -31,11 +31,16 @@ export function assertSafeTestEnvironment(
   const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\//, ''));
   const isLocal = LOCAL_DATABASE_HOSTS.has(databaseUrl.hostname);
   const isExplicitTestDatabase = /(^|[-_])test($|[-_])/i.test(databaseName);
+  const isConfirmedStagingDatabase =
+    env.CONFIRM_STAGING_TESTS === 'test-staging'
+    && typeof env.STAGING_DATABASE_URL === 'string'
+    && env.STAGING_DATABASE_URL !== ''
+    && rawDatabaseUrl === env.STAGING_DATABASE_URL;
 
-  if (!isLocal && !isExplicitTestDatabase) {
+  if (!isLocal && !isExplicitTestDatabase && !isConfirmedStagingDatabase) {
     throw new Error(
       `Refusing to run tests against non-local database "${databaseUrl.hostname}/${databaseName}". ` +
-        'Use a local database or a dedicated database whose name includes "test".',
+        'Use a local database, a dedicated database whose name includes "test", or explicitly confirm the configured staging database.',
     );
   }
 }

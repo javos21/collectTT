@@ -150,17 +150,18 @@ const checks: Check[] = [
     },
   },
   {
-    label: 'direct transaction workflow, evidence, deadlines, and dispute contracts are present',
+    label: 'direct transaction workflow, evidence, no-deadline cancellation, and dispute contracts are present',
     run: () => {
       contains('src/domain/states/handoff.ts', 'HANDOFF_STATES', 'seller_handed_over', 'buyer_received');
-      contains('src/services/transactions.ts', 'markItemHandedOver', 'confirmItemReceived', 'extendPaymentDeadline', 'receipt_window');
+      contains('src/services/transactions.ts', 'markItemHandedOver', 'confirmItemReceived', 'cancelDealByParticipant');
       contains('src/services/disputes.ts', "disputeState: 'open'", 'transactionEvents');
       contains('src/db/schema/transaction-evidence.ts', 'transaction_evidence', 'storageKey', 'status');
       contains('src/lib/storage.ts', 'evidenceBucket', 'bucketName');
       contains('src/services/transaction-evidence.ts', 'evidenceBucket()', 'bucketName');
       contains('.env.example', 'STORAGE_EVIDENCE_BUCKET', 'collecttt-evidence');
       contains('src/app/deals/[id]/page.tsx', 'Payments made directly to another user are not protected by CollectTT.', 'EvidenceUpload');
-      contains('src/jobs/tasks/index.ts', "'transaction:receipt_window'", 'reminderKind');
+      contains('src/jobs/tasks/transaction-windows.ts', 'payment/meetup deadline retired', 'seller drop-off deadline retired', 'receipt deadline retired');
+      contains('drizzle/0045_certain_kat_farrell.sql', 'DROP NOT NULL', 'buy_reneged_90d', "lifecycle_status\" = 'lifted'");
       contains('drizzle/0026_parallel_pretty_boy.sql', 'handoff_state', 'transaction_evidence');
       read('drizzle/0027_sharp_kulan_gath.sql');
       contains('drizzle/0028_wide_grandmaster.sql', 'dispute_state', 'tx_completion_requires_both');

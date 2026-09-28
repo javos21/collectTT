@@ -53,12 +53,6 @@ export interface RecordEventInput {
 const PUBLIC_REPUTATION_EVENT_TYPES: ReputationEventType[] = [
   'purchase_completed',
   'sale_completed',
-  'buyer_reneged_nonpayment',
-  'buyer_no_show',
-  'seller_delivered_on_time',
-  'seller_reneged_no_dropoff',
-  'seller_no_show',
-  'custody_overstay',
 ];
 
 /**
@@ -113,24 +107,12 @@ export async function ensureCounters(tx: Tx, userId: string): Promise<void> {
 export async function recomputeRollingWindows(tx: Tx, userId?: string): Promise<void> {
   // Correlated subqueries in SET, not a LATERAL join in FROM: Postgres does not allow
   // a lateral reference to the UPDATE target table.
-  const policy = await getRestrictionPolicy(tx);
-  const since = sql`now() - make_interval(days => ${policy.lookbackDays})`;
   const scope = userId === undefined ? sql`true` : sql`c.user_id = ${userId}`;
 
   await tx.execute(sql`
     update reputation_counters c
-       set buy_reneged_90d = (
-             select count(*)::int from reputation_events e
-              where e.user_id = c.user_id
-                and e.type in ('buyer_reneged_nonpayment', 'buyer_no_show')
-                and e.occurred_at >= ${since}
-           ),
-           sell_reneged_90d = (
-             select count(*)::int from reputation_events e
-              where e.user_id = c.user_id
-                and e.type in ('seller_reneged_no_dropoff', 'seller_no_show')
-                and e.occurred_at >= ${since}
-           ),
+       set buy_reneged_90d = 0,
+           sell_reneged_90d = 0,
            recomputed_at = now()
      where ${scope}
   `);
@@ -312,9 +294,7 @@ export type TrustSnapshot = {
   memberSince: Date;
   counters: {
     buyCompleted: number;
-    buyReneged90d: number;
     sellCompleted: number;
-    sellReneged90d: number;
     successfulAuctions: number;
   };
   events: Array<{
@@ -345,9 +325,7 @@ export async function trustSnapshotsForMembers(
         area: profiles.area,
         memberSince: profiles.memberSince,
         buyCompleted: reputationCounters.buyCompleted,
-        buyReneged90d: reputationCounters.buyReneged90d,
         sellCompleted: reputationCounters.sellCompleted,
-        sellReneged90d: reputationCounters.sellReneged90d,
       })
       .from(profiles)
       .leftJoin(reputationCounters, eq(reputationCounters.userId, profiles.userId))
@@ -399,9 +377,7 @@ export async function trustSnapshotsForMembers(
         memberSince: profile.memberSince,
         counters: {
           buyCompleted: profile.buyCompleted ?? 0,
-          buyReneged90d: profile.buyReneged90d ?? 0,
           sellCompleted: profile.sellCompleted ?? 0,
-          sellReneged90d: profile.sellReneged90d ?? 0,
           successfulAuctions: auctionCountByUser.get(profile.userId) ?? 0,
         },
         events: eventsByUser.get(profile.userId) ?? [],

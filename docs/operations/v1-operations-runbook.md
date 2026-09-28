@@ -12,8 +12,8 @@ in the repository.
 - Render should use `/api/ready` for the web health check. A `503` means the database is
   unavailable and the instance should not receive traffic.
 - Watch the worker logs for repeated Graphile Worker task failures, especially
-  `notifications:dispatch`, `auction:close`, `listing:expire`, and transaction-window
-  tasks. A failed notification delivery is visible in the admin Notifications page and
+  `notifications:dispatch`, `auction:close`, and `listing:expire`. Legacy
+  transaction-window tasks are compatibility no-ops. A failed notification delivery is visible in the admin Notifications page and
   can be retried only through the audited admin action.
 - Alert when failed notification deliveries remain non-zero across two checks, when
   the worker stops reporting ready, or when the database connection pool is exhausted.

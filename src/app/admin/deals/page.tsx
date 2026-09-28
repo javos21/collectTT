@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { and, count, desc, eq, ilike, isNotNull, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { Activity, Search } from 'lucide-react';
 
 import { db } from '@/db/client';
@@ -17,10 +17,6 @@ const PAGE_SIZE = 20;
 function pageNumber(value: string | undefined): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-}
-
-function date(value: Date | null): string {
-  return value === null ? '—' : value.toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function label(value: string): string {
@@ -41,7 +37,7 @@ function amount(cents: number, currency: string): string {
   return formatMoney(cents, currency === 'USD' ? 'USD' : 'TTD');
 }
 
-export default async function AdminDealsPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string; state?: string; deadline?: string; dispute?: string }> }) {
+export default async function AdminDealsPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string; state?: string; dispute?: string }> }) {
   const { viewer, isAdmin } = await adminAccess();
   if (viewer === null) return <AdminDenied signedIn={false} />;
   if (!isAdmin) return <AdminDenied signedIn />;
@@ -50,26 +46,16 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
   const query = (params.q ?? '').trim().slice(0, 80);
   const requestedPage = pageNumber(params.page);
   const selectedState = TRANSACTION_STATES.includes(params.state as TransactionState) ? params.state as TransactionState : 'all';
-  const selectedDeadline = params.deadline === 'overdue' ? 'overdue' : 'all';
   const selectedDispute = params.dispute === 'open' ? 'open' : 'all';
   const search = `%${query}%`;
-  const now = new Date();
   const searchParts = [
     ilike(listings.title, search),
     sql`exists (select 1 from profiles seller_search where seller_search.user_id = ${transactions.sellerId} and (seller_search.display_name ilike ${search} or seller_search.handle ilike ${search}))`,
     sql`exists (select 1 from profiles buyer_search where buyer_search.user_id = ${transactions.buyerId} and (buyer_search.display_name ilike ${search} or buyer_search.handle ilike ${search}))`,
     ...(isUuid(query) ? [eq(transactions.id, query)] : []),
   ];
-  const overdueFilter = and(
-    eq(transactions.state, 'open'),
-    or(
-      lt(transactions.paymentDeadlineAt, now),
-      and(isNotNull(transactions.sellerDropoffDeadlineAt), lt(transactions.sellerDropoffDeadlineAt, now)),
-    ),
-  );
   const filter = and(
     selectedState === 'all' ? undefined : eq(transactions.state, selectedState),
-    selectedDeadline === 'overdue' ? overdueFilter : undefined,
     selectedDispute === 'open' ? sql`exists (select 1 from disputes deal_disputes where deal_disputes.transaction_id = ${transactions.id} and deal_disputes.status = 'open')` : undefined,
     query === '' ? undefined : or(...searchParts),
   );
@@ -101,8 +87,6 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
       custodyState: transactions.custodyState,
       disputeState: transactions.disputeState,
       hasOpenDispute: sql<boolean>`exists (select 1 from disputes deal_disputes where deal_disputes.transaction_id = ${transactions.id} and deal_disputes.status = 'open')`,
-      paymentDeadlineAt: transactions.paymentDeadlineAt,
-      sellerDropoffDeadlineAt: transactions.sellerDropoffDeadlineAt,
       createdAt: transactions.createdAt,
     })
     .from(transactions)
@@ -116,7 +100,6 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
     const next = new URLSearchParams();
     if (query !== '') next.set('q', query);
     if (selectedState !== 'all') next.set('state', selectedState);
-    if (selectedDeadline !== 'all') next.set('deadline', selectedDeadline);
     if (selectedDispute !== 'all') next.set('dispute', selectedDispute);
     if (nextPage > 1) next.set('page', String(nextPage));
     const encoded = next.toString();
@@ -130,7 +113,7 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
           <div>
             <p className="admin-kicker">Admin workspace</p>
             <h1>Deals</h1>
-          <p>Review payment, custody, deadlines, and support context before any guided intervention.</p>
+          <p>Review payment, custody, and support context before any guided intervention.</p>
           </div>
           <span className="admin-environment">Guided support</span>
         </div>
@@ -154,11 +137,6 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
                 <option value="all">All states</option>
                 {TRANSACTION_STATES.map((state) => <option key={state} value={state}>{label(state)}</option>)}
               </select>
-              <label className="sr-only" htmlFor="deal-deadline">Filter by deadline</label>
-              <select id="deal-deadline" name="deadline" defaultValue={selectedDeadline}>
-                <option value="all">Any deadline</option>
-                <option value="overdue">Overdue open deals</option>
-              </select>
               <label className="sr-only" htmlFor="deal-dispute">Filter by dispute status</label>
               <select id="deal-dispute" name="dispute" defaultValue={selectedDispute}>
                 <option value="all">All support status</option>
@@ -171,15 +149,15 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
           {dealRows.length === 0 ? (
             <div className="admin-directory-empty" role="status">
               <Activity size={22} aria-hidden="true" />
-              <strong>{query === '' && selectedState === 'all' && selectedDeadline === 'all' && selectedDispute === 'all' ? 'No deals yet' : 'No deals found'}</strong>
-              <p>{query === '' && selectedState === 'all' && selectedDeadline === 'all' && selectedDispute === 'all' ? 'Transaction attempts will appear here as members complete marketplace actions.' : 'Try a different search term or support filter.'}</p>
+              <strong>{query === '' && selectedState === 'all' && selectedDispute === 'all' ? 'No deals yet' : 'No deals found'}</strong>
+              <p>{query === '' && selectedState === 'all' && selectedDispute === 'all' ? 'Transaction attempts will appear here as members complete marketplace actions.' : 'Try a different search term or support filter.'}</p>
             </div>
           ) : (
             <div className="admin-table-wrap">
               <table className="admin-directory-table admin-deal-table">
                 <caption className="sr-only">Deal directory</caption>
                 <thead>
-                  <tr><th scope="col">Deal</th><th scope="col">Buyer</th><th scope="col">Seller</th><th scope="col">Amount</th><th scope="col">State tracks</th><th scope="col">Support</th><th scope="col">Deadlines</th><th scope="col"><span className="sr-only">Actions</span></th></tr>
+                  <tr><th scope="col">Deal</th><th scope="col">Buyer</th><th scope="col">Seller</th><th scope="col">Amount</th><th scope="col">State tracks</th><th scope="col">Support</th><th scope="col"><span className="sr-only">Actions</span></th></tr>
                 </thead>
                 <tbody>
                   {dealRows.map((deal) => (
@@ -190,7 +168,6 @@ export default async function AdminDealsPage({ searchParams }: { searchParams: P
                       <td>{amount(deal.amountCents, deal.currency)}</td>
                       <td><span className={`admin-status admin-status--${deal.disputeState === 'open' ? 'pending' : statusTone(deal.state)}`}>{deal.disputeState === 'open' ? 'Under review' : label(deal.state)}</span><small>Payment: {label(deal.paymentState)}<br />Custody: {label(deal.custodyState)}</small></td>
                       <td>{deal.hasOpenDispute ? <span className="admin-status admin-status--pending">Needs review</span> : <span className="admin-muted-action">No open dispute</span>}</td>
-                      <td><span className={deal.state === 'open' && deal.paymentDeadlineAt < now ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{deal.fulfillmentPath === 'cash_meetup' ? 'Meetup' : 'Payment'} {date(deal.paymentDeadlineAt)}</span><small>{deal.sellerDropoffDeadlineAt === null ? 'No drop-off deadline' : `Drop-off ${date(deal.sellerDropoffDeadlineAt)}`}</small></td>
                       <td><Link className="admin-row-link" href={`/admin/deals/${encodeURIComponent(deal.id)}`}>View deal</Link></td>
                     </tr>
                   ))}

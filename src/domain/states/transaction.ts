@@ -231,7 +231,7 @@ export interface TransactionSnapshot {
   custodyState: CustodyState;
   handoffState?: HandoffState;
   fulfillmentPath: FulfillmentPath;
-  paymentDeadlineAt: Date;
+  paymentDeadlineAt: Date | null;
   sellerDropoffDeadlineAt: Date | null;
   relayStoreId: string | null;
   buyerId: string;
@@ -258,20 +258,9 @@ export function validateTransaction(tx: TransactionSnapshot): string[] {
     if (tx.relayStoreId !== null) violations.push('tx_p2p_no_custody');
   }
 
-  // Custody paths always do, and always carry a seller deadline.
+  // Custody paths always use the custody track. Deal deadlines are optional legacy data.
   if (usesCustodyTrack(tx.fulfillmentPath)) {
     if (tx.custodyState === 'not_applicable') violations.push('tx_custody_required');
-    if (tx.sellerDropoffDeadlineAt === null) violations.push('tx_custody_required');
-  }
-
-  // ★★ The seller's clock must expire before the buyer's, so that a seller who never
-  // drops off is caught while the buyer's payment window is still open and the buyer
-  // can still be told to stop. See the plan's "one consequence to flag".
-  if (
-    tx.sellerDropoffDeadlineAt !== null &&
-    tx.sellerDropoffDeadlineAt.getTime() >= tx.paymentDeadlineAt.getTime()
-  ) {
-    violations.push('tx_dropoff_before_payment');
   }
 
   // ★★ Completion requires both tracks.

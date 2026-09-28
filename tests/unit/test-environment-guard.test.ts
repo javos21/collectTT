@@ -20,6 +20,25 @@ describe('test environment guard', () => {
     ).not.toThrow();
   });
 
+  it('allows only the explicitly configured staging database when confirmed', () => {
+    const staging = 'postgresql://user:password@staging.example.com/postgres';
+    expect(() => assertSafeTestEnvironment({
+      NODE_ENV: 'test',
+      DATABASE_URL: staging,
+      STAGING_DATABASE_URL: staging,
+      CONFIRM_STAGING_TESTS: 'test-staging',
+    })).not.toThrow();
+  });
+
+  it('rejects a different remote database even when staging tests are confirmed', () => {
+    expect(() => assertSafeTestEnvironment({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgresql://user:password@production.example.com/postgres',
+      STAGING_DATABASE_URL: 'postgresql://user:password@staging.example.com/postgres',
+      CONFIRM_STAGING_TESTS: 'test-staging',
+    })).toThrow(/refusing to run tests/i);
+  });
+
   it('rejects production mode even when the database is local', () => {
     expect(() =>
       assertSafeTestEnvironment({

@@ -7,9 +7,7 @@ export type BuyerSnapshotData = {
   memberSince: string;
   counters: {
     buyCompleted: number;
-    buyReneged90d: number;
     sellCompleted: number;
-    sellReneged90d: number;
     successfulAuctions: number;
   };
   events: Array<{

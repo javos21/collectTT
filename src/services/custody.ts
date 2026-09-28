@@ -21,9 +21,7 @@ import { transactions, transactionEvents } from '../db/schema/transactions';
 import { listings } from '../db/schema/listings';
 import { profiles } from '../db/schema/profiles';
 import { users } from '../db/schema/auth';
-import { enqueue } from '../jobs/enqueue';
 import { notify } from '../notifications/dispatch';
-import { custodyExpiry } from '../domain/policy/windows';
 import { generateDropoffCode } from '../domain/dropoff-code';
 import {
   assertCustodyTransition,
@@ -439,35 +437,15 @@ export async function recomputeShelfClock(tx: Tx, holdingId: string): Promise<Da
   if (row.h.droppedOffAt === null) return null; // the clock starts at drop-off
   if (!isLiveCustodyState(row.h.state)) return null;
 
-  const paid = row.paymentState === 'confirmed';
-  const expiresAt = custodyExpiry({
-    paid,
-    droppedOffAt: row.h.droppedOffAt,
-    paymentConfirmedAt: row.paymentConfirmedAt,
-    ...(row.paidDays !== null ? { paidDays: row.paidDays } : {}),
-    ...(row.unpaidDays !== null ? { unpaidDays: row.unpaidDays } : {}),
-  });
-
   await tx
     .update(custodyHoldings)
     .set({
-      custodyExpiresAt: expiresAt,
-      // A recomputed clock re-arms the flag: an item flagged on the tight unpaid clock
-      // is no longer overstayed once payment lands and the clock extends past now.
-      overstayFlaggedAt: expiresAt.getTime() > Date.now() ? null : row.h.overstayFlaggedAt,
+      custodyExpiresAt: null,
+      overstayFlaggedAt: null,
       updatedAt: sql`now()`,
     })
     .where(eq(custodyHoldings.id, holdingId));
-
-  // ★ Same DB transaction as the clock change, so the sweeper can never be forgotten.
-  await enqueue(
-    tx,
-    'custody:overstay',
-    { holdingId },
-    { jobKey: `custody_overstay:${holdingId}`, runAt: expiresAt },
-  );
-
-  return expiresAt;
+  return null;
 }
 
 /**

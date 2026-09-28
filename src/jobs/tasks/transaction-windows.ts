@@ -8,15 +8,12 @@
  *   defensive.
  */
 
-import { and, eq, lte, ne, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import type { Helpers } from 'graphile-worker';
 
 import { db } from '../../db/client';
-import { transactions, transactionEvents } from '../../db/schema/transactions';
 import {
-  terminateTransaction,
   promoteNextCandidate,
-  completeIfBothTracksDone,
   expireAuctionFallbackOffer,
 } from '../../services/transactions';
 import { recomputeRollingWindows, evaluateRestrictions } from '../../services/reputation';
@@ -28,104 +25,14 @@ interface TxPayload {
   transactionId: string;
 }
 
-/**
- * The transaction's completion window lapsed. Terminate, record the fact, and advance
- * an auction to its next explicit fallback offer. Cash meetups use this same internal
- * clock as a meetup-completion window, not as a prepayment deadline.
- */
+/** Compatibility no-op for payment/meetup jobs queued before deadlines were retired. */
 export async function paymentWindowExpired(payload: TxPayload, helpers: Helpers): Promise<void> {
-  await db.transaction(async (tx) => {
-    const rows = await tx
-      .select()
-      .from(transactions)
-      .where(and(
-        eq(transactions.id, payload.transactionId),
-        eq(transactions.state, 'open'),
-        lte(transactions.paymentDeadlineAt, sql`now()`),
-      ))
-      .limit(1);
-
-    const row = rows[0];
-    if (row === undefined) {
-      helpers.logger.info(`transaction ${payload.transactionId} is not open — window moot`);
-      return;
-    }
-
-    // A confirmed payment that has not completed yet (custody still open, Phase 2) must
-    // NOT be reneged — the buyer did their part.
-    if (row.paymentState === 'confirmed') {
-      helpers.logger.info(`transaction ${payload.transactionId} is paid — window moot`);
-      return;
-    }
-
-    const reason = row.fulfillmentPath === 'cash_meetup' ? 'buyer_no_show' : 'non_payment';
-
-    const terminated = await terminateTransaction({
-      tx,
-      transactionId: payload.transactionId,
-      reason,
-      actorRole: 'system',
-      dueAt: row.fulfillmentPath === 'cash_meetup' ? 'meetup' : 'payment',
-    });
-
-    helpers.logger.info(
-      terminated
-        ? `transaction ${payload.transactionId} reneged (${reason})`
-        : `transaction ${payload.transactionId} already terminated`,
-    );
-  });
+  helpers.logger.info(`payment/meetup deadline retired for ${payload.transactionId}`);
 }
 
-/**
- * The seller's drop-off window lapsed on a custody path. This is the Phase 1 half of
- * symmetric accountability: a seller who strands a buyer takes the hit, and the buyer
- * is told to stop paying while their own window is still open.
- */
+/** Compatibility no-op for seller drop-off jobs queued before deadlines were retired. */
 export async function dropoffWindowExpired(payload: TxPayload, helpers: Helpers): Promise<void> {
-  await db.transaction(async (tx) => {
-    const rows = await tx
-      .select()
-      .from(transactions)
-      .where(and(
-        eq(transactions.id, payload.transactionId),
-        eq(transactions.state, 'open'),
-        lte(transactions.sellerDropoffDeadlineAt, sql`now()`),
-      ))
-      .limit(1);
-
-    const row = rows[0];
-    if (row === undefined) return;
-
-    // The item made it into custody — nothing to answer for.
-    if (row.custodyState !== 'awaiting_dropoff') {
-      helpers.logger.info(`transaction ${payload.transactionId} custody is ${row.custodyState} — moot`);
-      return;
-    }
-
-    // The seller's drop-off obligation begins only after payment is authoritative.
-    // A pending or buyer-marked payment must be resolved by the buyer payment window;
-    // expiring the seller clock here would blame the seller for an item they were not
-    // yet required to hand over.
-    if (row.paymentState !== 'confirmed') {
-      helpers.logger.info(
-        `transaction ${payload.transactionId} payment is ${row.paymentState} — seller drop-off not due yet`,
-      );
-      return;
-    }
-
-    await terminateTransaction({
-      tx,
-      transactionId: payload.transactionId,
-      reason: 'seller_no_dropoff',
-      actorRole: 'system',
-      dueAt: 'seller_dropoff',
-      // The seller failed, not the buyer — do not promote an auction runner-up when
-      // there is no item on the shelf.
-      promoteNext: false,
-    });
-
-    helpers.logger.info(`transaction ${payload.transactionId} reneged (seller_no_dropoff)`);
-  });
+  helpers.logger.info(`seller drop-off deadline retired for ${payload.transactionId}`);
 }
 
 /**
@@ -137,48 +44,9 @@ export async function paymentReminder(payload: TxPayload & { reminderKind?: 'hal
   helpers.logger.info(`payment reminder task retired for ${payload.transactionId}`);
 }
 
-/** Auto-complete a cash meetup after the receipt window if no problem was reported. */
+/** Compatibility no-op for receipt jobs queued before deadlines were retired. */
 export async function receiptWindowExpired(payload: TxPayload, helpers: Helpers): Promise<void> {
-  await db.transaction(async (tx) => {
-    const rows = await tx.select().from(transactions).where(and(
-      eq(transactions.id, payload.transactionId),
-      eq(transactions.state, 'open'),
-      ne(transactions.disputeState, 'open'),
-      eq(transactions.fulfillmentPath, 'cash_meetup'),
-      eq(transactions.paymentState, 'confirmed'),
-      eq(transactions.handoffState, 'seller_handed_over'),
-      lte(transactions.receiptDeadlineAt, sql`now()`),
-    )).limit(1);
-    const row = rows[0];
-    if (row === undefined) return;
-    // A member-reported problem moves the rollup to disputed, so this conditional
-    // update cannot auto-complete while support is reviewing the deal.
-    const updated = await tx.update(transactions).set({
-      handoffState: 'buyer_received',
-      receivedAt: sql`now()`,
-      updatedAt: sql`now()`,
-    }).where(and(
-      eq(transactions.id, payload.transactionId),
-      eq(transactions.state, 'open'),
-      ne(transactions.disputeState, 'open'),
-      eq(transactions.paymentState, 'confirmed'),
-      eq(transactions.fulfillmentPath, 'cash_meetup'),
-      eq(transactions.handoffState, 'seller_handed_over'),
-      lte(transactions.receiptDeadlineAt, sql`now()`),
-    )).returning({ id: transactions.id });
-    if (updated.length === 0) return;
-    await tx.insert(transactionEvents).values({
-      transactionId: row.id,
-      track: 'overall',
-      fromState: 'seller_handed_over',
-      toState: 'buyer_received',
-      actorRole: 'system',
-      reason: 'receipt confirmation window elapsed without a reported problem',
-      metadata: {},
-    });
-    await completeIfBothTracksDone(tx, row.id);
-    helpers.logger.info(`transaction ${row.id} auto-completed after receipt window`);
-  });
+  helpers.logger.info(`receipt deadline retired for ${payload.transactionId}`);
 }
 
 // ---------------------------------------------------------------- auction fallback

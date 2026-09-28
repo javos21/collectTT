@@ -342,30 +342,23 @@ describe('★★ tx_completion_requires_both — both tracks or it is not comple
   });
 });
 
-describe('★★ tx_dropoff_before_payment — the seller clock expires first', () => {
-  it('REJECTS a drop-off deadline equal to the payment deadline', async () => {
-    await expectRejected(
+describe('★ no-deadline deal shape', () => {
+  it('ACCEPTS an open transaction with no deal clocks', async () => {
+    const { rows } = await pool.query(
       `insert into transactions
          (listing_id, seller_id, buyer_id, source, amount_cents, fulfillment_path,
-          state, payment_state, custody_state, payment_deadline_at,
-          seller_dropoff_deadline_at, attempt_number)
-       values ($1, $2, $3, 'claim', 10000, 'relay', 'open', 'pending', 'awaiting_dropoff',
-               now() + interval '72 hours', now() + interval '72 hours', 94)`,
+          state, payment_state, custody_state, attempt_number)
+       values ($1, $2, $3, 'claim', 10000, 'relay', 'open', 'pending', 'awaiting_dropoff', 94)
+       returning id`,
       [ids.listing2, ids.seller, ids.buyer],
-      'tx_dropoff_before_payment',
     );
-  });
-
-  it('REJECTS a drop-off deadline after the payment deadline', async () => {
-    await expectRejected(
-      `insert into transactions
-         (listing_id, seller_id, buyer_id, source, amount_cents, fulfillment_path,
-          state, payment_state, custody_state, payment_deadline_at,
-          seller_dropoff_deadline_at, attempt_number)
-       values ($1, $2, $3, 'claim', 10000, 'relay', 'open', 'pending', 'awaiting_dropoff',
-               now() + interval '72 hours', now() + interval '96 hours', 95)`,
-      [ids.listing2, ids.seller, ids.buyer],
-      'tx_dropoff_before_payment',
+    expect(rows[0].id).toBeTruthy();
+    await pool.query(
+      `update transactions
+       set state = 'cancelled', payment_state = 'failed', terminated_at = now(),
+           terminated_reason = 'mutual_cancel'
+       where id = $1`,
+      [rows[0].id],
     );
   });
 });

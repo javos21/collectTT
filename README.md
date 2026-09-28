@@ -32,8 +32,8 @@ v1 includes:
 - fixed-price listings with optional buyer offers below the asking price;
 - cash meetups completed by one buyer confirmation after payment and collection;
 - global search, practical filters, deterministic sorting, and factual Trust Snapshots;
-- atomic reservations, binding bids, repeated two-minute anti-sniping, deadlines,
-  reminders, disputes, progressive restrictions, and audited admin intervention;
+- atomic reservations, explicit participant release, binding bids, repeated two-minute
+  anti-sniping, disputes, progressive restrictions, and audited admin intervention;
 - seller-configured meetup and direct bank-transfer workflows;
 - transactional email and contextual reporting/support.
 

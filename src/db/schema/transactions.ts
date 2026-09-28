@@ -90,8 +90,8 @@ export const transactions = pgTable(
     /** Support dispute track; an open dispute pauses automated deadlines and completion. */
     disputeState: transactionDisputeStateEnum('dispute_state').notNull().default('none'),
 
-    // ---- clocks, all set from the DB clock
-    paymentDeadlineAt: timestamp('payment_deadline_at', { withTimezone: true }).notNull(),
+    // ---- legacy clocks. New deals leave these null; retained for historical audit.
+    paymentDeadlineAt: timestamp('payment_deadline_at', { withTimezone: true }),
     sellerDropoffDeadlineAt: timestamp('seller_dropoff_deadline_at', { withTimezone: true }),
 
     markedPaidAt: timestamp('marked_paid_at', { withTimezone: true }),
@@ -118,13 +118,6 @@ export const transactions = pgTable(
     uniqueIndex('tx_listing_attempt').on(t.listingId, t.attemptNumber),
     index('tx_buyer').on(t.buyerId, t.state),
     index('tx_seller').on(t.sellerId, t.state),
-    index('tx_deadlines')
-      .on(t.paymentDeadlineAt)
-      .where(sql`${t.state} = 'open'`),
-    index('tx_dropoff_deadlines')
-      .on(t.sellerDropoffDeadlineAt)
-      .where(sql`${t.state} = 'open'`),
-
     check('tx_distinct_parties', sql`${t.buyerId} <> ${t.sellerId}`),
     check('tx_positive_amount', sql`${t.amountCents} > 0`),
     // ★ P2P paths never touch the custody track.
@@ -134,21 +127,11 @@ export const transactions = pgTable(
           or (${t.custodyState} = 'not_applicable' and ${t.relayStoreId} is null)`,
     ),
 
-    // ★ Custody paths always do, and always carry a seller deadline.
+    // Custody paths always use the custody track. Deadlines are no longer required.
     check(
       'tx_custody_required',
       sql`${t.fulfillmentPath} not in ('relay', 'full_service')
-          or (${t.custodyState} <> 'not_applicable' and ${t.sellerDropoffDeadlineAt} is not null)`,
-    ),
-
-    // ★★ The seller's clock expires BEFORE the buyer's, so a seller who never drops off
-    //    is caught while the buyer's payment window is still open and the buyer can be
-    //    told to stop. This is what keeps "payment window starts at claim" safe on the
-    //    relay path.
-    check(
-      'tx_dropoff_before_payment',
-      sql`${t.sellerDropoffDeadlineAt} is null
-          or ${t.sellerDropoffDeadlineAt} < ${t.paymentDeadlineAt}`,
+          or ${t.custodyState} <> 'not_applicable'`,
     ),
 
     // ★★ THE completion invariant: both tracks finished, or it is not complete.

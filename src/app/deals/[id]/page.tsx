@@ -35,6 +35,7 @@ import {
   confirmCollectionAction,
   submitDisputeAction,
   confirmItemReceivedAction,
+  cancelDealAction,
 } from './actions';
 import { serializeTrustSnapshot } from '../buyer-snapshot-data';
 import { BuyerSnapshotLink } from '../buyer-snapshot-link';
@@ -65,7 +66,7 @@ const SETTLEMENT_LABELS: Record<string, string> = {
 const STATE_LABELS: Record<string, string> = {
   open: 'In progress',
   completed: 'Completed',
-  reneged_buyer: 'Cancelled — buyer did not pay in time',
+  reneged_buyer: 'Cancelled — buyer did not complete the deal',
   reneged_seller: 'Cancelled — seller did not deliver',
   cancelled: 'Cancelled',
   expired: 'Expired',
@@ -100,8 +101,9 @@ function historyReason(value: string | null) {
   if (value === 'auction_runner_up') return 'Auction promotion';
   if (value === 'non_payment') return 'Buyer payment was not confirmed';
   if (value === 'buyer_no_show') return 'Buyer did not complete the meetup';
-  if (value === 'seller_no_dropoff') return 'Seller drop-off deadline expired';
+  if (value === 'seller_no_dropoff') return 'Seller did not complete the drop-off';
   if (value === 'seller_no_show') return 'Seller did not complete the meetup';
+  if (value === 'mutual_cancel') return 'Deal released by a participant';
   if (value === 'transaction terminated before drop-off') return 'Holding cancelled before drop-off';
   return humanize(value);
 }
@@ -283,7 +285,6 @@ export default async function DealPage({
     };
   })();
 
-  const dropoffDue = t.sellerDropoffDeadlineAt;
   const storeLocation = custodyPanel === null
     ? null
     : [custodyPanel.storeName ?? 'the delivery team', custodyPanel.storeArea, custodyPanel.storeAddress]
@@ -399,7 +400,6 @@ export default async function DealPage({
               <h2 id="deal-action-title">Collect your item</h2>
               <dl className="deal-action-card__facts">
                 <div><Store aria-hidden="true" /><dt>Collect from</dt><dd>{storeLocation}</dd></div>
-                {custodyPanel.custodyExpiresAt !== null && <div><CalendarDays aria-hidden="true" /><dt>Collect by</dt><dd><time dateTime={custodyPanel.custodyExpiresAt.toISOString()}>{formatDateTime(custodyPanel.custodyExpiresAt)}</time></dd></div>}
               </dl>
               <span className="codebox" aria-label={`Collection code ${custodyPanel.dropoffCode}`}>
                 <span className="codebox__label">Collection code</span>
@@ -417,7 +417,6 @@ export default async function DealPage({
               <h2 id="deal-action-title">Drop off the item</h2>
               <dl className="deal-action-card__facts">
                 <div><Store aria-hidden="true" /><dt>Location</dt><dd>{storeLocation}</dd></div>
-                {dropoffDue !== null && <div><CalendarDays aria-hidden="true" /><dt>Drop-off due</dt><dd><time dateTime={dropoffDue.toISOString()}>{formatDateTime(dropoffDue)}</time></dd></div>}
               </dl>
               <span className="codebox" aria-label={`Drop-off code ${custodyPanel.dropoffCode}`}>
                 <span className="codebox__label">Drop-off code</span>
@@ -472,7 +471,7 @@ export default async function DealPage({
             <>
               <p className="deal-action-card__eyebrow">Waiting on {counterpartyName}</p>
               <h2 id="deal-action-title">Waiting for receipt confirmation</h2>
-              <p className="deal-action-card__help">The buyer has until the receipt deadline to report a problem or confirm the item.</p>
+              <p className="deal-action-card__help">The buyer can confirm receipt or report a problem if something went wrong.</p>
             </>
           )}
 
@@ -480,7 +479,7 @@ export default async function DealPage({
             <>
               <p className="deal-action-card__eyebrow">Support review</p>
               <h2 id="deal-action-title">Deal under review</h2>
-              <p className="deal-action-card__help">Automatic completion, expiry, and blame are paused while CollectTT reviews the reported issue.</p>
+              <p className="deal-action-card__help">Completion and cancellation are paused while CollectTT reviews the reported issue.</p>
             </>
           )}
 
@@ -493,13 +492,26 @@ export default async function DealPage({
           )}
         </section>
 
+        {isOpen && !isDisputed && t.paymentState !== 'confirmed' && (
+          <section className="deal-action-card" aria-labelledby="deal-cancel-title">
+            <p className="deal-action-card__eyebrow">Plans changed?</p>
+            <h2 id="deal-cancel-title">Release this deal</h2>
+            <p className="deal-action-card__help">This makes the item available again. Releasing a deal does not automatically affect either member’s trust snapshot.</p>
+            <form action={cancelDealAction}>
+              <input type="hidden" name="transactionId" value={id} />
+              <label htmlFor="cancel-reason">Reason (optional)</label>
+              <textarea id="cancel-reason" name="reason" maxLength={500} rows={2} />
+              <button type="submit">Release deal</button>
+            </form>
+          </section>
+        )}
+
         {isOpen && custodyPanel?.state === 'awaiting_dropoff' && isBuyer && t.paymentState === 'confirmed' && (
           <section className="deal-dependency" aria-labelledby="deal-dependency-title">
             <Clock3 aria-hidden="true" />
             <div>
               <p>Waiting on {counterpartyName}</p>
               <h2 id="deal-dependency-title">Drop off at {custodyPanel.storeName ?? 'the delivery team'}</h2>
-              {dropoffDue !== null && <strong>By <time dateTime={dropoffDue.toISOString()}>{formatDateTime(dropoffDue)}</time></strong>}
               <span>{counterpartyName} needs to drop the item off{custodyPanel.storeArea ? ` in ${custodyPanel.storeArea}` : ''}.</span>
             </div>
           </section>

@@ -11,7 +11,7 @@ import { listings, claims, bids, listingAuditEvents } from '@/db/schema/listings
 import { profiles, reputationEvents, restrictions } from '@/db/schema/profiles';
 import { transactions, transactionEvents } from '@/db/schema/transactions';
 import { onTransactionTerminated } from '@/services/custody';
-import { extendPaymentDeadline, invalidateAuctionBid, rescheduleTransactionDeadlineJobs, terminateTransaction } from '@/services/transactions';
+import { invalidateAuctionBid, terminateTransaction } from '@/services/transactions';
 import { enqueue } from '@/jobs/enqueue';
 import { requireAdminAction } from '@/lib/admin';
 import { notify } from '@/notifications/dispatch';
@@ -494,7 +494,6 @@ export async function reviewDisputeAction(formData: FormData): Promise<void> {
           await tx.update(listings).set({ status: nextState === 'completed' ? 'ended_won' : 'active', activeTransactionId: null, updatedAt: sql`now()` }).where(eq(listings.id, row.transaction.listingId));
         } else {
           await tx.update(listings).set({ activeTransactionId: row.transaction.id, updatedAt: sql`now()` }).where(eq(listings.id, row.transaction.listingId));
-          await rescheduleTransactionDeadlineJobs(tx, row.transaction);
         }
       }
 
@@ -563,41 +562,6 @@ export async function reviewDisputeAction(formData: FormData): Promise<void> {
   if (!result.ok) redirect(`${callback}?adminError=${encodeURIComponent(result.message)}`);
   revalidatePath(callback);
   redirect(`${callback}?adminSuccess=${encodeURIComponent(`Dispute ${decision} recorded.`)}`);
-}
-
-export async function extendDealDeadlineAction(formData: FormData): Promise<void> {
-  const transactionId = text(formData, 'transactionId');
-  const reason = text(formData, 'reason');
-  const hours = Number(text(formData, 'hours'));
-  const callback = `/admin/deals/${encodeURIComponent(transactionId)}`;
-  const viewer = await requireAdminAction(callback);
-  if (!isUuid(transactionId)) redirect('/admin/deals?adminError=Deal+not+found.');
-  if (!Number.isInteger(hours) || hours < 1 || hours > 168 || reason.length < 10 || reason.length > 500) {
-    redirect(`${callback}?adminError=${encodeURIComponent('Choose 1–168 hours and provide a reason between 10 and 500 characters.')}`);
-  }
-  try {
-    await db.transaction(async (tx) => {
-      const before = await tx.select({ deadline: transactions.paymentDeadlineAt, state: transactions.state }).from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-      const prior = before[0];
-      if (prior === undefined) throw new Error('Deal not found.');
-      const deadline = await extendPaymentDeadline({ tx, transactionId, hours, reason, adminUserId: viewer.userId });
-      await recordAdminAudit(tx, {
-        actorUserId: viewer.userId,
-        targetType: 'transaction',
-        targetId: transactionId,
-        action: 'extend_payment_deadline',
-        reason,
-        outcome: 'succeeded',
-        beforeContext: { state: prior.state, paymentDeadlineAt: prior.deadline.toISOString() },
-        afterContext: { state: prior.state, paymentDeadlineAt: deadline.toISOString(), extendedHours: hours },
-        requestMetadata: { source: 'admin_ui' },
-      });
-    });
-  } catch (error) {
-    redirect(`${callback}?adminError=${encodeURIComponent(error instanceof Error ? error.message : 'Could not extend deadline.')}`);
-  }
-  revalidatePath(callback);
-  redirect(`${callback}?adminSuccess=Payment+deadline+extended.`);
 }
 
 export async function cancelDealAction(formData: FormData): Promise<void> {
