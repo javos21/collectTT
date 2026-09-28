@@ -57,7 +57,7 @@ import { recordAdminAudit } from './admin-audit';
 import type { SettlementMethod } from '../domain/policy/settlement';
 import { acquireCommitmentEligibility } from './marketplace-eligibility';
 import { MarketplaceEligibilityError } from './marketplace-eligibility';
-import { isV1Launch, V1_HANDOFF_CONFIRMATION_WINDOW_HOURS } from '@/lib/launch-scope';
+import { isV1Launch } from '@/lib/launch-scope';
 import {
   assertHandoffTransition,
   initialHandoffState,
@@ -205,23 +205,6 @@ export async function openTransaction(input: OpenTransactionInput): Promise<{ id
     reason: input.source,
     metadata: { attemptNumber, amountCents: input.amountCents },
   });
-
-  // ★ Deadline jobs enqueued in the SAME transaction that opened the deal.
-  await enqueue(
-    tx,
-    'transaction:payment_window',
-    { transactionId: created.id },
-    { jobKey: `payment_window:${created.id}`, runAt: deadlines.paymentDeadlineAt },
-  );
-
-  if (deadlines.sellerDropoffDeadlineAt !== null) {
-    await enqueue(
-      tx,
-      'transaction:dropoff_window',
-      { transactionId: created.id },
-      { jobKey: `dropoff_window:${created.id}`, runAt: deadlines.sellerDropoffDeadlineAt },
-    );
-  }
 
   const buyerEvent =
     input.source === 'auction_win'
@@ -468,12 +451,10 @@ export async function markItemHandedOver(
   if (row.fulfillmentPath !== 'cash_meetup') throw new ConflictError('Item hand-off is only available for meetup deals');
   if (row.paymentState !== 'confirmed') throw new ConflictError('Payment must be confirmed before hand-off');
   assertHandoffTransition(row.handoffState, 'seller_handed_over');
-  const now = await dbNow(tx);
-
   const updated = await tx.update(transactions).set({
     handoffState: 'seller_handed_over',
     handedOverAt: sql`now()`,
-    receiptDeadlineAt: sql`now() + (${V1_HANDOFF_CONFIRMATION_WINDOW_HOURS} || ' hours')::interval`,
+    receiptDeadlineAt: null,
     updatedAt: sql`now()`,
   }).where(and(
     eq(transactions.id, transactionId),
@@ -497,11 +478,6 @@ export async function markItemHandedOver(
     data: { listingTitle: row.listingTitle, deadline: 'buyer confirmation required' },
     linkUrl: `/deals/${transactionId}`,
     idempotencyKey: `item_handed_over:${transactionId}`,
-  });
-  const receiptDeadline = new Date(now.getTime() + V1_HANDOFF_CONFIRMATION_WINDOW_HOURS * 60 * 60 * 1000);
-  await enqueue(tx, 'transaction:receipt_window', { transactionId }, {
-    jobKey: `receipt_window:${transactionId}`,
-    runAt: receiptDeadline,
   });
 }
 
@@ -567,10 +543,6 @@ export async function completeCashMeetup(
   if (row.handoffState !== 'awaiting_handoff' && row.handoffState !== 'seller_handed_over') {
     throw new ConflictError('This meetup is not awaiting completion');
   }
-  if ((await dbNow(tx)).getTime() >= row.paymentDeadlineAt.getTime()) {
-    throw new ConflictError('The meetup window has ended');
-  }
-
   if (row.paymentState !== 'confirmed') {
     assertPaymentTransition(row.paymentState, 'confirmed');
   }
@@ -590,7 +562,6 @@ export async function completeCashMeetup(
         eq(transactions.id, transactionId),
         eq(transactions.state, 'open'),
         eq(transactions.fulfillmentPath, 'cash_meetup'),
-        gt(transactions.paymentDeadlineAt, sql`now()`),
         inArray(transactions.paymentState, ['pending', 'buyer_marked_paid', 'confirmed']),
         inArray(transactions.handoffState, ['awaiting_handoff', 'seller_handed_over']),
       ),
@@ -634,7 +605,50 @@ export async function completeCashMeetup(
   });
 }
 
-/** Seller says the money never arrived. The deadline is NOT extended. */
+/**
+ * Let either participant deliberately end an uncompleted deal. Time passing never
+ * performs this action on their behalf and participant cancellation carries no
+ * automatic reputation penalty.
+ */
+export async function cancelDealByParticipant(
+  tx: Tx,
+  transactionId: string,
+  userId: string,
+  detail?: string,
+): Promise<void> {
+  const row = await load(tx, transactionId);
+  const actorRole = row.buyerId === userId ? 'buyer' : row.sellerId === userId ? 'seller' : null;
+  if (actorRole === null) throw new ForbiddenError('Only the buyer or seller can cancel this deal');
+  if (row.state !== 'open') throw new ConflictError('This deal is no longer open');
+  if (row.disputeState === 'open') throw new ConflictError('Support must resolve the open report before this deal can be cancelled');
+  if (row.paymentState === 'confirmed') throw new ConflictError('Contact support to cancel a deal after payment has been confirmed');
+
+  const changed = await terminateTransaction({
+    tx,
+    transactionId,
+    reason: 'mutual_cancel',
+    actorRole,
+    actorUserId: userId,
+    promoteNext: row.source === 'auction_win' || row.source === 'auction_runner_up'
+      ? actorRole === 'buyer'
+      : false,
+  });
+  if (!changed) throw new ConflictError('This deal changed before it could be cancelled');
+
+  const reason = detail?.trim().slice(0, 500) || `${actorRole === 'buyer' ? 'The buyer' : 'The seller'} released the deal.`;
+  for (const recipientId of [row.buyerId, row.sellerId]) {
+    await notify({
+      tx,
+      userId: recipientId,
+      event: 'transaction_member_cancelled',
+      data: { listingTitle: row.listingTitle, reason },
+      linkUrl: `/deals/${transactionId}`,
+      idempotencyKey: `transaction-member-cancelled:${transactionId}:${recipientId}`,
+    });
+  }
+}
+
+/** Seller says the money never arrived and opens a support-visible report. */
 export async function disputePayment(
   tx: Tx,
   transactionId: string,
@@ -707,42 +721,6 @@ export async function disputePayment(
     linkUrl: `/deals/${transactionId}`,
     idempotencyKey: `payment_disputed:${transactionId}:${Date.now()}`,
   });
-}
-
-/** Admin/support extension. Sellers and buyers cannot move platform deadlines. */
-export async function extendPaymentDeadline(input: {
-  tx: Tx;
-  transactionId: string;
-  hours: number;
-  reason: string;
-  adminUserId: string;
-}): Promise<Date> {
-  if (!Number.isInteger(input.hours) || input.hours < 1 || input.hours > 168) {
-    throw new ConflictError('Deadline extensions must be between 1 and 168 hours.');
-  }
-  if (input.reason.trim().length < 10 || input.reason.trim().length > 500) {
-    throw new ConflictError('Enter an extension reason between 10 and 500 characters.');
-  }
-  const row = await load(input.tx, input.transactionId);
-  if (row.state !== 'open') throw new ConflictError('Only an open deal can be extended.');
-  const now = await dbNow(input.tx);
-  const nextDeadline = new Date(Math.max(row.paymentDeadlineAt.getTime(), now.getTime()) + input.hours * 60 * 60 * 1000);
-  const updated = await input.tx.update(transactions).set({ paymentDeadlineAt: nextDeadline, updatedAt: sql`now()` })
-    .where(and(eq(transactions.id, input.transactionId), eq(transactions.state, 'open')))
-    .returning({ paymentDeadlineAt: transactions.paymentDeadlineAt });
-  if (updated.length === 0) throw new ConflictError('The deal changed before its deadline could be extended.');
-  await recordTransition(input.tx, {
-    transactionId: input.transactionId,
-    track: 'overall',
-    from: 'open',
-    to: 'open',
-    actorUserId: input.adminUserId,
-    actorRole: 'admin',
-    reason: input.reason.trim(),
-    metadata: { previousDeadlineAt: row.paymentDeadlineAt.toISOString(), extendedHours: input.hours },
-  });
-  await enqueue(input.tx, 'transaction:payment_window', { transactionId: input.transactionId }, { jobKey: `payment_window:${input.transactionId}`, runAt: nextDeadline });
-  return updated[0]!.paymentDeadlineAt;
 }
 
 // ---------------------------------------------------------------- completion
@@ -975,7 +953,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
     metadata: {
       paymentStateAtTermination: row.paymentState,
       custodyStateAtTermination: row.custodyState,
-      paymentDeadlineAt: row.paymentDeadlineAt.toISOString(),
+      paymentDeadlineAt: row.paymentDeadlineAt?.toISOString() ?? null,
       sellerDropoffDeadlineAt: row.sellerDropoffDeadlineAt?.toISOString() ?? null,
       sellerDropoffRequired: row.paymentState === 'confirmed',
     },
@@ -992,10 +970,10 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
       to: 'failed',
       actorRole: 'system',
       reason: reason === 'non_payment'
-        ? 'payment deadline expired — no payment was confirmed'
+        ? 'payment was not confirmed'
         : 'deal ended before payment was confirmed',
       metadata: {
-        paymentDeadlineAt: row.paymentDeadlineAt.toISOString(),
+        paymentDeadlineAt: row.paymentDeadlineAt?.toISOString() ?? null,
         terminationReason: reason,
       },
     });
@@ -1025,7 +1003,7 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
   if (row.claimId !== null) {
     await tx
       .update(claims)
-      .set({ status: 'reneged' })
+      .set({ status: reason === 'mutual_cancel' ? 'withdrawn' : 'reneged' })
       .where(eq(claims.id, row.claimId));
   }
 
@@ -1113,7 +1091,11 @@ export async function terminateTransaction(input: TerminateInput): Promise<boole
     await resolveListingAfterFailure(
       tx,
       row.listingId,
-      !isAuction && toState === 'reneged_buyer' ? (listing?.autoRelistOnRenege ?? false) : false,
+      !isAuction && reason === 'mutual_cancel'
+        ? true
+        : !isAuction && toState === 'reneged_buyer'
+          ? (listing?.autoRelistOnRenege ?? false)
+          : false,
     );
   }
 
@@ -1760,66 +1742,10 @@ export interface LoadedTransaction {
   meetupLocationId: string | null;
   settlementMethod: string | null;
   amountCents: number;
-  paymentDeadlineAt: Date;
+  paymentDeadlineAt: Date | null;
   sellerDropoffDeadlineAt: Date | null;
   claimId: string | null;
   offerId: string | null;
-}
-
-/**
- * Re-arm deadline jobs after support resumes an open transaction. Jobs may have been
- * consumed while a dispute was open, so the resume transition must restore work from
- * the transaction's current tracks and clocks in the same database transaction.
- */
-export async function rescheduleTransactionDeadlineJobs(
-  tx: Tx,
-  transaction: Pick<
-    LoadedTransaction,
-    | 'id'
-    | 'paymentState'
-    | 'paymentDeadlineAt'
-    | 'sellerDropoffDeadlineAt'
-    | 'custodyState'
-    | 'fulfillmentPath'
-    | 'handoffState'
-    | 'receiptDeadlineAt'
-  >,
-): Promise<void> {
-  if (transaction.paymentState !== 'confirmed') {
-    await enqueue(
-      tx,
-      'transaction:payment_window',
-      { transactionId: transaction.id },
-      { jobKey: `payment_window:${transaction.id}`, runAt: transaction.paymentDeadlineAt },
-    );
-  }
-
-  if (
-    transaction.paymentState === 'confirmed'
-    && transaction.custodyState === 'awaiting_dropoff'
-    && transaction.sellerDropoffDeadlineAt !== null
-  ) {
-    await enqueue(
-      tx,
-      'transaction:dropoff_window',
-      { transactionId: transaction.id },
-      { jobKey: `dropoff_window:${transaction.id}`, runAt: transaction.sellerDropoffDeadlineAt },
-    );
-  }
-
-  if (
-    transaction.fulfillmentPath === 'cash_meetup'
-    && transaction.paymentState === 'confirmed'
-    && transaction.handoffState === 'seller_handed_over'
-    && transaction.receiptDeadlineAt !== null
-  ) {
-    await enqueue(
-      tx,
-      'transaction:receipt_window',
-      { transactionId: transaction.id },
-      { jobKey: `receipt_window:${transaction.id}`, runAt: transaction.receiptDeadlineAt },
-    );
-  }
 }
 
 async function load(tx: Tx, transactionId: string): Promise<LoadedTransaction> {

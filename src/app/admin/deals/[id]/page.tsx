@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
-import { Activity, AlertTriangle, ArrowLeft, CircleDollarSign, Clock3, FileText, History, Mail, PackageCheck, UserRound } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, CircleDollarSign, FileText, History, Mail, PackageCheck, UserRound } from 'lucide-react';
 import { notFound } from 'next/navigation';
 
 import { db } from '@/db/client';
@@ -14,7 +14,7 @@ import { formatMoney } from '@/domain/money';
 import { requireAdmin } from '@/lib/admin';
 import { AdminFrame } from '../../admin-frame';
 import { DisputeAdminActions } from './dispute-actions';
-import { cancelDealAction, extendDealDeadlineAction } from '@/app/admin/actions';
+import { cancelDealAction } from '@/app/admin/actions';
 
 function dateTime(value: Date | null): string {
   return value === null ? '—' : value.toLocaleString('en-TT', { dateStyle: 'medium', timeStyle: 'short' });
@@ -34,10 +34,6 @@ function statusTone(status: string): string {
 
 function money(cents: number, currency: string): string {
   return formatMoney(cents, currency === 'USD' ? 'USD' : 'TTD');
-}
-
-function isOverdue(value: Date | null, state: string, now: Date): boolean {
-  return state === 'open' && value !== null && value < now;
 }
 
 export default async function AdminDealDetailPage({
@@ -63,7 +59,6 @@ export default async function AdminDealDetailPage({
   if (row === undefined) notFound();
   const transaction = row.transaction;
   const isCashMeetup = transaction.fulfillmentPath === 'cash_meetup';
-  const now = new Date();
 
   const [participantRows, eventRows, notificationRows, disputeRows, custodyRows] = await Promise.all([
     db
@@ -139,8 +134,6 @@ export default async function AdminDealDetailPage({
             droppedOffAt: custodyHoldings.droppedOffAt,
             pickedUpAt: custodyHoldings.pickedUpAt,
             returnedAt: custodyHoldings.returnedAt,
-            custodyExpiresAt: custodyHoldings.custodyExpiresAt,
-            overstayFlaggedAt: custodyHoldings.overstayFlaggedAt,
           })
           .from(custodyHoldings)
           .leftJoin(relayStores, eq(relayStores.id, custodyHoldings.storeId))
@@ -150,8 +143,6 @@ export default async function AdminDealDetailPage({
   const buyer = participantRows.find((participant) => participant.userId === transaction.buyerId);
   const seller = participantRows.find((participant) => participant.userId === transaction.sellerId);
   const custody = custodyRows[0];
-  const paymentOverdue = isOverdue(transaction.paymentDeadlineAt, transaction.state, now);
-  const dropoffOverdue = isOverdue(transaction.sellerDropoffDeadlineAt, transaction.state, now);
 
   return (
     <AdminFrame activeNav="deals">
@@ -198,27 +189,13 @@ export default async function AdminDealDetailPage({
         </div>
 
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-tracks-title">
-          <div className="admin-panel__heading"><div><h2 id="deal-tracks-title">State tracks and deadlines</h2><p className="admin-panel__subcopy">Payment, item custody, and v1 meetup hand-off advance independently; completion requires every applicable track to settle.</p></div><Clock3 size={19} aria-hidden="true" /></div>
+          <div className="admin-panel__heading"><div><h2 id="deal-tracks-title">State tracks</h2><p className="admin-panel__subcopy">Payment, item custody, and meetup hand-off advance independently; completion requires every applicable track to settle.</p></div></div>
           <div className="admin-track-grid">
-            <article className={`admin-track-card admin-track-card--${statusTone(transaction.paymentState)}`}><div className="admin-track-card__heading"><div><span>{isCashMeetup ? 'Payment at meetup' : 'Payment track'}</span><h3>{label(transaction.paymentState)}</h3></div><CircleDollarSign size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>{isCashMeetup ? 'Meetup deadline' : 'Payment deadline'}</dt><dd className={paymentOverdue ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{dateTime(transaction.paymentDeadlineAt)}{paymentOverdue && <small>Overdue</small>}</dd></div><div><dt>Marked paid</dt><dd>{dateTime(transaction.markedPaidAt)}</dd></div><div><dt>Confirmed</dt><dd>{dateTime(transaction.paymentConfirmedAt)}</dd></div><div><dt>Disputed</dt><dd>{dateTime(transaction.paymentDisputedAt)}</dd></div></dl></article>
-            <article className={`admin-track-card admin-track-card--${statusTone(transaction.custodyState)}`}><div className="admin-track-card__heading"><div><span>Custody track</span><h3>{label(transaction.custodyState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Seller drop-off due</dt><dd className={dropoffOverdue ? 'admin-deadline admin-deadline--overdue' : 'admin-deadline'}>{dateTime(transaction.sellerDropoffDeadlineAt)}{dropoffOverdue && <small>Overdue</small>}</dd></div><div><dt>Completed</dt><dd>{dateTime(transaction.completedAt)}</dd></div><div><dt>Terminated</dt><dd>{dateTime(transaction.terminatedAt)}<small>{label(transaction.terminatedReason)}</small></dd></div><div><dt>Fulfillment path</dt><dd>{label(transaction.fulfillmentPath)}</dd></div></dl></article>
-            <article className={`admin-track-card admin-track-card--${statusTone(transaction.handoffState)}`}><div className="admin-track-card__heading"><div><span>Meetup hand-off</span><h3>{label(transaction.handoffState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Handed over</dt><dd>{dateTime(transaction.handedOverAt)}</dd></div><div><dt>Received</dt><dd>{dateTime(transaction.receivedAt)}</dd></div><div><dt>Receipt deadline</dt><dd>{dateTime(transaction.receiptDeadlineAt)}</dd></div><div><dt>Dispute track</dt><dd>{label(transaction.disputeState)}</dd></div></dl></article>
+            <article className={`admin-track-card admin-track-card--${statusTone(transaction.paymentState)}`}><div className="admin-track-card__heading"><div><span>{isCashMeetup ? 'Payment at meetup' : 'Payment track'}</span><h3>{label(transaction.paymentState)}</h3></div><CircleDollarSign size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Marked paid</dt><dd>{dateTime(transaction.markedPaidAt)}</dd></div><div><dt>Confirmed</dt><dd>{dateTime(transaction.paymentConfirmedAt)}</dd></div><div><dt>Disputed</dt><dd>{dateTime(transaction.paymentDisputedAt)}</dd></div></dl></article>
+            <article className={`admin-track-card admin-track-card--${statusTone(transaction.custodyState)}`}><div className="admin-track-card__heading"><div><span>Custody track</span><h3>{label(transaction.custodyState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Completed</dt><dd>{dateTime(transaction.completedAt)}</dd></div><div><dt>Terminated</dt><dd>{dateTime(transaction.terminatedAt)}<small>{label(transaction.terminatedReason)}</small></dd></div><div><dt>Fulfillment path</dt><dd>{label(transaction.fulfillmentPath)}</dd></div></dl></article>
+            <article className={`admin-track-card admin-track-card--${statusTone(transaction.handoffState)}`}><div className="admin-track-card__heading"><div><span>Meetup hand-off</span><h3>{label(transaction.handoffState)}</h3></div><PackageCheck size={20} aria-hidden="true" /></div><dl className="admin-detail-list"><div><dt>Handed over</dt><dd>{dateTime(transaction.handedOverAt)}</dd></div><div><dt>Received</dt><dd>{dateTime(transaction.receivedAt)}</dd></div><div><dt>Dispute track</dt><dd>{label(transaction.disputeState)}</dd></div></dl></article>
           </div>
         </section>
-
-        {transaction.state === 'open' && (
-          <section className="admin-panel admin-detail-section" aria-labelledby="deal-deadline-action-title">
-            <div className="admin-panel__heading"><div><h2 id="deal-deadline-action-title">Extend {isCashMeetup ? 'meetup' : 'payment'} deadline</h2><p className="admin-panel__subcopy">Support-only override. Every extension is recorded in the transaction timeline and audit log.</p></div><Clock3 size={19} aria-hidden="true" /></div>
-            <form action={extendDealDeadlineAction} className="admin-dispute-action__form">
-              <input type="hidden" name="transactionId" value={transaction.id} />
-              <label htmlFor="deadline-hours">Additional hours</label>
-              <input id="deadline-hours" name="hours" type="number" min="1" max="168" defaultValue="24" required />
-              <label htmlFor="deadline-reason">Reason</label>
-              <textarea id="deadline-reason" name="reason" minLength={10} maxLength={500} rows={3} required placeholder="Explain why support is extending this deadline." />
-              <button className="admin-button" type="submit">Extend deadline</button>
-            </form>
-          </section>
-        )}
 
         {transaction.state === 'open' && (
           <section className="admin-panel admin-detail-section" aria-labelledby="deal-cancel-action-title">
@@ -234,7 +211,7 @@ export default async function AdminDealDetailPage({
 
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-custody-title">
           <div className="admin-panel__heading"><div><h2 id="deal-custody-title">Retained custody record</h2><p className="admin-panel__subcopy">Admin-visible operational record only; no store-staff actions are exposed here.</p></div><PackageCheck size={19} aria-hidden="true" /></div>
-          {custody === undefined ? <p className="admin-empty-copy">No retained custody record is linked to this deal.</p> : <dl className="admin-detail-list"><div><dt>Holding</dt><dd><code>{custody.id}</code><small>{label(custody.holder)} · {label(custody.state)}</small></dd></div><div><dt>Location</dt><dd>{custody.storeName ?? 'No relay store'}<small>{custody.storeArea ?? '—'}</small></dd></div><div><dt>Drop-off code</dt><dd><code>{custody.dropoffCode}</code></dd></div><div><dt>Drop-off</dt><dd>{dateTime(custody.droppedOffAt)}</dd></div><div><dt>Pickup / return</dt><dd>{dateTime(custody.pickedUpAt)}<small>Returned {dateTime(custody.returnedAt)}</small></dd></div><div><dt>Custody clock</dt><dd>{dateTime(custody.custodyExpiresAt)}<small>{custody.overstayFlaggedAt === null ? 'No overstay flag' : `Overstay flagged ${dateTime(custody.overstayFlaggedAt)}`}</small></dd></div></dl>}
+          {custody === undefined ? <p className="admin-empty-copy">No retained custody record is linked to this deal.</p> : <dl className="admin-detail-list"><div><dt>Holding</dt><dd><code>{custody.id}</code><small>{label(custody.holder)} · {label(custody.state)}</small></dd></div><div><dt>Location</dt><dd>{custody.storeName ?? 'No relay store'}<small>{custody.storeArea ?? '—'}</small></dd></div><div><dt>Drop-off code</dt><dd><code>{custody.dropoffCode}</code></dd></div><div><dt>Drop-off</dt><dd>{dateTime(custody.droppedOffAt)}</dd></div><div><dt>Pickup / return</dt><dd>{dateTime(custody.pickedUpAt)}<small>Returned {dateTime(custody.returnedAt)}</small></dd></div></dl>}
         </section>
 
         <section className="admin-panel admin-detail-section" aria-labelledby="deal-disputes-title">

@@ -28,7 +28,7 @@ import { transactions, transactionEvents } from '../../src/db/schema/transaction
 import { notificationDeliveries } from '../../src/db/schema/notifications';
 import { claimListing } from '../../src/db/atomic/claim-listing';
 import { placeBid } from '../../src/db/atomic/place-bid';
-import { markPaid, completeCashMeetup, confirmPayment, disputePayment, acceptAuctionFallbackOffer } from '../../src/services/transactions';
+import { markPaid, completeCashMeetup, confirmPayment, disputePayment, acceptAuctionFallbackOffer, cancelDealByParticipant } from '../../src/services/transactions';
 import { submitDispute } from '../../src/services/disputes';
 import { acceptOffer, rejectOffer, submitOffer } from '../../src/services/offers';
 import { assertMarketplaceEligible } from '../../src/services/marketplace-eligibility';
@@ -452,11 +452,12 @@ describe('★ fixed-price offers (v1)', () => {
     expect(opened?.amountCents).toBe(8_000);
     expect(opened?.handoffState).toBe('awaiting_handoff');
 
-    // An accepted offer uses the normal buyer expiry path and respects the listing's
-    // auto-relist setting, rather than leaving the listing permanently claimed.
+    // Legacy expiry jobs are harmless: the accepted offer stays reserved until an
+    // explicit participant action resolves it.
     await expirePaymentWindow(result.transactionId);
     await paymentWindowExpired({ transactionId: result.transactionId }, helpers);
-    expect((await db.select().from(listings).where(eq(listings.id, listingId)))[0]?.status).toBe('active');
+    expect((await db.select().from(listings).where(eq(listings.id, listingId)))[0]?.status).toBe('claimed');
+    expect((await db.select().from(transactions).where(eq(transactions.id, result.transactionId)))[0]?.state).toBe('open');
     expect((await db.select().from(offers).where(eq(offers.id, second.id)))[0]?.status).toBe('pending');
   });
 
@@ -514,15 +515,15 @@ describe('★ mark-paid / confirm-received handshake', () => {
     expect(row).toMatchObject({ paymentState: 'pending', handoffState: 'awaiting_handoff' });
   });
 
-  it('does not complete a meetup after its completion window has ended', async () => {
+  it('completes a meetup even when a legacy deadline is in the past', async () => {
     const listingId = await makeListing();
     const claim = await claimListing({ listingId, claimantId: buyers[2]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
     const txId = claim.transactionId!;
     await expirePaymentWindow(txId);
 
-    await expect(db.transaction(async (tx) => completeCashMeetup(tx, txId, buyers[2]!))).rejects.toThrow(/meetup window has ended/i);
+    await db.transaction(async (tx) => completeCashMeetup(tx, txId, buyers[2]!));
     const row = (await db.select({ state: transactions.state, paymentState: transactions.paymentState }).from(transactions).where(eq(transactions.id, txId)))[0];
-    expect(row).toMatchObject({ state: 'open', paymentState: 'pending' });
+    expect(row).toMatchObject({ state: 'completed', paymentState: 'confirmed' });
   });
 
   it('completes an acknowledged v1 meetup in a single buyer action', async () => {
@@ -580,7 +581,7 @@ describe('★ mark-paid / confirm-received handshake', () => {
     expect(row.disputeState).toBe('open');
   });
 
-  it('keeps a future-deadline deal open when an old payment job runs', async () => {
+  it('keeps a no-deadline deal open when an old payment job runs', async () => {
     const listingId = await makeListing();
     const claim = await claimListing({ listingId, claimantId: buyers[3]!, fulfillmentPath: 'cash_meetup', commitmentAcknowledged: true });
     const txId = claim.transactionId!;
@@ -588,7 +589,7 @@ describe('★ mark-paid / confirm-received handshake', () => {
     await paymentWindowExpired({ transactionId: txId }, helpers);
 
     const row = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0]!;
-    expect(row.paymentDeadlineAt.getTime()).toBeGreaterThan(Date.now());
+    expect(row.paymentDeadlineAt).toBeNull();
     expect(row.state).toBe('open');
   });
 
@@ -677,8 +678,8 @@ describe('★ mark-paid / confirm-received handshake', () => {
 
 // ════════════════════════════════════════════════════════ fixed-price failure
 
-describe('★ fixed-price payment lapse → relist without a backup', () => {
-  it('returns the item to the catalog after the sole claimer reneges', async () => {
+describe('★ explicit reservation release', () => {
+  it('returns the item to the catalog without creating a trust penalty', async () => {
     const listingId = await makeListing();
 
     const first = await claimListing({
@@ -689,14 +690,13 @@ describe('★ fixed-price payment lapse → relist without a backup', () => {
     expect(first.outcome).toBe('claimed');
 
     const firstTxId = first.transactionId!;
-    await expirePaymentWindow(firstTxId);
-    await paymentWindowExpired({ transactionId: firstTxId }, helpers);
+    await db.transaction(async (tx) => cancelDealByParticipant(tx, firstTxId, buyers[0]!, 'Plans changed.'));
 
-    // The first buyer reneged and the fact is on their record.
+    // The participant released the deal; no timeout or blame is inferred.
     const failed = (await db.select().from(transactions).where(eq(transactions.id, firstTxId)))[0];
-    expect(failed?.state).toBe('reneged_buyer');
+    expect(failed?.state).toBe('cancelled');
     expect(failed?.paymentState).toBe('failed');
-    expect(failed?.terminatedReason).toBe('buyer_no_show'); // cash_meetup reads as a no-show
+    expect(failed?.terminatedReason).toBe('mutual_cancel');
 
     const facts = await db
       .select()
@@ -704,23 +704,20 @@ describe('★ fixed-price payment lapse → relist without a backup', () => {
       .where(
         and(eq(reputationEvents.transactionId, firstTxId), eq(reputationEvents.userId, buyers[0]!)),
       );
-    expect(facts.length).toBeGreaterThan(0);
+    expect(facts).toHaveLength(0);
 
     const transitions = await db
       .select({ track: transactionEvents.track, reason: transactionEvents.reason })
       .from(transactionEvents)
       .where(eq(transactionEvents.transactionId, firstTxId));
-    expect(transitions.some((event) => event.track === 'payment')).toBe(false);
+    expect(transitions.some((event) => event.track === 'overall' && event.reason === 'mutual_cancel')).toBe(true);
 
     const buyerNotifications = await db
       .select({ eventType: notificationDeliveries.eventType })
       .from(notificationDeliveries)
       .where(eq(notificationDeliveries.userId, buyers[0]!));
-    expect(buyerNotifications.map((event) => event.eventType)).toContain('meetup_window_lapsed_buyer');
-    expect(buyerNotifications.map((event) => event.eventType)).not.toContain('payment_window_lapsed_buyer');
-
-    // Fixed-price claims do not enqueue a promotion job.
-    await promoteNext({ listingId, failedTransactionId: firstTxId }, helpers);
+    expect(buyerNotifications.map((event) => event.eventType)).toContain('transaction_member_cancelled');
+    expect(buyerNotifications.map((event) => event.eventType)).not.toContain('meetup_window_lapsed_buyer');
 
     const open = await openTransactionFor(listingId);
     expect(open).toBeUndefined();
@@ -728,10 +725,10 @@ describe('★ fixed-price payment lapse → relist without a backup', () => {
     expect(listing?.status).toBe('active');
     const claimRows = await db.select().from(claims).where(eq(claims.listingId, listingId));
     expect(claimRows).toHaveLength(1);
-    expect(claimRows[0]?.status).toBe('reneged');
+    expect(claimRows[0]?.status).toBe('superseded');
   });
 
-  it('allows a fresh buyer to claim after a failed attempt is relisted', async () => {
+  it('allows a fresh buyer to claim after an explicit release', async () => {
     const listingId = await makeListing();
     const first = await claimListing({
       listingId,
@@ -739,8 +736,7 @@ describe('★ fixed-price payment lapse → relist without a backup', () => {
       fulfillmentPath: 'cash_meetup',
     });
 
-    await expirePaymentWindow(first.transactionId!);
-    await paymentWindowExpired({ transactionId: first.transactionId! }, helpers);
+    await db.transaction(async (tx) => cancelDealByParticipant(tx, first.transactionId!, buyers[3]!));
     const second = await claimListing({
       listingId,
       claimantId: buyers[4]!,
@@ -769,7 +765,7 @@ describe('★ fixed-price payment lapse → relist without a backup', () => {
     expect(row?.state).toBe('completed'); // untouched
   });
 
-  it('is idempotent — a duplicate expiry delivery changes nothing', async () => {
+  it('keeps a deal open across duplicate legacy expiry deliveries', async () => {
     const listingId = await makeListing();
     const claim = await claimListing({
       listingId,
@@ -783,14 +779,15 @@ describe('★ fixed-price payment lapse → relist without a backup', () => {
     await paymentWindowExpired({ transactionId: txId }, helpers);
     await paymentWindowExpired({ transactionId: txId }, helpers);
 
-    // The unique index on (transaction, user, type) means the fact is recorded once.
+    const deal = (await db.select().from(transactions).where(eq(transactions.id, txId)))[0];
+    expect(deal?.state).toBe('open');
     const facts = await db
       .select()
       .from(reputationEvents)
       .where(
         and(eq(reputationEvents.transactionId, txId), eq(reputationEvents.userId, buyers[5]!)),
       );
-    expect(facts).toHaveLength(1);
+    expect(facts).toHaveLength(0);
   });
 });
 
@@ -955,9 +952,8 @@ describe('★ auctions: bidding, anti-snipe, close', () => {
     expect(winnerTx?.buyerId).toBe(buyers[1]!);
     expect(winnerTx?.amountCents).toBe(12_000);
 
-    // The winner never pays.
-    await expirePaymentWindow(winnerTx!.id);
-    await paymentWindowExpired({ transactionId: winnerTx!.id }, helpers);
+    // The winner explicitly releases the deal.
+    await db.transaction(async (tx) => cancelDealByParticipant(tx, winnerTx!.id, buyers[1]!));
     await promoteNext({ listingId, failedTransactionId: winnerTx!.id }, helpers);
 
     const fallback = (await db.select().from(auctionFallbackOffers).where(and(

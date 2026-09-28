@@ -57,7 +57,7 @@ import {
   statusAfterFailedAttempt,
   type ListingStatus,
 } from '../../src/domain/states/listing';
-import { WINDOWS, computeDeadlines, assertWindowInvariant } from '../../src/domain/policy/windows';
+import { computeDeadlines, assertWindowInvariant } from '../../src/domain/policy/windows';
 
 // ---------------------------------------------------------------- payment track
 
@@ -292,7 +292,7 @@ describe('fulfillment paths against both tracks', () => {
     paymentState: 'pending',
     custodyState: 'not_applicable',
     fulfillmentPath: 'cash_meetup',
-    paymentDeadlineAt: new Date('2026-01-03T00:00:00Z'),
+    paymentDeadlineAt: null,
     sellerDropoffDeadlineAt: null,
     relayStoreId: null,
     buyerId: 'buyer-1',
@@ -305,7 +305,7 @@ describe('fulfillment paths against both tracks', () => {
       const snapshot = base({
         fulfillmentPath: path,
         custodyState: initialCustodyState(path),
-        sellerDropoffDeadlineAt: usesCustodyTrack(path) ? new Date('2026-01-02T00:00:00Z') : null,
+        sellerDropoffDeadlineAt: null,
         relayStoreId: path === 'relay' ? 'store-1' : null,
       });
       expect(validateTransaction(snapshot)).toEqual([]);
@@ -325,28 +325,6 @@ describe('fulfillment paths against both tracks', () => {
       base({ fulfillmentPath: 'relay', custodyState: 'not_applicable', sellerDropoffDeadlineAt: null }),
     );
     expect(v).toContain('tx_custody_required');
-  });
-
-  it('★★ rejects a seller deadline at or after the buyer deadline', () => {
-    const sameTime = validateTransaction(
-      base({
-        fulfillmentPath: 'relay',
-        custodyState: 'awaiting_dropoff',
-        paymentDeadlineAt: new Date('2026-01-03T00:00:00Z'),
-        sellerDropoffDeadlineAt: new Date('2026-01-03T00:00:00Z'),
-      }),
-    );
-    expect(sameTime).toContain('tx_dropoff_before_payment');
-
-    const later = validateTransaction(
-      base({
-        fulfillmentPath: 'relay',
-        custodyState: 'awaiting_dropoff',
-        paymentDeadlineAt: new Date('2026-01-03T00:00:00Z'),
-        sellerDropoffDeadlineAt: new Date('2026-01-04T00:00:00Z'),
-      }),
-    );
-    expect(later).toContain('tx_dropoff_before_payment');
   });
 
   it('★★ rejects completion with either track unfinished', () => {
@@ -411,25 +389,17 @@ describe('listing lifecycle', () => {
 
 // ---------------------------------------------------------------- windows
 
-describe('deadline policy', () => {
-  it('★★ the seller drop-off window is strictly shorter than the payment window', () => {
+describe('deal timing policy', () => {
+  it('retains the compatibility invariant export as a no-op', () => {
     expect(() => assertWindowInvariant()).not.toThrow();
-    for (const path of ['relay', 'full_service'] as const) {
-      expect(WINDOWS.sellerDropoff[path]).toBeLessThan(WINDOWS.payment[path]);
-    }
   });
 
-  it('computed deadlines satisfy the invariant on every path', () => {
+  it('does not assign deadlines to new deals', () => {
     const now = new Date('2026-01-01T00:00:00Z');
     for (const path of FULFILLMENT_PATHS) {
       const d = computeDeadlines(path, now);
-      expect(d.paymentDeadlineAt.getTime()).toBeGreaterThan(now.getTime());
-      if (usesCustodyTrack(path)) {
-        expect(d.sellerDropoffDeadlineAt).not.toBeNull();
-        expect(d.sellerDropoffDeadlineAt!.getTime()).toBeLessThan(d.paymentDeadlineAt.getTime());
-      } else {
-        expect(d.sellerDropoffDeadlineAt).toBeNull();
-      }
+      expect(d.paymentDeadlineAt).toBeNull();
+      expect(d.sellerDropoffDeadlineAt).toBeNull();
     }
   });
 

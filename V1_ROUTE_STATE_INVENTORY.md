@@ -38,7 +38,7 @@ legacy route unless the product scope explicitly approves it.
 | `/admin` | Keep, admin-only | unauthorized, dashboard, empty queues, service failure | Admin is a launch dependency. |
 | `/admin/members`, `/admin/members/[id]` | Keep, admin-only | search, no result, detail, suspend/restrict/reactivate, audit failure | Private phone access is audited; no impersonation. |
 | `/admin/listings`, `/admin/listings/[id]` | Keep, admin-only | search, state history, remove/intervene, audit failure | Legacy listing fields may be inspected; new writes obey scope. |
-| `/admin/deals`, `/admin/deals/[id]` | Keep, admin-only | timeline, evidence, dispute, deadline extension, cancel, audit failure | Counterparty disclosure and support actions are permission checked. |
+| `/admin/deals`, `/admin/deals/[id]` | Keep, admin-only | timeline, evidence, dispute, cancel, audit failure | Counterparty disclosure and support actions are permission checked. |
 | `/admin/audit/[id]` | Keep, admin-only | immutable timeline, missing target, authorization failure | Append-only audit history. |
 | `/admin/notifications`, `/admin/notifications/[id]` | Keep, admin-only | queued, sent, failed, retry, dedupe | Transactional email is v1; retries must be idempotent. |
 | `/admin/catalog` | Keep, admin-only | category/value CRUD, validation, audit failure | Category-specific fields remain data driven. |
@@ -52,16 +52,16 @@ legacy route unless the product scope explicitly approves it.
 
 ## State-model checkpoints
 
-- Listing lifecycle: `DRAFT → ACTIVE → RESERVED → SOLD`; timeout or external sale
-  terminates the old record; relist/duplicate creates a new draft.
+- Listing lifecycle: `DRAFT → ACTIVE → RESERVED → SOLD`; participant release or an
+  external sale terminates the old deal; relist/duplicate creates a new draft.
 - Fixed-price reservation is an atomic, one-winner transition. A new buyer may
   have at most one active reservation.
 - Auctions use server time, binding bids, repeated two-minute anti-sniping, and
   idempotent close/fallback jobs. Reserve prices, buyouts, proxy bids, and bid
   retraction are not v1 inputs.
 - Transactions retain the current granular payment/custody implementation while
-  exposing the v1-equivalent lifecycle, event timeline, deadlines, dispute pause,
-  and direct-payment disclaimer.
+  exposing the v1-equivalent lifecycle, event timeline, explicit release, dispute
+  pause, and direct-payment disclaimer. Time passing alone never closes a deal.
 - Phone numbers are private before commitment and disclosed only to the two
   transaction parties or an authorized, audited administrator afterward.
 - `COLLECTTT_LAUNCH_SCOPE=v1` is the production default. `legacy` is a controlled

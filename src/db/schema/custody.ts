@@ -85,7 +85,7 @@ export const custodyHoldings = pgTable(
     pickedUpAt: timestamp('picked_up_at', { withTimezone: true }),
     returnedAt: timestamp('returned_at', { withTimezone: true }),
 
-    /** Shelf clock. Recomputed whenever payment state changes — paying EXTENDS it. */
+    /** Legacy shelf clock retained for historical rows; new holdings leave it null. */
     custodyExpiresAt: timestamp('custody_expires_at', { withTimezone: true }),
     overstayFlaggedAt: timestamp('overstay_flagged_at', { withTimezone: true }),
 
@@ -99,11 +99,6 @@ export const custodyHoldings = pgTable(
       .where(sql`${t.state} not in ('picked_up', 'returned_to_seller', 'voided')`),
     // The store's board view.
     index('custody_store_board').on(t.storeId, t.state),
-    // The overstay sweeper's scan.
-    index('custody_clock')
-      .on(t.custodyExpiresAt)
-      .where(sql`${t.state} in ('at_relay', 'release_authorized')`),
-
     check(
       'custody_store_required',
       sql`${t.holder} <> 'relay_store' or ${t.storeId} is not null`,

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ChevronDown, CircleCheck, Clock3, MapPin, PackageCheck, ShoppingBag, Store } from 'lucide-react';
+import { ChevronDown, CircleCheck, MapPin, PackageCheck, ShoppingBag, Store } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { formatMoney } from '@/domain/money';
@@ -36,16 +36,6 @@ const taskLabels: Record<Exclude<PhysicalDealTask, null>, string> = {
   to_collect: 'To collect',
   at_store: 'At store / waiting',
 };
-
-function formatDeadline(value: string): string {
-  return new Date(value).toLocaleString('en-TT', {
-    timeZone: 'America/Port_of_Spain',
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
 
 function roleLabel(role: ActiveDealRole): string {
   return role === 'buying' ? 'Buying' : 'Selling';
@@ -171,13 +161,6 @@ export function ActiveDealsList({
                       <span>{deal.currentState}</span>
                       <strong>{deal.nextStep}</strong>
                     </div>
-                    {deal.deadlineAt !== null && (
-                      <div className="active-deal__deadline">
-                        <Clock3 aria-hidden="true" />
-                        <span>Due</span>
-                        <time dateTime={deal.deadlineAt}>{formatDeadline(deal.deadlineAt)}</time>
-                      </div>
-                    )}
                     <button
                       className="active-deal__toggle"
                       type="button"
@@ -198,7 +181,6 @@ export function ActiveDealsList({
                       <div><dt>Payment</dt><dd>{deal.paymentStatus}</dd></div>
                       <div><dt>Delivery</dt><dd>{deal.deliveryStatus}</dd></div>
                       <div><dt>Next step</dt><dd>{deal.nextStep}</dd></div>
-                      {deal.deadlineAt !== null && <div><dt>Deadline</dt><dd><time dateTime={deal.deadlineAt}>{formatDeadline(deal.deadlineAt)}</time></dd></div>}
                       {deal.location !== null && <div><dt>Location</dt><dd><MapPin aria-hidden="true" />{deal.location.name}{deal.location.area ? ` · ${deal.location.area}` : ''}</dd></div>}
                     </dl>
                     <div className="active-deal__detail-actions">

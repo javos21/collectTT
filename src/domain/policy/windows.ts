@@ -69,8 +69,8 @@ export function sellerDropoffWindowMs(path: FulfillmentPath): number | null {
 }
 
 export interface Deadlines {
-  /** Legacy column name; for cash_meetup this is the meetup-completion deadline. */
-  paymentDeadlineAt: Date;
+  /** Legacy columns remain readable for historical deals; new deals have no deadlines. */
+  paymentDeadlineAt: Date | null;
   sellerDropoffDeadlineAt: Date | null;
 }
 
@@ -79,10 +79,12 @@ export interface Deadlines {
  * `now` MUST come from the database clock.
  */
 export function computeDeadlines(path: FulfillmentPath, now: Date, paymentWindowHours?: number): Deadlines {
-  const dropoffMs = sellerDropoffWindowMs(path);
+  void path;
+  void now;
+  void paymentWindowHours;
   return {
-    paymentDeadlineAt: new Date(now.getTime() + paymentWindowMs(path, paymentWindowHours)),
-    sellerDropoffDeadlineAt: dropoffMs === null ? null : new Date(now.getTime() + dropoffMs),
+    paymentDeadlineAt: null,
+    sellerDropoffDeadlineAt: null,
   };
 }
 
@@ -113,14 +115,6 @@ export function custodyExpiry(opts: {
  * stop. Asserted at module load by the test suite, and enforced per-row by a CHECK.
  */
 export function assertWindowInvariant(): void {
-  for (const path of ['relay', 'full_service'] as const) {
-    if (WINDOWS.sellerDropoff[path] >= WINDOWS.payment[path]) {
-      throw new Error(
-        `Window invariant violated for "${path}": seller drop-off window ` +
-          `(${WINDOWS.sellerDropoff[path]}ms) must be strictly shorter than the payment ` +
-          `window (${WINDOWS.payment[path]}ms), or a buyer can be asked to pay for an ` +
-          `item that will never arrive.`,
-      );
-    }
-  }
+  // Compatibility export for callers and historical tests. Deal deadlines were
+  // retired; there is no ordering invariant to assert for new transactions.
 }

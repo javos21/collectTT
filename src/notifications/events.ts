@@ -209,7 +209,7 @@ export const EVENTS = {
     type: 'item_handed_over_buyer',
     channels: ['in_app', 'email'],
     title: (d) => `Meetup hand-off recorded for "${str(d, 'listingTitle')}"`,
-    body: () => `Confirm that you received the item, or report a problem before the receipt window closes.`,
+    body: () => `Confirm that you received the item, or report a problem if something went wrong.`,
   },
   item_received_seller: {
     type: 'item_received_seller',
@@ -291,6 +291,12 @@ export const EVENTS = {
     title: (d) => `Your deal for "${str(d, 'listingTitle')}" was cancelled`,
     body: (d) => str(d, 'reason'),
   },
+  transaction_member_cancelled: {
+    type: 'transaction_member_cancelled',
+    channels: ['in_app', 'email'],
+    title: (d) => `The deal for "${str(d, 'listingTitle')}" was released`,
+    body: (d) => str(d, 'reason', 'A participant released the deal.'),
+  },
 } as const satisfies Record<string, EventDefinition>;
 
 export type EventType = keyof typeof EVENTS;
@@ -322,6 +328,7 @@ const MANDATORY_EVENT_TYPES = new Set<EventType>([
   'restriction_warning',
   'support_case_updated',
   'transaction_admin_cancelled',
+  'transaction_member_cancelled',
   'listing_moderation_updated',
   'auction_bid_invalidated_buyer',
 ]);

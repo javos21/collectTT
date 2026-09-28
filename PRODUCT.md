@@ -44,9 +44,9 @@ append-only audit trail. Admin impersonation is not supported.
 - Fixed-price listings may opt into buyer offers below the asking price; pending offers
   do not reserve the listing, and seller acceptance atomically opens a normal deal at
   the offered amount.
-- Deliberate atomic fixed-price reservation and binding bids with two-minute
-  anti-sniping, winner/default fallback, deadlines, reminders, disputes, and
-  idempotent automation.
+- Deliberate atomic fixed-price reservation with participant-controlled release, plus
+  binding bids with two-minute anti-sniping, winner/default fallback, disputes, and
+  idempotent automation. Open deals do not expire merely because time passes.
 - Transaction event timelines, factual behavioral Trust Snapshots, progressive
   restrictions, contextual reporting/support, transactional email, and admin tools.
 - Marketplace, direct-payment, privacy, and authenticity disclaimers in the relevant

@@ -157,18 +157,6 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
             <span>Successful auctions</span>
           </div>
         </div>
-        <div className="member-reliability" aria-label="Recent reliability signals">
-          <div>
-            <span>Unpaid claims</span>
-            <strong>{c?.buyReneged90d ?? 0}</strong>
-            <small>Last 90 days</small>
-          </div>
-          <div>
-            <span>Undelivered sales</span>
-            <strong>{c?.sellReneged90d ?? 0}</strong>
-            <small>Last 90 days</small>
-          </div>
-        </div>
       </section>
 
       <section className="member-section member-section--listings" aria-labelledby="listings-heading">

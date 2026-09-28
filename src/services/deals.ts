@@ -73,7 +73,6 @@ export interface ActiveDealSummary {
   deliveryStatus: string;
   currentState: string;
   nextStep: string;
-  deadlineAt: string | null;
   physicalTask: PhysicalDealTask;
   location: { name: string; area: string | null } | null;
   /** Whether the canonical deal page can show this viewer a valid counter code. */
@@ -107,15 +106,11 @@ type ActiveDealInput = Pick<
   | 'amountCents'
   | 'fulfillmentPath'
   | 'paymentState'
-  | 'paymentDeadlineAt'
-  | 'sellerDropoffDeadlineAt'
   | 'custodyState'
 > & {
   handoffState?: HandoffState;
-  receiptDeadlineAt?: Date | null;
   disputeState?: 'none' | 'open' | 'resolved';
   title: string;
-  custodyExpiresAt: Date | null;
   storeName: string | null;
   storeArea: string | null;
 };
@@ -136,7 +131,6 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
 
   let currentState = 'In progress';
   let nextStep = 'View full deal';
-  let deadline: Date | null = null;
 
   if (paymentState === 'pending') {
     currentState = isCashMeetup ? 'Meetup pending' : 'Offer accepted';
@@ -150,15 +144,12 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
     currentState = 'Payment confirmed';
     if (custodyState === 'awaiting_dropoff') {
       nextStep = isBuyer ? 'Waiting for seller drop-off' : 'Drop off item';
-      deadline = deal.sellerDropoffDeadlineAt;
     } else if (custodyState === 'at_relay') {
       currentState = 'At pickup store';
       nextStep = isBuyer ? 'Collect item' : 'Waiting for buyer pickup';
-      deadline = deal.custodyExpiresAt;
     } else if (custodyState === 'release_authorized') {
       currentState = 'Ready for pickup';
       nextStep = isBuyer ? 'Collect item' : 'Waiting for buyer pickup';
-      deadline = deal.custodyExpiresAt;
     } else if (!hasCustody) {
       if (handoffState === 'awaiting_handoff') {
         currentState = isCashMeetup ? 'Meetup pending' : 'Payment confirmed';
@@ -166,7 +157,6 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
       } else if (handoffState === 'seller_handed_over') {
         currentState = 'Item handed over';
         nextStep = isBuyer ? 'Confirm item received' : 'Waiting for buyer receipt';
-        deadline = deal.receiptDeadlineAt ?? null;
       } else {
         currentState = 'Payment confirmed';
         nextStep = 'Complete the hand-off';
@@ -207,7 +197,6 @@ export function summarizeActiveDeal(deal: ActiveDealInput, userId: string): Acti
           : DELIVERY_STATUS_LABELS[custodyState],
     currentState,
     nextStep,
-    deadlineAt: deadline?.toISOString() ?? null,
     physicalTask,
     location: deal.storeName === null ? null : { name: deal.storeName, area: deal.storeArea },
     canShowCode,
@@ -223,7 +212,6 @@ export async function activeDealsForUser(
     .select({
       transaction: transactions,
       title: listings.title,
-      custodyExpiresAt: custodyHoldings.custodyExpiresAt,
       storeName: relayStores.name,
       storeArea: relayStores.area,
     })
@@ -240,12 +228,11 @@ export async function activeDealsForUser(
     .orderBy(desc(transactions.createdAt))
     .limit(50);
 
-  return rows.map(({ transaction, title, custodyExpiresAt, storeName, storeArea }) =>
+  return rows.map(({ transaction, title, storeName, storeArea }) =>
     summarizeActiveDeal(
       {
         ...transaction,
         title,
-        custodyExpiresAt,
         storeName,
         storeArea,
       },

@@ -12,10 +12,7 @@ const baseDeal = {
   amountCents: 125_00,
   fulfillmentPath: 'relay' as const,
   paymentState: 'pending' as const,
-  paymentDeadlineAt: new Date('2026-09-08T12:00:00.000Z'),
-  sellerDropoffDeadlineAt: new Date('2026-09-07T12:00:00.000Z'),
   custodyState: 'awaiting_dropoff' as const,
-  custodyExpiresAt: null,
   storeName: 'Long Circular Relay',
   storeArea: 'St James',
 };
@@ -28,7 +25,6 @@ describe('shared active-deal summary', () => {
         fulfillmentPath: 'cash_meetup' as const,
         custodyState: 'not_applicable' as const,
         handoffState: 'awaiting_handoff' as const,
-        sellerDropoffDeadlineAt: null,
       },
       'buyer-1',
     );
@@ -38,7 +34,6 @@ describe('shared active-deal summary', () => {
     expect(summary.nextStep).toBe('Complete the meetup');
     expect(summary.paymentStatus).toBe('Pay at meetup');
     expect(summary.deliveryStatus).toBe('Awaiting meetup');
-    expect(summary.deadlineAt).toBeNull();
   });
 
   it('describes a buyer payment task without exposing the internal payment deadline', () => {
@@ -49,7 +44,6 @@ describe('shared active-deal summary', () => {
     expect(summary.currentState).toBe('Offer accepted');
     expect(summary.nextStep).toBe('Pay the seller');
     expect(summary.physicalTask).toBeNull();
-    expect(summary.deadlineAt).toBeNull();
     expect(summary.canShowCode).toBe(false);
   });
 
@@ -63,7 +57,6 @@ describe('shared active-deal summary', () => {
     expect(summary.needsAttention).toBe(true);
     expect(summary.nextStep).toBe('Drop off item');
     expect(summary.physicalTask).toBe('to_drop_off');
-    expect(summary.deadlineAt).toBe(baseDeal.sellerDropoffDeadlineAt?.toISOString());
     expect(summary.canShowCode).toBe(true);
     expect('dropoffCode' in summary).toBe(false);
   });
@@ -74,7 +67,6 @@ describe('shared active-deal summary', () => {
         ...baseDeal,
         paymentState: 'confirmed' as const,
         custodyState: 'release_authorized' as const,
-        custodyExpiresAt: new Date('2026-09-14T12:00:00.000Z'),
       },
       'buyer-1',
     );
@@ -84,7 +76,6 @@ describe('shared active-deal summary', () => {
     expect(summary.currentState).toBe('Ready for pickup');
     expect(summary.nextStep).toBe('Collect item');
     expect(summary.canShowCode).toBe(true);
-    expect(summary.deadlineAt).toBe('2026-09-14T12:00:00.000Z');
   });
 
   it('lets the buyer collect as soon as a paid item is on the shelf', () => {
@@ -93,7 +84,6 @@ describe('shared active-deal summary', () => {
         ...baseDeal,
         paymentState: 'confirmed' as const,
         custodyState: 'at_relay' as const,
-        custodyExpiresAt: new Date('2026-09-12T12:00:00.000Z'),
       },
       'buyer-1',
     );
@@ -109,7 +99,6 @@ describe('shared active-deal summary', () => {
         ...baseDeal,
         paymentState: 'confirmed' as const,
         custodyState: 'at_relay' as const,
-        custodyExpiresAt: new Date('2026-09-12T12:00:00.000Z'),
       },
       'seller-1',
     );
