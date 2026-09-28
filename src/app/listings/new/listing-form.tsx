@@ -256,7 +256,7 @@ export function ListingForm({
         <DeliveryFields deliveryOptions={deliveryOptions} relayStoreOptions={relayStoreOptions} defaultDeliveryOptionIds={defaultDeliveryOptionIds} defaultRelayStoreIds={defaultRelayStoreIds} onSelectionChange={handleDeliverySelectionChange} />
         {hasMeetupDelivery && (
           <div className="meetup-location-picker">
-            <fieldset className="form-field form-field--compact">
+            <fieldset className="meetup-location-fieldset">
               <legend>Public meetup locations</legend>
               <small id="meetup-location-help">Choose up to 3. The buyer will select one when they reserve or bid. {selectedMeetupLocationIds.length}/3 selected.</small>
               <div className="choice-grid" aria-describedby="meetup-location-help">

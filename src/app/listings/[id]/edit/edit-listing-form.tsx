@@ -102,7 +102,7 @@ export function EditListingForm({
           </label>
         )}
         {hasMeetupDelivery && (
-          <fieldset className="form-field form-field--compact">
+          <fieldset className="meetup-location-fieldset">
             <legend>Public meetup locations</legend>
             <small>Choose 1–3. The buyer will select one when they reserve or bid. {selectedMeetupLocationIds.length}/3 selected.</small>
             <div className="choice-grid">

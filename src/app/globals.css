@@ -2837,6 +2837,16 @@ header.site .phase { color: #557783; }
 .choice-card small { margin-top: .18rem; color: #6f8790; font-size: .64rem; line-height: 1.35; }
 .choice-card--compact { align-items: center; }
 .choice-card--compact input { margin-top: 0; }
+.meetup-location-fieldset {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  box-sizing: border-box;
+}
+.meetup-location-fieldset .choice-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
 .create-final-options { align-items: flex-end; margin-top: 1.1rem; padding-top: 1.1rem; border-top: 1px solid var(--brand-line); }
 .auto-relist { display: flex; align-items: flex-start; gap: .6rem; min-height: 74px; padding: .75rem; border: 1px solid #cfe2e8; border-radius: 12px; background: #fbfeff; cursor: pointer; }
 .auto-relist input { flex: none; margin-top: .18rem; }
