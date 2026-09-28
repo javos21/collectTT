@@ -11,6 +11,8 @@ describe('listing workflow', () => {
 
     expect(newListingSource).toContain('<InlineMeetupLocationForm onCreated={handleMeetupLocationCreated} />');
     expect(editListingSource).toContain('<InlineMeetupLocationForm onCreated={handleMeetupLocationCreated} />');
+    expect(newListingSource).toContain('<fieldset className="meetup-location-fieldset">');
+    expect(editListingSource).toContain('<fieldset className="meetup-location-fieldset">');
     expect(inlineFormSource).toContain('createMeetupLocationAction(formData)');
     expect(inlineFormSource).toContain('This will be saved for future listings too.');
   });
