@@ -28,10 +28,42 @@ describe('listing social sharing integration', () => {
     expect(action).toContain('?published=1');
     expect(page).toContain('<ListingShare {...shareProps} success />');
     expect(component).toContain('https://wa.me/?text=');
+    expect(component).toContain('https://www.facebook.com/sharer/sharer.php');
     expect(component).toContain('navigator.share');
     expect(component).toContain('navigator.clipboard');
+    expect(component).toContain('Instagram post');
+    expect(component).toContain('Instagram story');
+    expect(component).toContain('Choose Feed, Group, or Page');
+    expect(component).toContain("post: { width: 1080, height: 1350 }");
+    expect(component).toContain("story: { width: 1080, height: 1920 }");
     expect(analytics).toContain("'listing_share_whatsapp'");
+    expect(analytics).toContain("'listing_share_facebook'");
+    expect(analytics).toContain("'listing_share_instagram_post'");
+    expect(analytics).toContain("'listing_share_instagram_story'");
     expect(analytics).toContain("'listing_share_native'");
     expect(analytics).toContain("'listing_share_copy_link'");
+  });
+
+  it('creates seller storefront post and story collages from active listing previews', async () => {
+    const [component, profile, member, catalog, listings] = await Promise.all([
+      readFile(new URL('../../src/components/share-listings-button.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/app/me/profile-page.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/app/members/[id]/page.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/app/listings/page.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/services/listings.ts', import.meta.url), 'utf8'),
+    ]);
+
+    expect(component).toContain("post: { width: 1080, height: 1350 }");
+    expect(component).toContain("story: { width: 1080, height: 1920 }");
+    expect(component).toContain('4:5 storefront collage');
+    expect(component).toContain('9:16 storefront collage');
+    expect(component).toContain('https://www.facebook.com/sharer/sharer.php');
+    expect(component).toContain('https://wa.me/?text=');
+    expect(component).toContain('navigator.share');
+    expect(component).toContain("previews.slice(0, 4)");
+    expect(profile).toContain('imagePath: listing.primaryImageId === null ? null');
+    expect(member).toContain('previews={theirListings.slice(0, 4)');
+    expect(catalog).toContain('previews={rows.slice(0, 4)');
+    expect(listings).toContain('primaryImageId: sql<string | null>');
   });
 });

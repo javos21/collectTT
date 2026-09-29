@@ -1458,6 +1458,8 @@ tbody tr:hover { background: rgba(8,122,88,.06); }
   border-radius: 12px; color: var(--fg); background: var(--surface); box-shadow: none; text-align: left;
 }
 .listing-share-modal__options button:hover { border-color: #a5b4fc; background: var(--accent-wash); box-shadow: none; transform: none; }
+.listing-share-modal__options button:disabled { cursor: wait; opacity: .56; }
+.listing-share-modal__options button:disabled:hover { border-color: var(--border); background: var(--surface); }
 .listing-share-modal__options button > svg { width: 20px; height: 20px; justify-self: center; color: var(--primary); }
 .listing-share-modal__options button span { display: grid; gap: .12rem; }
 .listing-share-modal__options button strong { font-size: .88rem; }

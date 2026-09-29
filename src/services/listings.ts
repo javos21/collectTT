@@ -1450,6 +1450,14 @@ export async function listingsBySeller(sellerId: string) {
       priceCents: listings.priceCents,
       startBidCents: listings.startBidCents,
       currentBidCents: listings.currentBidCents,
+      primaryImageId: sql<string | null>`(
+        select i.id
+        from listing_images li
+        inner join images i on i.id = li.image_id
+        where li.listing_id = ${listings.id}
+        order by li.position asc
+        limit 1
+      )`,
       liveClaimCount: sql<number>`(
         select count(*)::int
           from claims c

@@ -1,7 +1,7 @@
 import { formatMoney } from '@/domain/money';
 import { getCategory } from '@/domain/categories/definitions';
 
-export type ShareSource = 'whatsapp' | 'native_share' | 'copy_link';
+export type ShareSource = 'whatsapp' | 'facebook' | 'instagram_post' | 'instagram_story' | 'native_share' | 'copy_link';
 
 type ShareListing = {
   title: string;

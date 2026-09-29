@@ -195,6 +195,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
           claimCount: listing.liveClaimCount,
           bidCount: listing.liveBidCount,
           activeTransactionCount: listing.activeTransactionCount,
+          primaryImageId: listing.primaryImageId,
           amount: formatMoney(listing.saleType === 'auction'
             ? (listing.currentBidCents ?? listing.startBidCents ?? 0)
             : (listing.priceCents ?? 0)),
