@@ -4,6 +4,8 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, Link2, MessageCircle, Share2, UsersRound, X } from 'lucide-react';
 
+import { drawSocialShareBackground, drawSocialShareLogo, SOCIAL_SHARE_BRAND } from '@/lib/social-share-brand';
+
 type SocialFormat = 'post' | 'story';
 type ShareStatus = 'idle' | 'copied' | 'error' | 'preparing' | 'downloaded';
 type SellerShareSource = 'facebook' | 'instagram_post' | 'instagram_story' | 'native_share' | 'copy_link' | 'whatsapp';
@@ -104,6 +106,7 @@ async function createSellerShareFile(
   previews: ListingPreview[],
   images: Array<HTMLImageElement | null>,
   format: SocialFormat,
+  logo: HTMLImageElement | null,
 ): Promise<File> {
   const { width, height } = SOCIAL_SIZE[format];
   const canvas = document.createElement('canvas');
@@ -124,36 +127,30 @@ async function createSellerShareFile(
   const tileWidth = (width - margin * 2 - gap * (columns - 1)) / columns;
   const tileHeight = (gridHeight - gap * (rows - 1)) / rows;
 
-  const background = context.createLinearGradient(0, 0, width, height);
-  background.addColorStop(0, '#122c35');
-  background.addColorStop(1, '#087a58');
-  context.fillStyle = background;
-  context.fillRect(0, 0, width, height);
+  drawSocialShareBackground(context, width, height, format);
 
-  context.fillStyle = '#ffffff';
-  context.font = '800 48px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  context.fillText('CollectTT', margin, headerY);
-  context.fillStyle = '#84e1bc';
-  context.font = '700 25px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  drawSocialShareLogo(context, logo, margin, headerY, 190);
+  context.fillStyle = SOCIAL_SHARE_BRAND.slate;
+  context.font = '700 25px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   context.textAlign = 'right';
   context.fillText('collecttt.com', width - margin, headerY - 6);
   context.textAlign = 'left';
 
-  context.fillStyle = '#84e1bc';
-  context.font = '800 27px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  context.fillStyle = SOCIAL_SHARE_BRAND.blue;
+  context.font = '800 27px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   context.fillText('SHOP MY ACTIVE LISTINGS', margin, titleY - 62);
-  context.fillStyle = '#ffffff';
-  context.font = `800 ${format === 'story' ? 66 : 56}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  context.fillStyle = SOCIAL_SHARE_BRAND.navy;
+  context.font = `800 ${format === 'story' ? 66 : 56}px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
   wrappedLines(context, sellerName, width - margin * 2, 2).forEach((line, index) => {
     context.fillText(line, margin, titleY + index * (format === 'story' ? 76 : 64));
   });
 
   if (items.length === 0) {
     roundedRect(context, margin, gridY, width - margin * 2, gridHeight, 34);
-    context.fillStyle = 'rgba(255,255,255,.1)';
+    context.fillStyle = 'rgba(218,220,252,.72)';
     context.fill();
-    context.fillStyle = '#ffffff';
-    context.font = `800 ${format === 'story' ? 58 : 48}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    context.fillStyle = SOCIAL_SHARE_BRAND.navy;
+    context.font = `800 ${format === 'story' ? 58 : 48}px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
     context.textAlign = 'center';
     context.fillText('Fresh collectibles', width / 2, gridY + gridHeight / 2 - 10);
     context.fillText('available now', width / 2, gridY + gridHeight / 2 + 62);
@@ -164,23 +161,31 @@ async function createSellerShareFile(
       const row = Math.floor(index / columns);
       const x = margin + column * (tileWidth + gap);
       const y = gridY + row * (tileHeight + gap);
+      context.save();
+      context.shadowColor = 'rgba(11,29,66,.14)';
+      context.shadowBlur = 22;
+      context.shadowOffsetY = 9;
+      roundedRect(context, x, y, tileWidth, tileHeight, 28);
+      context.fillStyle = SOCIAL_SHARE_BRAND.white;
+      context.fill();
+      context.restore();
       roundedRect(context, x, y, tileWidth, tileHeight, 28);
       context.save();
       context.clip();
       const image = images[index] ?? null;
       if (image === null) {
-        context.fillStyle = index % 2 === 0 ? '#1d4f5c' : '#16634f';
+        context.fillStyle = index % 2 === 0 ? SOCIAL_SHARE_BRAND.lavender : SOCIAL_SHARE_BRAND.blue;
         context.fillRect(x, y, tileWidth, tileHeight);
       } else {
         drawImageCover(context, image, x, y, tileWidth, tileHeight);
       }
       const overlay = context.createLinearGradient(0, y + tileHeight * 0.45, 0, y + tileHeight);
-      overlay.addColorStop(0, 'rgba(8,20,25,0)');
-      overlay.addColorStop(1, 'rgba(8,20,25,.92)');
+      overlay.addColorStop(0, 'rgba(11,29,66,0)');
+      overlay.addColorStop(1, 'rgba(11,29,66,.92)');
       context.fillStyle = overlay;
       context.fillRect(x, y, tileWidth, tileHeight);
-      context.fillStyle = '#ffffff';
-      context.font = `750 ${format === 'story' ? 30 : 27}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      context.fillStyle = SOCIAL_SHARE_BRAND.white;
+      context.font = `750 ${format === 'story' ? 30 : 27}px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       const titleLines = wrappedLines(context, item.title, tileWidth - 44, 2);
       titleLines.forEach((line, lineIndex) => {
         context.fillText(line, x + 22, y + tileHeight - 30 - (titleLines.length - 1 - lineIndex) * 38);
@@ -189,12 +194,15 @@ async function createSellerShareFile(
     });
   }
 
-  context.fillStyle = '#ffffff';
-  context.font = `800 ${format === 'story' ? 36 : 32}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  context.fillStyle = SOCIAL_SHARE_BRAND.navy;
+  context.font = `800 ${format === 'story' ? 36 : 32}px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
   context.fillText('Browse the full collection on CollectTT', margin, height - (format === 'story' ? 185 : 115));
-  context.fillStyle = '#dff4eb';
-  context.font = '600 25px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  context.fillStyle = SOCIAL_SHARE_BRAND.slate;
+  context.font = '600 25px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   context.fillText('Tap the link to search, filter, and shop', margin, height - (format === 'story' ? 132 : 68));
+  context.fillStyle = SOCIAL_SHARE_BRAND.blue;
+  context.font = '700 24px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  context.fillText('Buy. Sell. Connect.', margin, height - (format === 'story' ? 82 : 30));
 
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((value) => value === null ? reject(new Error('Could not create share image')) : resolve(value), 'image/jpeg', 0.92);
@@ -276,14 +284,17 @@ export function ShareListingsButton({
     setStatus('preparing');
     mediaPromise.current = (async () => {
       const selectedPreviews = previews.slice(0, 4);
-      const loadedImages = await Promise.all(selectedPreviews.map((preview) => (
-        preview.imagePath === null
-          ? Promise.resolve(null)
-          : loadImage(new URL(preview.imagePath, window.location.origin).toString())
-      )));
+      const [loadedImages, logo] = await Promise.all([
+        Promise.all(selectedPreviews.map((preview) => (
+          preview.imagePath === null
+            ? Promise.resolve(null)
+            : loadImage(new URL(preview.imagePath, window.location.origin).toString())
+        ))),
+        loadImage('/assets/collecttt_logo.png'),
+      ]);
       const [post, story] = await Promise.all([
-        createSellerShareFile(sellerName, selectedPreviews, loadedImages, 'post'),
-        createSellerShareFile(sellerName, selectedPreviews, loadedImages, 'story'),
+        createSellerShareFile(sellerName, selectedPreviews, loadedImages, 'post', logo),
+        createSellerShareFile(sellerName, selectedPreviews, loadedImages, 'story', logo),
       ]);
       return { post, story };
     })();
