@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { Camera, CheckCircle2, Copy, Link2, MessageCircle, Share2, UsersRound, X } from 'lucide-react';
 
 import { attributedShareUrl, listingShareText, type ShareSource } from '@/lib/listing-sharing';
+import { drawSocialShareBackground, drawSocialShareLogo, SOCIAL_SHARE_BRAND } from '@/lib/social-share-brand';
 
 type ShareMethod = 'clicked' | 'whatsapp' | 'facebook' | 'instagram_post' | 'instagram_story' | 'native' | 'copy_link';
 type InstagramFormat = 'post' | 'story';
@@ -94,6 +95,7 @@ async function createInstagramFile(
   props: Pick<ListingShareProps, 'listingId' | 'title' | 'priceLabel' | 'conditionLabel' | 'saleType'>,
   format: InstagramFormat,
   image: HTMLImageElement | null,
+  logo: HTMLImageElement | null,
 ): Promise<File> {
   const { width, height } = INSTAGRAM_SIZE[format];
   const canvas = document.createElement('canvas');
@@ -102,30 +104,35 @@ async function createInstagramFile(
   const context = canvas.getContext('2d');
   if (context === null) throw new Error('Canvas is unavailable');
 
-  context.fillStyle = '#122c35';
-  context.fillRect(0, 0, width, height);
+  drawSocialShareBackground(context, width, height, format);
   const margin = format === 'story' ? 64 : 54;
   const brandY = format === 'story' ? 118 : 82;
   const imageY = format === 'story' ? 220 : 150;
   const imageHeight = format === 'story' ? 1030 : 700;
   const contentY = imageY + imageHeight + (format === 'story' ? 86 : 62);
 
-  context.fillStyle = '#ffffff';
-  context.font = '800 48px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  context.fillText('CollectTT', margin, brandY);
-  context.fillStyle = '#84e1bc';
-  context.font = '700 25px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  drawSocialShareLogo(context, logo, margin, brandY, 190);
+  context.fillStyle = SOCIAL_SHARE_BRAND.slate;
+  context.font = '700 25px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   context.textAlign = 'right';
   context.fillText('collecttt.com', width - margin, brandY - 6);
   context.textAlign = 'left';
 
+  context.save();
+  context.shadowColor = 'rgba(11,29,66,.14)';
+  context.shadowBlur = 24;
+  context.shadowOffsetY = 10;
+  roundedRect(context, margin, imageY, width - margin * 2, imageHeight, 34);
+  context.fillStyle = SOCIAL_SHARE_BRAND.white;
+  context.fill();
+  context.restore();
   roundedRect(context, margin, imageY, width - margin * 2, imageHeight, 34);
   context.save();
   context.clip();
   if (image === null) {
     const fallback = context.createLinearGradient(margin, imageY, width - margin, imageY + imageHeight);
-    fallback.addColorStop(0, '#087a58');
-    fallback.addColorStop(1, '#1d4f5c');
+    fallback.addColorStop(0, SOCIAL_SHARE_BRAND.lavender);
+    fallback.addColorStop(1, SOCIAL_SHARE_BRAND.blue);
     context.fillStyle = fallback;
     context.fillRect(margin, imageY, width - margin * 2, imageHeight);
   } else {
@@ -133,20 +140,29 @@ async function createInstagramFile(
   }
   context.restore();
 
-  context.fillStyle = '#84e1bc';
-  context.font = '800 27px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  context.fillText(props.saleType === 'auction' ? 'LIVE AUCTION' : 'FOR SALE', margin, contentY);
-  context.fillStyle = '#ffffff';
-  context.font = `800 ${format === 'story' ? 58 : 50}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  const label = props.saleType === 'auction' ? 'LIVE AUCTION' : 'FOR SALE';
+  context.font = '800 24px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const labelWidth = context.measureText(label).width + 38;
+  roundedRect(context, margin, contentY - 31, labelWidth, 43, 22);
+  context.fillStyle = props.saleType === 'auction' ? SOCIAL_SHARE_BRAND.red : SOCIAL_SHARE_BRAND.blue;
+  context.fill();
+  context.fillStyle = SOCIAL_SHARE_BRAND.white;
+  context.fillText(label, margin + 19, contentY);
+  context.fillStyle = SOCIAL_SHARE_BRAND.navy;
+  context.font = `800 ${format === 'story' ? 58 : 50}px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
   drawWrappedTitle(context, props.title, margin, contentY + 68, width - margin * 2, format === 'story' ? 68 : 59);
-  context.fillStyle = '#84e1bc';
-  context.font = `800 ${format === 'story' ? 52 : 45}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  context.fillStyle = SOCIAL_SHARE_BRAND.blue;
+  context.font = `800 ${format === 'story' ? 52 : 45}px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
   context.fillText(props.priceLabel, margin, contentY + (format === 'story' ? 235 : 200));
   if (props.conditionLabel !== null && props.conditionLabel !== undefined) {
-    context.fillStyle = '#dff4eb';
-    context.font = '600 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    context.fillStyle = SOCIAL_SHARE_BRAND.slate;
+    context.font = '600 28px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     context.fillText(props.conditionLabel, margin, contentY + (format === 'story' ? 292 : 248));
   }
+
+  context.fillStyle = SOCIAL_SHARE_BRAND.navy;
+  context.font = '700 25px "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  context.fillText('Buy. Sell. Connect.', margin, height - (format === 'story' ? 82 : 46));
 
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((value) => value === null ? reject(new Error('Could not create share image')) : resolve(value), 'image/jpeg', 0.92);
@@ -274,10 +290,13 @@ export function ListingShare(props: ListingShareProps) {
     setStatus('preparing');
     const imageUrl = new URL(props.imagePath, window.location.origin).toString();
     mediaPromise.current = (async () => {
-      const image = await loadShareImage(imageUrl);
+      const [image, logo] = await Promise.all([
+        loadShareImage(imageUrl),
+        loadShareImage('/assets/collecttt_logo.png'),
+      ]);
       const [post, story] = await Promise.all([
-        createInstagramFile(props, 'post', image),
-        createInstagramFile(props, 'story', image),
+        createInstagramFile(props, 'post', image, logo),
+        createInstagramFile(props, 'story', image, logo),
       ]);
       return { post, story };
     })();
