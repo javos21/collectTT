@@ -8,13 +8,16 @@ import { getPublicListingShareData } from '@/services/listings';
 
 const inputSchema = z.object({
   listingId: z.string().uuid(),
-  method: z.enum(['clicked', 'whatsapp', 'native', 'copy_link']),
+  method: z.enum(['clicked', 'whatsapp', 'facebook', 'instagram_post', 'instagram_story', 'native', 'copy_link']),
   eventId: z.string().min(8).max(100),
 });
 
 const EVENT_BY_METHOD: Record<z.infer<typeof inputSchema>['method'], AnalyticsEventName> = {
   clicked: 'listing_share_clicked',
   whatsapp: 'listing_share_whatsapp',
+  facebook: 'listing_share_facebook',
+  instagram_post: 'listing_share_instagram_post',
+  instagram_story: 'listing_share_instagram_story',
   native: 'listing_share_native',
   copy_link: 'listing_share_copy_link',
 };

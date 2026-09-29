@@ -53,6 +53,15 @@ describe('listing sharing', () => {
     expect(result.searchParams.get('utm_medium')).toBe('social');
   });
 
+  it('attributes Instagram posts and stories independently', () => {
+    expect(new URL(attributedShareUrl('https://collecttt.com/listings/abc', 'instagram_post')).searchParams.get('utm_source')).toBe('instagram_post');
+    expect(new URL(attributedShareUrl('https://collecttt.com/listings/abc', 'instagram_story')).searchParams.get('utm_source')).toBe('instagram_story');
+  });
+
+  it('attributes Facebook shares independently', () => {
+    expect(new URL(attributedShareUrl('https://collecttt.com/listings/abc', 'facebook')).searchParams.get('utm_source')).toBe('facebook');
+  });
+
   it('builds concise share text with the listing URL', () => {
     expect(listingShareText({
       title: listing.title,

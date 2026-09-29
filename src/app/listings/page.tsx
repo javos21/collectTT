@@ -226,7 +226,14 @@ export default async function BrowsePage({
           </div>
           <div className="seller-catalog-banner__actions">
             <Link href={`/members/${selectedSeller.userId}`}>View trust profile</Link>
-            <ShareListingsButton path={`/listings?seller=${encodeURIComponent(selectedSeller.userId)}`} sellerName={selectedSeller.displayName} />
+            <ShareListingsButton
+              path={`/listings?seller=${encodeURIComponent(selectedSeller.userId)}`}
+              sellerName={selectedSeller.displayName}
+              previews={rows.slice(0, 4).map((listing) => ({
+                title: listing.title,
+                imagePath: listing.primaryImageId === null ? null : `/api/images/${listing.primaryImageId}/social`,
+              }))}
+            />
           </div>
         </section>
       )}

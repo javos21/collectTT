@@ -10,18 +10,31 @@
 - The deployment requires `STORAGE_PUBLIC_URL`, but staging verification found that its `r2.dev` domain can return `404` for objects that remain available through the private bucket. Social metadata must therefore not assume this public-domain mapping exposes the listing-image bucket.
 - Root metadata currently has only a site title and description. There is no metadata base, canonical URL, Open Graph configuration, Twitter card configuration, robots route, sitemap, middleware, or image hotlink rule in this repository.
 - First-party analytics already stores allow-listed events in `analytics_events`, with a subject, optional signed-in user ID, metadata, and an idempotency key. No browser analytics endpoint exists yet.
-- A native-share/copy component exists for sharing a seller's listings, but no reusable single-listing share component exists.
+- Seller listing collections and individual listings use reusable share sheets with purpose-sized Instagram artwork, Facebook/WhatsApp destinations, native sharing, and attributed copy-link fallbacks.
 
 ## Proposed UX
+
+### Seller listing collections
+
+- Replace the seller collection button's immediate native-share/copy behavior with the same accessible modal/bottom-sheet pattern as individual listings.
+- Create branded storefront collages from up to four active listings and their first ordered images:
+  - `Instagram post` — 1080×1350 (4:5).
+  - `Instagram story` — 1080×1920 (9:16).
+- Include `Facebook`, `WhatsApp`, `More options…`, and `Copy link` actions for the stable `/listings?seller=[id]` URL.
+- Use the generated collage only as share media. The attributed seller URL remains the source of truth and always resolves to the seller's current active inventory.
+- Apply the enhanced button consistently on the seller's own profile, public member profile, and seller-filtered catalog banner.
 
 ### Listing detail page
 
 - Put a visible `Share` button beside the listing title so it is available to sellers and buyers without entering the purchase panel.
 - Open an accessible modal on desktop and bottom sheet on small screens. It contains:
+  - `Instagram post` — creates a branded 1080×1350 (4:5) image from the listing photo and opens file sharing.
+  - `Instagram story` — creates a branded 1080×1920 (9:16) image from the listing photo and opens file sharing.
+  - `Facebook` — opens Facebook's link-sharing composer, where the member chooses Feed, Group, or Page.
   - `WhatsApp` — opens the standard `wa.me` composer with listing summary and attributed URL.
-  - `Share…` — invokes `navigator.share()` when supported; otherwise copies the link.
+  - `More options…` — invokes `navigator.share()` when supported; otherwise copies the link.
   - `Copy link` — writes an attributed listing URL to the clipboard and provides visible/live-region confirmation.
-- Keep Facebook and Instagram inside the native device share sheet. Web-to-Instagram URL/image sharing is not consistently available, and a dedicated workaround would be brittle. Open Graph metadata supplies rich previews where the receiving platform supports them.
+- Instagram actions share a real image file so mobile operating systems can expose Instagram's Post and Story destinations. Browsers cannot publish directly to an Instagram account; when file sharing is unavailable, download the correctly sized image and tell the member to add it from Instagram.
 
 ### After listing creation
 
@@ -33,8 +46,9 @@
 
 ### Listing share component
 
-- Add a reusable client component, `ListingShare`, receiving listing ID, title, formatted price, condition, canonical path, and optional success-callout mode.
+- Add a reusable client component, `ListingShare`, receiving listing ID, title, formatted price, condition, canonical path, first-image path, and optional success-callout mode.
 - Construct human-readable text from the listing title, condition (when available), price/current bid, and CollectTT URL.
+- Generate branded JPEGs in the browser only after the share dialog opens; use the first listing image or the existing branded fallback.
 - Use native buttons with at least 44px hit targets, visible focus states, Escape-to-close, focus trapping/restoration, and an `aria-live` status for clipboard feedback.
 - Do not add a dependency.
 
@@ -68,10 +82,13 @@
 - Add allow-listed events:
   - `listing_share_clicked`
   - `listing_share_whatsapp`
+  - `listing_share_facebook`
+  - `listing_share_instagram_post`
+  - `listing_share_instagram_story`
   - `listing_share_native`
   - `listing_share_copy_link`
 - Add a small POST endpoint that accepts listing ID, share method, and a client-generated event UUID; it records the signed-in viewer ID when available, the listing as subject, and no personal/message content.
-- Append `ref=share`, `utm_source=<whatsapp|native_share|copy_link>`, and `utm_medium=social` to shared links. Canonical and Open Graph URLs remain clean. These parameters allow later inbound attribution without changing listing routing.
+- Append `ref=share`, `utm_source=<whatsapp|facebook|instagram_post|instagram_story|native_share|copy_link>`, and `utm_medium=social` to shared links. Canonical and Open Graph URLs remain clean. These parameters allow later inbound attribution without changing listing routing.
 
 ## Data changes
 
@@ -106,6 +123,9 @@ No schema or migration is required. Existing image positions and analytics JSON 
 - Draft/private listing: do not expose metadata; return noindex/not-found behavior.
 - Sold, expired, claimed, cancelled, or ended listing: keep the stable URL and preview, include an unavailable/ended description, and allow copying/sharing the historical listing.
 - Mobile with Web Share: open native sheet, including WhatsApp/Facebook/Instagram when the OS exposes them.
+- Instagram with file sharing: pass a purpose-sized JPEG so Instagram can offer Post/Story media destinations instead of only message sharing.
+- Instagram without file sharing: download the purpose-sized JPEG and show instructions to add it from the Instagram app.
+- Facebook: open the web share composer with the listing URL and let Facebook choose the available Feed, Group, or Page destination; CollectTT does not request publishing permissions or preselect a group.
 - Desktop or unsupported Web Share: `Share…` gracefully copies the link; explicit WhatsApp and Copy Link remain available.
 - Clipboard API unavailable/denied: use a short-lived hidden textarea fallback; if that also fails, show an error and keep the URL selectable.
 - Long titles/descriptions: metadata descriptions are normalized and bounded; share text remains concise.

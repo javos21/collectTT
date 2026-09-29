@@ -202,6 +202,9 @@ export default async function ListingPage({
     conditionLabel: shareConditionLabel,
     saleType: listing.saleType,
     path: `/listings/${listing.id}`,
+    imagePath: images[0] === undefined
+      ? '/assets/collecttt-hero-v2.png'
+      : `/api/images/${images[0].id}/social`,
   } as const;
 
   return (

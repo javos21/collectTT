@@ -45,6 +45,7 @@ type ListingData = {
   bidCount: number;
   activeTransactionCount: number;
   amount: string;
+  primaryImageId: string | null;
 };
 type ClaimData = { id: string; title: string; status: string; transactionId: string | null; fulfillmentPath: string; claimedAt: string };
 type BidData = { id: string; title: string; amount: string; status: string; placedAt: string };
@@ -579,7 +580,17 @@ function ListingsPanel({ listings, deleteListingAction, identity }: Pick<Profile
         </div>
         <div className="profile-seller-share__actions">
           <Link href={`/listings?seller=${encodeURIComponent(identity.userId)}`}>View public listings ({activeCount})</Link>
-          <ShareListingsButton path={`/listings?seller=${encodeURIComponent(identity.userId)}`} sellerName={identity.displayName} />
+          <ShareListingsButton
+            path={`/listings?seller=${encodeURIComponent(identity.userId)}`}
+            sellerName={identity.displayName}
+            previews={listings
+              .filter((listing) => listing.status === 'active')
+              .slice(0, 4)
+              .map((listing) => ({
+                title: listing.title,
+                imagePath: listing.primaryImageId === null ? null : `/api/images/${listing.primaryImageId}/social`,
+              }))}
+          />
         </div>
       </section>
       <ListingsTable listings={listings} saleType="auction" deleteListingAction={deleteListingAction} />

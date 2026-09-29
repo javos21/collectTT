@@ -169,7 +169,14 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
             {activeListingCount > 0 && (
               <>
                 <Link href={`/listings?seller=${encodeURIComponent(id)}`}>Search all listings</Link>
-                <ShareListingsButton path={`/listings?seller=${encodeURIComponent(id)}`} sellerName={row.displayName} />
+                <ShareListingsButton
+                  path={`/listings?seller=${encodeURIComponent(id)}`}
+                  sellerName={row.displayName}
+                  previews={theirListings.slice(0, 4).map((listing) => ({
+                    title: listing.title,
+                    imagePath: listing.primaryImageId === null ? null : `/api/images/${listing.primaryImageId}/social`,
+                  }))}
+                />
               </>
             )}
           </div>
