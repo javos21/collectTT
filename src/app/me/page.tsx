@@ -19,6 +19,7 @@ import { updatePrivatePhoneNumber } from '@/services/account-profile';
 import { notificationPreferencesFor, saveNotificationPreferences } from '@/services/notification-preferences';
 import { OPTIONAL_NOTIFICATION_PREFERENCES } from '@/notifications/events';
 import { listRelayStores } from '@/services/relay-stores';
+import { areAuctionsVisible } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -111,6 +112,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
   const user = await currentUser();
   if (user === null) redirect('/sign-in');
   const params = await searchParams;
+  const auctionsVisible = areAuctionsVisible();
 
   const [identityRows, countersRows, sellerListings, claimRows, bidRows, offerRows, dealRows, reputationEventRows, meetupLocations, sellerPreferences, deliveryOptions, paymentOptions, relayStores, notificationPreferences] =
     await Promise.all([
@@ -125,13 +127,13 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         .where(eq(claims.claimantId, user.userId))
         .orderBy(desc(claims.claimedAt))
         .limit(30),
-      db
+      auctionsVisible ? db
         .select({ bid: bids, title: listings.title })
         .from(bids)
         .innerJoin(listings, eq(listings.id, bids.listingId))
         .where(eq(bids.bidderId, user.userId))
         .orderBy(desc(bids.placedAt))
-        .limit(30),
+        .limit(30) : Promise.resolve([]),
       db
         .select({ offer: offers, title: listings.title })
         .from(offers)
@@ -177,6 +179,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
   return (
     <main className="profile-page">
       <ProfilePage
+        auctionsVisible={auctionsVisible}
         signOutAction={signOutAction}
         deleteListingAction={deleteListingAction}
         initialTab={params.tab}
@@ -186,7 +189,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
           sellCompleted: counters.sellCompleted,
           sellRenegedTotal: counters.sellRenegedTotal,
         }}
-        listings={sellerListings.map((listing) => ({
+        listings={sellerListings.filter((listing) => auctionsVisible || listing.saleType !== 'auction').map((listing) => ({
           id: listing.id,
           title: listing.title,
           category: listing.category,

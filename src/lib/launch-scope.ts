@@ -9,6 +9,21 @@
 export const LAUNCH_SCOPES = ['v1', 'legacy'] as const;
 export type LaunchScope = (typeof LAUNCH_SCOPES)[number];
 
+export const AUCTION_MODES = ['enabled', 'draining', 'hidden'] as const;
+export type AuctionMode = (typeof AUCTION_MODES)[number];
+
+export class AuctionUnavailableError extends Error {
+  readonly mode: Exclude<AuctionMode, 'enabled'>;
+
+  constructor(mode: Exclude<AuctionMode, 'enabled'>, message?: string) {
+    super(message ?? (mode === 'draining'
+      ? 'New auctions are temporarily unavailable while existing auctions finish.'
+      : 'Auctions are not currently available.'));
+    this.name = 'AuctionUnavailableError';
+    this.mode = mode;
+  }
+}
+
 export const LEGACY_FEATURES = [
   'offers',
   'store_custody',
@@ -50,6 +65,41 @@ export function launchScope(): LaunchScope {
 
 export function isV1Launch(): boolean {
   return launchScope() === 'v1';
+}
+
+/**
+ * Auction availability is deliberately independent from the broader launch scope.
+ * Missing or invalid values fail closed so a deployment cannot expose auctions by
+ * accidentally omitting the setting.
+ */
+export function auctionMode(): AuctionMode {
+  const value = process.env.COLLECTTT_AUCTION_MODE;
+  return value === 'enabled' || value === 'draining' ? value : 'hidden';
+}
+
+/** Existing auctions remain discoverable and operational while the feature drains. */
+export function areAuctionsVisible(): boolean {
+  return auctionMode() !== 'hidden';
+}
+
+/** Only fully enabled mode may create, duplicate, relist, or publish an auction. */
+export function isAuctionCreationEnabled(): boolean {
+  return auctionMode() === 'enabled';
+}
+
+/** Draining mode permits bids on already-active auctions so their terms are honoured. */
+export function isAuctionBiddingEnabled(): boolean {
+  return auctionMode() !== 'hidden';
+}
+
+export function assertAuctionCreationEnabled(): void {
+  const mode = auctionMode();
+  if (mode !== 'enabled') throw new AuctionUnavailableError(mode);
+}
+
+export function assertAuctionBiddingEnabled(): void {
+  const mode = auctionMode();
+  if (mode === 'hidden') throw new AuctionUnavailableError(mode);
 }
 
 export function isLegacyFeatureAllowed(feature: LegacyFeature): boolean {

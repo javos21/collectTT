@@ -13,7 +13,7 @@ import { parseMoneyInput } from '@/domain/money';
 import { acceptOffer, rejectOffer, submitOffer } from '@/services/offers';
 import { MarketplaceEligibilityError } from '@/services/marketplace-eligibility';
 import { ConflictError } from '@/services/transactions';
-import { isV1Launch } from '@/lib/launch-scope';
+import { assertAuctionBiddingEnabled, isV1Launch } from '@/lib/launch-scope';
 import { acceptAuctionFallbackOffer } from '@/services/transactions';
 import { db } from '@/db/client';
 import { listings } from '@/db/schema/listings';
@@ -199,6 +199,7 @@ export async function acceptFallbackOfferAction(formData: FormData): Promise<voi
   if (offerId === '') redirect('/listings');
   let result: { transactionId: string };
   try {
+    assertAuctionBiddingEnabled();
     await enforceUserAndIpRateLimit('deal:mutation', user.userId, RATE_LIMITS.transaction);
     result = await db.transaction(async (tx) => acceptAuctionFallbackOffer(tx, offerId, user.userId));
   } catch (error) {

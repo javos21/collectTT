@@ -52,6 +52,7 @@ export function ListingForm({
   duplicateMode = false,
   error,
   v1 = false,
+  auctionsEnabled = true,
 }: {
   action: ServerAction;
   relayStoreOptions: RelayStore[];
@@ -78,6 +79,7 @@ export function ListingForm({
   duplicateMode?: boolean;
   error?: string;
   v1?: boolean;
+  auctionsEnabled?: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [step, setStep] = useState(1);
@@ -243,6 +245,7 @@ export function ListingForm({
           initialDurationHours={initialDurationHours}
           initialAcceptsOffers={initialAcceptsOffers}
           v1={v1}
+          auctionsEnabled={auctionsEnabled}
         />
         <label className="auto-relist" htmlFor="autoRelist">
           <input id="autoRelist" type="checkbox" name="autoRelistOnRenege" defaultChecked={initialAutoRelistOnRenege} />
@@ -258,7 +261,7 @@ export function ListingForm({
           <div className="meetup-location-picker">
             <fieldset className="meetup-location-fieldset">
               <legend>Public meetup locations</legend>
-              <small id="meetup-location-help">Choose up to 3. The buyer will select one when they reserve or bid. {selectedMeetupLocationIds.length}/3 selected.</small>
+              <small id="meetup-location-help">Choose up to 3. The buyer will select one when they {auctionsEnabled ? 'reserve or bid' : 'reserve the item'}. {selectedMeetupLocationIds.length}/3 selected.</small>
               <div className="choice-grid" aria-describedby="meetup-location-help">
                 {availableMeetupLocations.map((location) => (
                   <label className="choice-card choice-card--compact" key={location.id}>

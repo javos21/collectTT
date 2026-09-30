@@ -11,6 +11,7 @@ import { HomeListingTile, type HomeListingRow } from '@/app/home-listing-carouse
 import { currentUser } from '@/lib/session';
 import { reportAccountAction } from './actions';
 import { ShareListingsButton } from '@/components/share-listings-button';
+import { areAuctionsVisible } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,7 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
   const { id } = await params;
   const viewer = await currentUser();
   const flash = await searchParams;
+  const auctionsVisible = areAuctionsVisible();
 
   const rows = await db
     .select({
@@ -58,13 +60,13 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
         acceptsOffers: listings.acceptsOffers,
       })
       .from(listings)
-      .where(and(eq(listings.sellerId, id), eq(listings.status, 'active')))
+      .where(and(eq(listings.sellerId, id), eq(listings.status, 'active'), auctionsVisible ? undefined : eq(listings.saleType, 'straight_sale')))
       .orderBy(desc(listings.publishedAt))
       .limit(12),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(listings)
-      .where(and(eq(listings.sellerId, id), eq(listings.status, 'active'))),
+      .where(and(eq(listings.sellerId, id), eq(listings.status, 'active'), auctionsVisible ? undefined : eq(listings.saleType, 'straight_sale'))),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(transactions)
@@ -152,10 +154,10 @@ export default async function MemberPage({ params, searchParams }: { params: Pro
             <strong>{c?.sellCompleted ?? 0}</strong>
             <span>Sales</span>
           </div>
-          <div className="member-metric member-metric--purple">
+          {auctionsVisible && <div className="member-metric member-metric--purple">
             <strong>{successfulAuctions}</strong>
             <span>Successful auctions</span>
-          </div>
+          </div>}
         </div>
       </section>
 

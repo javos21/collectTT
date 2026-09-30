@@ -39,6 +39,7 @@ import {
 } from './actions';
 import { serializeTrustSnapshot } from '../buyer-snapshot-data';
 import { BuyerSnapshotLink } from '../buyer-snapshot-link';
+import { areAuctionsVisible } from '@/lib/launch-scope';
 import { EvidenceUpload } from './evidence-upload';
 import { CopyPhoneButton } from './copy-phone-button';
 import { evidenceForViewer } from '@/services/transaction-evidence';
@@ -573,6 +574,7 @@ export default async function DealPage({
                     triggerClassName="deal-detail__profile-link"
                     triggerLabel={counterpartyName}
                     showTriggerIcon={false}
+                    auctionsVisible={areAuctionsVisible()}
                   />
                 )}
               </strong>

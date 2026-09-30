@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { ArrowRight, Gavel, Plus, Search, Tag } from 'lucide-react';
 
 import { browseListings, recentlyClaimedListings } from '@/services/listings';
-import { HomeListingCarousel, type HomeListingRow } from './home-listing-carousel';
-import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
+import { HomeListingCarousel, HomeListingGrid, type HomeListingRow } from './home-listing-carousel';
+import { areAuctionsVisible, isLegacyFeatureAllowed } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,10 +44,13 @@ function toRecentlyClaimedRow(row: RecentlyClaimedRow): HomeListingRow {
 }
 
 export default async function HomePage() {
+  const auctionsVisible = areAuctionsVisible();
   const [recentSale, recentlyClaimed, auctions] = await Promise.all([
-    browseListings({ saleType: 'straight_sale', surface: 'recent', pageSize: 16, sort: 'newest' }),
+    browseListings({ saleType: 'straight_sale', surface: 'recent', pageSize: 24, sort: 'newest' }),
     recentlyClaimedListings(16),
-    browseListings({ saleType: 'auction', pageSize: 16, sort: 'ending_soon' }),
+    auctionsVisible
+      ? browseListings({ saleType: 'auction', pageSize: 16, sort: 'ending_soon' })
+      : Promise.resolve(null),
   ]);
 
   const total = recentSale.total;
@@ -69,11 +72,11 @@ export default async function HomePage() {
               <button type="submit">Search</button>
             </form>
             <div className="home-browse-actions" aria-label="Browse listing types">
-              <Link className="home-browse-action home-browse-action--auction" href="/listings?saleType=auction">
+              {auctionsVisible && <Link className="home-browse-action home-browse-action--auction" href="/listings?saleType=auction">
                 <span className="home-browse-action__icon"><Gavel aria-hidden="true" /></span>
                 <span>Browse All Auctions Listings</span>
                 <ArrowRight aria-hidden="true" />
-              </Link>
+              </Link>}
               <Link className="home-browse-action home-browse-action--sale" href="/listings?saleType=straight_sale">
                 <span className="home-browse-action__icon"><Tag aria-hidden="true" /></span>
                 <span>Browse All Sale Listings</span>
@@ -84,7 +87,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="home-section" aria-labelledby="auction-title">
+      {auctions !== null && <section className="home-section" aria-labelledby="auction-title">
         <div className="home-section__heading">
           <div><h2 id="auction-title">Live Auctions</h2></div>
           <Link href="/listings?saleType=auction">See All <ArrowRight aria-hidden="true" /></Link>
@@ -94,6 +97,19 @@ export default async function HomePage() {
         ) : (
           <div className="home-empty"><strong>No live auctions yet.</strong><span>Check back soon or list something for the community.</span></div>
         )}
+      </section>}
+
+      <section className="home-section home-section--recent" aria-labelledby="recent-title">
+        <div className="home-section__heading">
+          <div><h2 id="recent-title">Recent Sale Listings</h2></div>
+          <Link href="/listings?saleType=straight_sale">See All <ArrowRight aria-hidden="true" /></Link>
+        </div>
+        {recentSale.rows.length > 0 ? (
+          <HomeListingGrid label="recent sale listings" rows={recentSale.rows.map(toHomeListingRow)} />
+        ) : (
+          <div className="home-empty"><strong>No sale listings yet.</strong><span>Be the first to put something up for the community.</span><Link className="button" href="/listings/new">Create a listing</Link></div>
+        )}
+        <p className="home-catalog-note"><span className="home-catalog-note__dot" aria-hidden="true" /> {total} active listing{total === 1 ? '' : 's'} across the catalog · secure local handoff options available</p>
       </section>
 
       <section className="home-sell-prompt" aria-labelledby="sell-prompt-title">
@@ -104,19 +120,6 @@ export default async function HomePage() {
         <Link className="home-sell-prompt__cta" href="/listings/new">
           <Plus aria-hidden="true" />Create Listing
         </Link>
-      </section>
-
-      <section className="home-section home-section--recent" aria-labelledby="recent-title">
-        <div className="home-section__heading">
-          <div><h2 id="recent-title">Recent Sale Listings</h2></div>
-          <Link href="/listings?saleType=straight_sale">See All <ArrowRight aria-hidden="true" /></Link>
-        </div>
-        {recentSale.rows.length > 0 ? (
-          <HomeListingCarousel label="recent sale listings" rows={recentSale.rows.map(toHomeListingRow)} />
-        ) : (
-          <div className="home-empty"><strong>No sale listings yet.</strong><span>Be the first to put something up for the community.</span><Link className="button" href="/listings/new">Create a listing</Link></div>
-        )}
-        <p className="home-catalog-note"><span className="home-catalog-note__dot" aria-hidden="true" /> {total} active listing{total === 1 ? '' : 's'} across the catalog · secure local handoff options available</p>
       </section>
 
       <section className="home-section home-section--recent" aria-labelledby="recently-claimed-title">

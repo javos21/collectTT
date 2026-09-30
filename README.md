@@ -79,6 +79,11 @@ npm run admin:grant -- you@example.com
 Keep `COLLECTTT_LAUNCH_SCOPE=v1` in local and deployed environments. Set it to
 `legacy` only for a controlled rollback or historical-flow test.
 
+Auction availability is controlled independently with `COLLECTTT_AUCTION_MODE`:
+`enabled` exposes the complete auction flow, `draining` blocks new auctions while
+existing ones finish, and `hidden` removes the user-facing feature and blocks auction
+writes. Missing or unrecognized values fail closed as `hidden`.
+
 ## Verify changes
 
 ```bash

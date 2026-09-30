@@ -784,6 +784,13 @@ header.site .brand-logo {
 .home-carousel__dots { display: flex; align-items: center; gap: .25rem; }
 .home-carousel__dots span { display: block; width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
 .home-carousel__dots span.is-active { width: 18px; border-radius: 999px; background: #4338ca; }
+.home-listing-paged { display: grid; gap: 1rem; }
+.home-pagination { display: flex; align-items: center; justify-content: center; gap: .8rem; }
+.home-pagination__button { display: inline-flex; align-items: center; justify-content: center; gap: .38rem; min-width: 44px; min-height: 44px; margin: 0; padding: .5rem .75rem; border: 1px solid #a5b4fc; border-radius: 10px; color: #3730a3; background: #eef2ff; font: inherit; font-size: .75rem; font-weight: 750; cursor: pointer; }
+.home-pagination__button:hover:not(:disabled), .home-pagination__button:focus-visible:not(:disabled) { border-color: #4338ca; color: #fff; background: #4338ca; }
+.home-pagination__button:disabled { cursor: not-allowed; opacity: .42; }
+.home-pagination__button svg { width: 16px; height: 16px; }
+.home-pagination__status { min-width: 90px; color: #667985; font-size: .75rem; font-weight: 750; text-align: center; }
 .home-listing-tile { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--home-line); border-radius: 15px; color: var(--home-ink); background: #fff; text-decoration: none; box-shadow: 0 5px 15px rgba(26,94,125,.05); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
 .home-listing-tile:hover { border-color: #a9dce5; box-shadow: 0 12px 24px rgba(26,94,125,.12); transform: translateY(-3px); }
 .home-listing-tile__image { display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; background: linear-gradient(145deg, #e8f6f8, #f4efe5); color: #6e8b94; font-size: .65rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }

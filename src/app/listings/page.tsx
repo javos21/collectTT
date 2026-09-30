@@ -16,6 +16,7 @@ import { activeCategoryDefinitions } from '@/services/catalog';
 import { serializeTrustSnapshot } from '../deals/buyer-snapshot-data';
 import { BuyerSnapshotLink } from '../deals/buyer-snapshot-link';
 import { ShareListingsButton } from '@/components/share-listings-button';
+import { areAuctionsVisible } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,6 +76,7 @@ export default async function BrowsePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const auctionsVisible = areAuctionsVisible();
   const sellerId = typeof params.seller === 'string' && params.seller.trim() !== '' ? params.seller : undefined;
   const [availableDeliveryOptions, availablePaymentOptions, availableCategories, sellerRows] = await Promise.all([
     listMarketplaceOptions('delivery', { activeOnly: true }),
@@ -97,7 +99,7 @@ export default async function BrowsePage({
   const activeCategory = selectedCategories.length === 1 ? selectedCategories[0] : undefined;
   const activeCategoryDefinition = availableCategories.find((category) => category.key === activeCategory);
   const requestedSaleType =
-    params.saleType === 'straight_sale' || params.saleType === 'auction'
+    params.saleType === 'straight_sale' || (auctionsVisible && params.saleType === 'auction')
       ? params.saleType
       : undefined;
   // The general marketplace always includes both sale types unless a tab is chosen.
@@ -320,7 +322,7 @@ export default async function BrowsePage({
           <nav className="browse-type-tabs" aria-label="Browse by sale type">
             <Link className={saleType === undefined ? 'is-active' : ''} href={browseHref({ saleType: null, page: 1 })}>All listings</Link>
             <Link className={saleType === 'straight_sale' ? 'is-active' : ''} href={browseHref({ saleType: 'straight_sale', page: 1 })}>Straight Sales</Link>
-            <Link className={saleType === 'auction' ? 'is-active' : ''} href={browseHref({ saleType: 'auction', page: 1 })}>Auctions</Link>
+            {auctionsVisible && <Link className={saleType === 'auction' ? 'is-active' : ''} href={browseHref({ saleType: 'auction', page: 1 })}>Auctions</Link>}
           </nav>
           <div className="results-toolbar">
             <div className="results-head">
@@ -348,7 +350,7 @@ export default async function BrowsePage({
                 <option value="newest">Newest listed</option>
                 <option value="price_low">Price: low to high</option>
                 <option value="price_high">Price: high to low</option>
-                <option value="ending_soon">Ending soon</option>
+                {auctionsVisible && <option value="ending_soon">Ending soon</option>}
               </select>
               <button type="submit" className="button secondary">Apply</button>
             </form>
@@ -391,6 +393,7 @@ export default async function BrowsePage({
                               triggerClassName="catalog-card__seller-link"
                               triggerLabel={row.sellerName}
                               showTriggerIcon={false}
+                              auctionsVisible={auctionsVisible}
                             />
                           )}
                         </div>
