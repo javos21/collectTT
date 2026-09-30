@@ -35,7 +35,13 @@ import { AUCTION_DURATION_HOURS, WINDOWS } from '../domain/policy/windows';
 import { enqueue } from '../jobs/enqueue';
 import { getFullServiceDeliveryDays, getListingExpiryDays, UnavailableMarketplaceOptionError } from './platform-settings';
 import { assertMarketplaceEligible } from './marketplace-eligibility';
-import { assertV1ListingTerms, V1_PAYMENT_WINDOW_HOURS } from '@/lib/launch-scope';
+import {
+  areAuctionsVisible,
+  AuctionUnavailableError,
+  assertAuctionCreationEnabled,
+  assertV1ListingTerms,
+  V1_PAYMENT_WINDOW_HOURS,
+} from '@/lib/launch-scope';
 
 import { recordAnalyticsEvent } from './analytics';
 
@@ -175,6 +181,7 @@ export async function createListing(
           : [])]
       : [],
   };
+  if (input.saleType === 'auction') assertAuctionCreationEnabled();
   const settlementMethods = requestedPaymentKeys.length > 0 ? requestedPaymentKeys : input.settlementMethods;
   const relayStoreIds = input.relayStoreIds.length > 0 ? input.relayStoreIds : sellerDefaults.defaultRelayStoreIds;
   if (fulfillmentPaths.length === 0) throw new UnavailableMarketplaceOptionError('delivery');
@@ -407,6 +414,7 @@ export async function publishListing(sellerId: string, listingId: string): Promi
 
     const row = current[0];
     if (row === undefined) throw new Error('Listing not found');
+    if (row.saleType === 'auction') assertAuctionCreationEnabled();
     await assertPublishableListing(tx, listingId);
     assertV1ListingTerms(row);
     // Compile-time-checked machine, asserted again at runtime for a DB-read value.
@@ -542,6 +550,9 @@ export async function updateListingBasics(
       meetup_location_id: string | null;
     } | undefined;
     if (current === undefined) throw new Error('Listing not found');
+    if (current.sale_type === 'auction' && !areAuctionsVisible()) {
+      throw new AuctionUnavailableError('hidden');
+    }
     if (current.status !== 'active' && current.status !== 'draft') {
       throw new Error('Only active or draft listings can be edited.');
     }
@@ -836,6 +847,7 @@ export async function duplicateListingToDraft(sellerId: string, sourceListingId:
     const sourceRows = await tx.select().from(listings).where(and(eq(listings.id, sourceListingId), eq(listings.sellerId, sellerId))).limit(1);
     const source = sourceRows[0];
     if (source === undefined) throw new Error('Listing not found');
+    if (source.saleType === 'auction') assertAuctionCreationEnabled();
     if (source.status === 'sold_outside' || source.status === 'expired' || source.status === 'ended_no_sale' || source.status === 'cancelled' || source.status === 'ended_won' || source.status === 'active') {
       // Active duplication is useful for a seller who wants a second similar item;
       // all other statuses are relist history. Reserved/claimed rows are intentionally
@@ -1015,8 +1027,9 @@ function browsePriceExpression() {
 
 function browseConditions(filters: BrowseFilters) {
   const surface = filters.surface ?? 'catalog';
+  const auctionsVisible = areAuctionsVisible();
   const conditions = [
-    surface === 'recent'
+    surface === 'recent' || !auctionsVisible
       ? sql`${listings.status} = 'active' and ${listings.saleType} = 'straight_sale'`
       : sql`(
           (${listings.status} = 'active' and ${listings.saleType} = 'auction')
@@ -1422,6 +1435,7 @@ export async function getPublicListingShareData(id: string) {
 
   const listing = rows[0];
   if (listing === undefined) return null;
+  if (listing.saleType === 'auction' && !areAuctionsVisible()) return null;
 
   const firstImages = await db
     .select({

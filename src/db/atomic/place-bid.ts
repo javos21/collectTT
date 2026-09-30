@@ -31,7 +31,7 @@ import { fallbackFulfillmentPath, type FulfillmentPath } from '../../domain/stat
 import type { SettlementMethod } from '../../domain/policy/settlement';
 import { getListingDeliveryOption } from '../../services/platform-settings';
 import { assertMarketplaceEligible } from '../../services/marketplace-eligibility';
-import { assertV1ListingTerms } from '../../lib/launch-scope';
+import { assertAuctionBiddingEnabled, assertV1ListingTerms } from '../../lib/launch-scope';
 import { recordAnalyticsEvent } from '../../services/analytics';
 import { assertListingMeetupLocation } from '../../services/meetup-selection';
 import { requiresMeetupLocationForPath } from '../../domain/policy/meetup-location';
@@ -65,6 +65,7 @@ export async function placeBid(opts: {
   /** Explicit acknowledgement that a bid is a binding purchase commitment. */
   commitmentAcknowledged?: boolean;
 }): Promise<BidResult> {
+  assertAuctionBiddingEnabled();
   return db.transaction(async (tx) => {
     const listing = await loadListing(tx, opts.listingId);
     assertV1ListingTerms(listing);

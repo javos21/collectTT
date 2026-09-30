@@ -13,7 +13,7 @@ import { serializeTrustSnapshot } from './buyer-snapshot-data';
 import { BuyerSnapshotLink } from './buyer-snapshot-link';
 import { ActiveDealsList, type ActiveDealFilter, type PhysicalDealFilter } from './active-deals-list';
 import { listMarketplaceOptions } from '@/services/platform-settings';
-import { isLegacyFeatureAllowed } from '@/lib/launch-scope';
+import { areAuctionsVisible, isLegacyFeatureAllowed } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -219,7 +219,7 @@ export default async function DealsPage({
                           {snapshot === undefined ? (
                             <span className="deals-inbox-table__buyer-fallback"><UserRound aria-hidden="true" />{offer.buyerName}</span>
                           ) : (
-                            <BuyerSnapshotLink snapshot={serializeTrustSnapshot(snapshot)} />
+                            <BuyerSnapshotLink snapshot={serializeTrustSnapshot(snapshot)} auctionsVisible={areAuctionsVisible()} />
                           )}
                         </dd>
                       </div>

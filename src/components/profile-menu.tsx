@@ -4,12 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, LogOut } from 'lucide-react';
 
-import { profileTabs } from '@/lib/profile-tabs';
+import { profileTabsFor } from '@/lib/profile-tabs';
 
 type ProfileMenuProps = {
   displayName: string;
   image: string | null;
   signOutAction: () => Promise<void>;
+  auctionsVisible: boolean;
 };
 
 function initials(name: string): string {
@@ -23,7 +24,7 @@ function initials(name: string): string {
   return letters || 'C';
 }
 
-export function ProfileMenu({ displayName, image, signOutAction }: ProfileMenuProps) {
+export function ProfileMenu({ displayName, image, signOutAction, auctionsVisible }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -72,7 +73,7 @@ export function ProfileMenu({ displayName, image, signOutAction }: ProfileMenuPr
       {open && (
         <div id="profile-menu-dropdown" className="profile-menu__dropdown" role="menu" aria-label="Profile sections">
           <div className="profile-menu__heading">Profile</div>
-          {profileTabs.map((tab) => (
+          {profileTabsFor(auctionsVisible).map((tab) => (
             <Link
               key={tab.id}
               role="menuitem"

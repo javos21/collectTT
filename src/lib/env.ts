@@ -12,6 +12,8 @@ const envSchema = z.object({
   APP_URL: z.string().url().default('http://localhost:3000'),
   // v1 is the safe default. Set to `legacy` only for controlled rollback/testing.
   COLLECTTT_LAUNCH_SCOPE: z.enum(['v1', 'legacy']).default('v1'),
+  // Auctions fail closed. Use `draining` to honour existing auctions without creating more.
+  COLLECTTT_AUCTION_MODE: z.enum(['enabled', 'draining', 'hidden']).catch('hidden').default('hidden'),
 
   DATABASE_URL: z.string().min(1),
 

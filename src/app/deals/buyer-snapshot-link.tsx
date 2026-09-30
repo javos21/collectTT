@@ -44,6 +44,7 @@ export function BuyerSnapshotLink({
   triggerLabel,
   triggerContent,
   showTriggerIcon = true,
+  auctionsVisible,
 }: {
   snapshot: BuyerSnapshotData;
   subjectLabel?: 'Buyer' | 'Seller';
@@ -51,6 +52,7 @@ export function BuyerSnapshotLink({
   triggerLabel?: string;
   triggerContent?: ReactNode;
   showTriggerIcon?: boolean;
+  auctionsVisible: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
@@ -162,10 +164,10 @@ export function BuyerSnapshotLink({
                 <strong>{snapshot.counters.sellCompleted}</strong>
                 <span>Sales</span>
               </div>
-              <div className="buyer-snapshot-modal__metric">
+              {auctionsVisible && <div className="buyer-snapshot-modal__metric">
                 <strong>{snapshot.counters.successfulAuctions}</strong>
                 <span>Successful auctions</span>
-              </div>
+              </div>}
             </div>
 
             <section className="buyer-snapshot-modal__activity" aria-labelledby={`${titleId}-activity`}>

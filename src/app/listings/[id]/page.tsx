@@ -24,7 +24,7 @@ import { ClaimConfirmedModal } from './claim-confirmed-modal';
 import { SettlementFields } from './settlement-fields';
 import { ReportListingModal } from './report-listing-modal';
 import { BuyerSnapshotLink } from '../../deals/buyer-snapshot-link';
-import { isLegacyFeatureAllowed, isV1Launch } from '@/lib/launch-scope';
+import { areAuctionsVisible, isLegacyFeatureAllowed, isV1Launch } from '@/lib/launch-scope';
 import { auctionFallbackOffers } from '@/db/schema/auction-fallback-offers';
 import { SUPPORT_CASE_CATEGORIES } from '@/services/support-cases';
 import { ListingShare } from '@/components/listing-share';
@@ -87,6 +87,7 @@ export default async function ListingPage({
   if (result === null) notFound();
 
   const { listing, sellerName, sellerSince, images, deliveryOptions, paymentOptions, meetupLocations } = result;
+  if (listing.saleType === 'auction' && !areAuctionsVisible()) notFound();
   const [category, sellerSnapshots] = await Promise.all([
     categoryDefinitionWithCatalogValues(listing.category),
     trustSnapshotsForMembers(db, [listing.sellerId]),
@@ -324,6 +325,7 @@ export default async function ListingPage({
                 <BuyerSnapshotLink
                   snapshot={serializeTrustSnapshot(sellerSnapshot)}
                   subjectLabel="Seller"
+                  auctionsVisible={areAuctionsVisible()}
                   triggerClassName="listing-seller-summary__trigger"
                   showTriggerIcon={false}
                   triggerContent={

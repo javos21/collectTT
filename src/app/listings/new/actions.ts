@@ -10,7 +10,7 @@ import { UnavailableMarketplaceOptionError } from '@/services/platform-settings'
 import { categoryDefinitionWithCatalogValues } from '@/services/catalog';
 import { parseMoneyInput } from '@/domain/money';
 import { MarketplaceEligibilityError } from '@/services/marketplace-eligibility';
-import { V1ScopeError } from '@/lib/launch-scope';
+import { AuctionUnavailableError, V1ScopeError } from '@/lib/launch-scope';
 
 function collectAttributes(definition: Awaited<ReturnType<typeof categoryDefinitionWithCatalogValues>>, formData: FormData): Record<string, unknown> {
   const attributes: Record<string, unknown> = {};
@@ -85,6 +85,9 @@ export async function createListingAction(formData: FormData): Promise<void> {
       redirect(`/me?tab=account&error=${encodeURIComponent(error.message)}`);
     }
     if (error instanceof V1ScopeError) {
+      redirect(`/listings/new?error=${encodeURIComponent(error.message)}`);
+    }
+    if (error instanceof AuctionUnavailableError) {
       redirect(`/listings/new?error=${encodeURIComponent(error.message)}`);
     }
     throw error;

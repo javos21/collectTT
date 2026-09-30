@@ -38,6 +38,7 @@ interface AuthPanelProps {
   callbackURL: string;
   consoleMode: boolean;
   initialMode?: Mode;
+  auctionsVisible: boolean;
 }
 
 function errorMessage(error: unknown): string {
@@ -67,7 +68,7 @@ function errorMessage(error: unknown): string {
   }
 }
 
-export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }: AuthPanelProps) {
+export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in', auctionsVisible }: AuthPanelProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -426,7 +427,7 @@ export function AuthPanel({ callbackURL, consoleMode, initialMode = 'sign-in' }:
                 aria-describedby="auth-display-name-help"
                 required
               />
-              <small id="auth-display-name-help" className="field-help">Public. Shown on listings, bids, and your Trust Snapshot.</small>
+              <small id="auth-display-name-help" className="field-help">{auctionsVisible ? 'Public. Shown on listings, bids, and your Trust Snapshot.' : 'Public. Shown on listings and your Trust Snapshot.'}</small>
             </div>
             <div>
               <label htmlFor="auth-phone">Mobile number</label>

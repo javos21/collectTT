@@ -96,6 +96,66 @@ interface HomeListingCarouselProps {
   rows: HomeListingRow[];
 }
 
+interface HomeListingGridProps {
+  label: string;
+  rows: HomeListingRow[];
+}
+
+/**
+ * The primary homepage inventory surface uses a three-row page rather than a
+ * carousel. The controls still keep the page compact while the grid lets buyers
+ * compare more listings at once.
+ */
+export function HomeListingGrid({ label, rows }: HomeListingGridProps) {
+  const [page, setPage] = useState(0);
+  const pageSize = 12;
+  const pages = useMemo(() => {
+    const pageRows: HomeListingRow[][] = [];
+    for (let index = 0; index < rows.length; index += pageSize) {
+      pageRows.push(rows.slice(index, index + pageSize));
+    }
+    return pageRows;
+  }, [rows]);
+
+  useEffect(() => setPage(0), [rows]);
+
+  const pageCount = Math.max(1, pages.length);
+  const currentRows = pages[page] ?? pages[0] ?? [];
+
+  return (
+    <div className="home-listing-paged" aria-label={label}>
+      <div className="home-listing-grid home-listing-grid--paged" aria-live="polite">
+        {currentRows.map((row) => <HomeListingTile key={row.id} row={row} />)}
+      </div>
+      {pageCount > 1 && (
+        <nav className="home-pagination" aria-label={`${label} pagination`}>
+          <button
+            className="home-pagination__button"
+            type="button"
+            aria-label={`Previous ${label}`}
+            disabled={page === 0}
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
+          >
+            <ArrowLeft aria-hidden="true" />
+            <span>Previous</span>
+          </button>
+          <span className="home-pagination__status" aria-live="polite">Page {page + 1} of {pageCount}</span>
+          <button
+            className="home-pagination__button"
+            type="button"
+            aria-label={`Next ${label}`}
+            disabled={page >= pageCount - 1}
+            onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+          >
+            <span>Next</span>
+            <ArrowRight aria-hidden="true" />
+          </button>
+        </nav>
+      )}
+    </div>
+  );
+}
+
 export function HomeListingCarousel({ label, rows }: HomeListingCarouselProps) {
   const [visibleCount, setVisibleCount] = useState(4);
   const [page, setPage] = useState(0);

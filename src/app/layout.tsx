@@ -15,7 +15,7 @@ import { adminAccess } from '@/lib/admin';
 import { storesForStaff } from '@/services/custody';
 import { countDealsNeedingAttention } from '@/services/deals';
 import { countPendingOffersReceivedBySeller } from '@/services/offers';
-import { isV1Launch } from '@/lib/launch-scope';
+import { areAuctionsVisible, isV1Launch } from '@/lib/launch-scope';
 import { env } from '@/lib/env';
 
 export const metadata: Metadata = {
@@ -85,7 +85,7 @@ async function SiteNavigation() {
         {viewer === null ? (
           <Link href="/sign-in"><UserRound className="nav-icon" aria-hidden="true" />Log in</Link>
         ) : (
-          <ProfileMenu displayName={viewer.displayName} image={viewer.image} signOutAction={signOutAction} />
+          <ProfileMenu displayName={viewer.displayName} image={viewer.image} signOutAction={signOutAction} auctionsVisible={areAuctionsVisible()} />
         )}
       </nav>
       <MobileNavigation

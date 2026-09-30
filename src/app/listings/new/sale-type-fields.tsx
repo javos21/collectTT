@@ -21,6 +21,7 @@ export function SaleTypeFields({
   initialDurationHours,
   initialAcceptsOffers = false,
   v1 = false,
+  auctionsEnabled = true,
 }: {
   saleType: SaleType;
   onSaleTypeChange: (value: SaleType) => void;
@@ -30,6 +31,7 @@ export function SaleTypeFields({
   initialDurationHours?: number;
   initialAcceptsOffers?: boolean;
   v1?: boolean;
+  auctionsEnabled?: boolean;
 }) {
   return (
     <>
@@ -48,7 +50,7 @@ export function SaleTypeFields({
           <span><strong>Fixed price</strong><small>Buy now or offer</small></span>
         </label>
 
-        <label className={saleType === 'auction' ? 'sale-type-option is-selected' : 'sale-type-option'}>
+        {auctionsEnabled && <label className={saleType === 'auction' ? 'sale-type-option is-selected' : 'sale-type-option'}>
           <input
             type="radio"
             name="saleType"
@@ -60,7 +62,7 @@ export function SaleTypeFields({
             <svg viewBox="0 0 24 24" {...stroke}><path d="M14 6l4 4M9.5 10.5l4 4M4 20h9" /><path d="M12 8l-6 6 2 2 6-6zM15 5l4 4" /></svg>
           </span>
           <span><strong>Auction</strong><small>Highest bid wins</small></span>
-        </label>
+        </label>}
       </div>
 
       {saleType === 'straight_sale' ? (

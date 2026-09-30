@@ -1,17 +1,58 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  areAuctionsVisible,
+  assertAuctionBiddingEnabled,
+  assertAuctionCreationEnabled,
   assertLegacyFeatureAllowed,
   assertV1ListingTerms,
+  auctionMode,
+  isAuctionBiddingEnabled,
+  isAuctionCreationEnabled,
   isLegacyFeatureAllowed,
   launchScope,
 } from '@/lib/launch-scope';
 
 const originalScope = process.env.COLLECTTT_LAUNCH_SCOPE;
+const originalAuctionMode = process.env.COLLECTTT_AUCTION_MODE;
 
 afterEach(() => {
   if (originalScope === undefined) delete process.env.COLLECTTT_LAUNCH_SCOPE;
   else process.env.COLLECTTT_LAUNCH_SCOPE = originalScope;
+  if (originalAuctionMode === undefined) delete process.env.COLLECTTT_AUCTION_MODE;
+  else process.env.COLLECTTT_AUCTION_MODE = originalAuctionMode;
+});
+
+describe('auction availability', () => {
+  it('fails closed when the mode is missing or invalid', () => {
+    delete process.env.COLLECTTT_AUCTION_MODE;
+    expect(auctionMode()).toBe('hidden');
+    expect(areAuctionsVisible()).toBe(false);
+    expect(isAuctionCreationEnabled()).toBe(false);
+    expect(isAuctionBiddingEnabled()).toBe(false);
+    expect(() => assertAuctionCreationEnabled()).toThrow('Auctions are not currently available.');
+
+    process.env.COLLECTTT_AUCTION_MODE = 'unexpected';
+    expect(auctionMode()).toBe('hidden');
+  });
+
+  it('drains existing auctions without allowing new ones', () => {
+    process.env.COLLECTTT_AUCTION_MODE = 'draining';
+    expect(areAuctionsVisible()).toBe(true);
+    expect(isAuctionCreationEnabled()).toBe(false);
+    expect(isAuctionBiddingEnabled()).toBe(true);
+    expect(() => assertAuctionCreationEnabled()).toThrow('existing auctions finish');
+    expect(() => assertAuctionBiddingEnabled()).not.toThrow();
+  });
+
+  it('enables the complete auction flow explicitly', () => {
+    process.env.COLLECTTT_AUCTION_MODE = 'enabled';
+    expect(areAuctionsVisible()).toBe(true);
+    expect(isAuctionCreationEnabled()).toBe(true);
+    expect(isAuctionBiddingEnabled()).toBe(true);
+    expect(() => assertAuctionCreationEnabled()).not.toThrow();
+    expect(() => assertAuctionBiddingEnabled()).not.toThrow();
+  });
 });
 
 describe('v1 launch scope', () => {

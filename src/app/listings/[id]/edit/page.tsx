@@ -6,6 +6,7 @@ import { getListing, getListingActivity, listingAuditForSeller, sellerMeetupLoca
 import { imageVariants } from '@/services/images';
 import { EditListingForm } from './edit-listing-form';
 import { cancelListingAction, updateListingAction, publishListingAction } from './actions';
+import { areAuctionsVisible } from '@/lib/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,7 @@ export default async function EditListingPage({
   const result = await getListing(id, user.userId);
   if (result === null) notFound();
   const { listing, images, deliveryOptions, meetupLocations: listingMeetupLocations } = result;
+  if (listing.saleType === 'auction' && !areAuctionsVisible()) notFound();
   if (listing.sellerId !== user.userId) redirect(`/listings/${id}`);
   if (listing.status !== 'active' && listing.status !== 'draft') redirect(`/listings/${id}`);
   const [activity, auditEvents, meetupLocations] = await Promise.all([

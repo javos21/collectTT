@@ -6,6 +6,12 @@ export const profileTabs = [
   { id: 'listings', label: 'Listings' },
 ] as const;
 
+export function profileTabsFor(auctionsVisible: boolean) {
+  return profileTabs.map((tab) => tab.id === 'bids-offers' && !auctionsVisible
+    ? { ...tab, label: 'Offers' }
+    : tab);
+}
+
 export type ProfileTabId = (typeof profileTabs)[number]['id'];
 
 export function isProfileTabId(value: string | undefined): value is ProfileTabId {

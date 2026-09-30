@@ -8,7 +8,7 @@ import { ListingForm } from './listing-form';
 import { getFullServiceDeliveryDays, listMarketplaceOptions } from '@/services/platform-settings';
 import { activeCategoryDefinitions } from '@/services/catalog';
 import { evaluateMarketplaceAction } from '@/services/marketplace-eligibility';
-import { isV1Launch } from '@/lib/launch-scope';
+import { isAuctionCreationEnabled, isV1Launch } from '@/lib/launch-scope';
 import { getListing, sellerMarketplacePreferencesFor, sellerMeetupLocationsFor } from '@/services/listings';
 import { getListingActivity } from '@/services/listings';
 import { imageVariants } from '@/services/images';
@@ -22,6 +22,7 @@ export default async function NewListingPage({
 }) {
   const user = await currentUser();
   const { error, duplicateFrom } = await searchParams;
+  const auctionsEnabled = isAuctionCreationEnabled();
 
   if (user === null) {
     return (
@@ -61,6 +62,9 @@ export default async function NewListingPage({
     const duplicableStatuses = new Set(['draft', 'active', 'sold_outside', 'expired', 'ended_no_sale', 'cancelled', 'ended_won']);
     if (source === undefined || source.sellerId !== user.userId) {
       return <main className="create-page"><Link className="create-back" href="/listings">← Back to listings</Link><div className="create-error" role="alert">This listing is not available to duplicate.</div></main>;
+    }
+    if (source.saleType === 'auction' && !auctionsEnabled) {
+      return <main className="create-page"><Link className="create-back" href={`/listings/${source.id}`}>← Back to listing</Link><div className="create-error" role="alert">Auction listings cannot be duplicated while auctions are turned off.</div></main>;
     }
     if (!duplicableStatuses.has(source.status)) {
       return <main className="create-page"><Link className="create-back" href={`/listings/${source.id}`}>← Back to listing</Link><div className="create-error" role="alert">This listing cannot be duplicated while buyer activity is active.</div></main>;
@@ -115,6 +119,7 @@ export default async function NewListingPage({
       <ListingForm
         action={createListingAction}
         v1={isV1Launch()}
+        auctionsEnabled={auctionsEnabled}
         relayStoreOptions={relayStoreOptions.map((store) => ({
           id: store.id,
           name: store.name,

@@ -80,7 +80,7 @@ export function EditListingForm({
 
       <fieldset className="create-section" disabled={locked}>
         <legend>Listing details</legend>
-        <p className="create-section__intro">Update the information buyers see. These settings are available until the first buyer reservation, bid, offer, or open deal.</p>
+        <p className="create-section__intro">Update the information buyers see. These settings are available until the first buyer {saleType === 'auction' ? 'bid' : 'reservation or offer'}, or open deal.</p>
         <div className="form-field">
           <label htmlFor="edit-title">Title</label>
           <input id="edit-title" name="title" type="text" defaultValue={title} required minLength={3} maxLength={160} />
@@ -104,7 +104,7 @@ export function EditListingForm({
         {hasMeetupDelivery && (
           <fieldset className="meetup-location-fieldset">
             <legend>Public meetup locations</legend>
-            <small>Choose 1–3. The buyer will select one when they reserve or bid. {selectedMeetupLocationIds.length}/3 selected.</small>
+            <small>Choose 1–3. The buyer will select one when they {saleType === 'auction' ? 'bid' : 'reserve the item'}. {selectedMeetupLocationIds.length}/3 selected.</small>
             <div className="choice-grid">
               {availableMeetupLocations.map((location) => (
                 <label className="choice-card choice-card--compact" key={location.id}>

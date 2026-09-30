@@ -40,4 +40,22 @@ describe('listing workflow', () => {
     expect(listingServiceSource).toContain('Choose only active payment methods.');
     expect(launchScopeSource).not.toContain('V1_ALLOWED_SETTLEMENT_METHODS');
   });
+
+  it('gates auction discovery, creation, and bidding through the centralized switch', async () => {
+    const [homeSource, browseSource, listingServiceSource, bidSource, createFormSource] = await Promise.all([
+      readFile(new URL('../../src/app/page.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/app/listings/page.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/services/listings.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/db/atomic/place-bid.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/app/listings/new/sale-type-fields.tsx', import.meta.url), 'utf8'),
+    ]);
+
+    expect(homeSource).toContain('const auctionsVisible = areAuctionsVisible()');
+    expect(homeSource).toContain('{auctionsVisible && <Link className="home-browse-action home-browse-action--auction"');
+    expect(browseSource).toContain('{auctionsVisible && <Link');
+    expect(listingServiceSource).toContain("if (input.saleType === 'auction') assertAuctionCreationEnabled()");
+    expect(listingServiceSource).toContain('surface === \'recent\' || !auctionsVisible');
+    expect(bidSource).toContain('assertAuctionBiddingEnabled();');
+    expect(createFormSource).toContain('{auctionsEnabled && <label');
+  });
 });

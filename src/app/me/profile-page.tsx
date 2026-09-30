@@ -24,7 +24,7 @@ import {
 
 import { Tabs } from '@/components/application/tabs/tabs';
 import { NativeSelect } from '@/components/base/select/select-native';
-import { normalizeProfileTab, profileTabs } from '@/lib/profile-tabs';
+import { normalizeProfileTab, profileTabsFor } from '@/lib/profile-tabs';
 import { OPTIONAL_NOTIFICATION_PREFERENCES } from '@/notifications/events';
 import { ShareListingsButton } from '@/components/share-listings-button';
 
@@ -58,6 +58,7 @@ type RelayStoreData = { id: string; name: string; area: string };
 type MeetupLocationData = { id: string; label: string; area: string; instructions: string | null; active: boolean };
 
 interface ProfilePageProps {
+  auctionsVisible: boolean;
   signOutAction: () => Promise<void>;
   deleteListingAction: (formData: FormData) => Promise<void>;
   initialTab?: string;
@@ -240,7 +241,7 @@ function AccountPanel(props: ProfilePageProps) {
         <div className="profile-panel__title"><Bell size={19} aria-hidden="true" /><h3 id="profile-notification-title">Notification preferences</h3></div>
         <p className="profile-panel__note">You can turn off optional email updates. Commitment, payment, dispute, security, and restriction emails always remain on.</p>
         <form className="profile-account-form profile-notification-form" action={props.saveNotificationPreferencesAction}>
-          {OPTIONAL_NOTIFICATION_PREFERENCES.map(({ eventType, label, description }) => (
+          {OPTIONAL_NOTIFICATION_PREFERENCES.filter(({ eventType }) => props.auctionsVisible || !eventType.startsWith('auction_')).map(({ eventType, label, description }) => (
             <label className="profile-notification-choice" key={eventType}>
               <input type="checkbox" name={`email:${eventType}`} defaultChecked={props.notificationPreferences[eventType] !== false} />
               <span><strong>{label}</strong><small>{description}</small></span>
@@ -315,7 +316,7 @@ function ActivityIcon({ kind }: { kind: ActivityItem['kind'] }) {
   return <HeartHandshake size={18} aria-hidden="true" />;
 }
 
-function ActivityPanel({ claims, bids, offers, deals }: Pick<ProfilePageProps, 'claims' | 'bids' | 'offers' | 'deals'>) {
+function ActivityPanel({ claims, bids, offers, deals, auctionsVisible }: Pick<ProfilePageProps, 'claims' | 'bids' | 'offers' | 'deals' | 'auctionsVisible'>) {
   const activity = [
     ...claims.map<ActivityItem>((claim) => ({
       id: `claim-${claim.id}`,
@@ -359,7 +360,7 @@ function ActivityPanel({ claims, bids, offers, deals }: Pick<ProfilePageProps, '
         <div className="profile-section-heading profile-section-heading--tight">
           <div>
             <h3 className="profile-section-heading__title">Your activity</h3>
-            <p className="profile-section-heading__description">A single timeline for claims, bids, offers, and transactions.</p>
+            <p className="profile-section-heading__description">A single timeline for {auctionsVisible ? 'claims, bids, offers, and transactions' : 'claims, offers, and transactions'}.</p>
           </div>
           <span className="profile-section-heading__hint">{activity.length} recorded</span>
         </div>
@@ -370,7 +371,7 @@ function ActivityPanel({ claims, bids, offers, deals }: Pick<ProfilePageProps, '
           {activity.length > 0 && <span className="profile-section-heading__hint">Newest first</span>}
         </div>
         {activity.length === 0 ? (
-          <EmptyState icon={<WalletCards size={22} />} title="No activity yet">Your claims, bids, offers, and completed transactions will appear here.</EmptyState>
+          <EmptyState icon={<WalletCards size={22} />} title="No activity yet">Your {auctionsVisible ? 'claims, bids, offers, and completed transactions' : 'claims, offers, and completed transactions'} will appear here.</EmptyState>
         ) : (
           <div className="profile-activity-feed">
             {activity.slice(0, 30).map((item) => (
@@ -568,7 +569,7 @@ function DraftsGrid({ listings, deleteListingAction }: Pick<ListingTableProps, '
   );
 }
 
-function ListingsPanel({ listings, deleteListingAction, identity }: Pick<ProfilePageProps, 'listings' | 'deleteListingAction' | 'identity'>) {
+function ListingsPanel({ listings, deleteListingAction, identity, auctionsVisible }: Pick<ProfilePageProps, 'listings' | 'deleteListingAction' | 'identity' | 'auctionsVisible'>) {
   const activeCount = listings.filter((listing) => listing.status === 'active').length;
   return (
     <div className="profile-content-stack">
@@ -593,29 +594,29 @@ function ListingsPanel({ listings, deleteListingAction, identity }: Pick<Profile
           />
         </div>
       </section>
-      <ListingsTable listings={listings} saleType="auction" deleteListingAction={deleteListingAction} />
+      {auctionsVisible && <ListingsTable listings={listings} saleType="auction" deleteListingAction={deleteListingAction} />}
       <ListingsTable listings={listings} saleType="straight_sale" deleteListingAction={deleteListingAction} />
     </div>
   );
 }
 
-function BidsOffersPanel({ bids, offers }: Pick<ProfilePageProps, 'bids' | 'offers'>) {
+function BidsOffersPanel({ bids, offers, auctionsVisible }: Pick<ProfilePageProps, 'bids' | 'offers' | 'auctionsVisible'>) {
   return (
     <div className="profile-content-stack">
       <section className="profile-panel profile-panel--bids-offers-intro">
         <div className="profile-section-heading profile-section-heading--tight">
           <div>
-            <h3 className="profile-section-heading__title">Bids &amp; offers</h3>
+            <h3 className="profile-section-heading__title">{auctionsVisible ? 'Bids & offers' : 'Offers'}</h3>
             <p className="profile-section-heading__description">Keep every action you sent in one place. Seller responses and deal updates live in My Deals.</p>
           </div>
-          <span className="profile-section-heading__hint">{bids.length + offers.length} sent</span>
+          <span className="profile-section-heading__hint">{(auctionsVisible ? bids.length : 0) + offers.length} sent</span>
         </div>
       </section>
       <div className="profile-two-column">
-        <section className="profile-panel">
+        {auctionsVisible && <section className="profile-panel">
           <div className="profile-panel__title"><Gavel size={19} aria-hidden="true" /><h3>Auction bids <span>{bids.length}</span></h3></div>
           {bids.length === 0 ? <p className="profile-panel__empty-copy">Your auction bids will show up here.</p> : <div className="profile-mini-list">{bids.slice(0, 30).map((bid) => <div className="profile-mini-row" key={bid.id}><div><strong>{bid.title}</strong><small>Placed {date(bid.placedAt)}</small></div><div><strong>{bid.amount}</strong><StatusPill value={bid.status} /></div></div>)}</div>}
-        </section>
+        </section>}
         <section className="profile-panel">
           <div className="profile-panel__title"><HandCoins size={19} aria-hidden="true" /><h3>Offers sent <span>{offers.length}</span></h3></div>
           {offers.length === 0 ? <p className="profile-panel__empty-copy">Offers you make on fixed-price listings will show up here.</p> : <div className="profile-mini-list">{offers.slice(0, 30).map((offer) => <div className="profile-mini-row" key={offer.id}><div><strong>{offer.title}</strong><small>Sent {date(offer.createdAt)}</small></div><div><strong>{offer.amount}</strong><StatusPill value={offer.status} /></div></div>)}</div>}
@@ -627,20 +628,21 @@ function BidsOffersPanel({ bids, offers }: Pick<ProfilePageProps, 'bids' | 'offe
 
 const panelByTab: Record<string, FC<ProfilePageProps>> = {
   account: (props) => <AccountPanel {...props} />,
-  activity: ({ claims, bids, offers, deals }) => <ActivityPanel claims={claims} bids={bids} offers={offers} deals={deals} />,
+  activity: ({ claims, bids, offers, deals, auctionsVisible }) => <ActivityPanel claims={claims} bids={bids} offers={offers} deals={deals} auctionsVisible={auctionsVisible} />,
   trust: ({ counters, reputationEvents }) => <TrustPanel counters={counters} reputationEvents={reputationEvents} />,
-  listings: ({ listings, deleteListingAction, identity }) => <ListingsPanel listings={listings} deleteListingAction={deleteListingAction} identity={identity} />,
-  'bids-offers': ({ bids, offers }) => <BidsOffersPanel bids={bids} offers={offers} />,
+  listings: ({ listings, deleteListingAction, identity, auctionsVisible }) => <ListingsPanel listings={listings} deleteListingAction={deleteListingAction} identity={identity} auctionsVisible={auctionsVisible} />,
+  'bids-offers': ({ bids, offers, auctionsVisible }) => <BidsOffersPanel bids={bids} offers={offers} auctionsVisible={auctionsVisible} />,
 };
 
 export default function ProfilePage(props: ProfilePageProps) {
+  const profileTabs = profileTabsFor(props.auctionsVisible);
   const initialTab = normalizeProfileTab(props.initialTab);
   const [selectedTabIndex, setSelectedTabIndex] = useState<Key>(initialTab);
   useEffect(() => {
     setSelectedTabIndex(initialTab);
   }, [initialTab]);
   const ActivePanel = panelByTab[String(selectedTabIndex)] ?? panelByTab.activity!;
-  const selectedTab = profileTabs.find((tab) => tab.id === String(selectedTabIndex)) ?? profileTabs[0];
+  const selectedTab = profileTabs.find((tab) => tab.id === String(selectedTabIndex)) ?? profileTabs[0]!;
 
   return <>
     <div className="profile-page__section-bar">
