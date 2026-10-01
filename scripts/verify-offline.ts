@@ -29,6 +29,15 @@ function contains(relativePath: string, ...needles: string[]): void {
   }
 }
 
+function doesNotContain(relativePath: string, ...needles: string[]): void {
+  const source = read(relativePath);
+  for (const needle of needles) {
+    if (source.includes(needle)) {
+      throw new Error(`${relativePath} retains removed contract: ${needle}`);
+    }
+  }
+}
+
 type Check = { label: string; run: () => void };
 
 const checks: Check[] = [
@@ -144,7 +153,7 @@ const checks: Check[] = [
       contains('src/db/schema/transactions.ts', 'meetupLocationId');
       contains('src/app/listings/[id]/page.tsx', 'commitmentAcknowledged', 'Reserve / buy now', 'errorCode');
       contains('src/app/listings/[id]/actions.ts', 'commitment_confirmation_required');
-      contains('src/services/marketplace-eligibility.ts', "'active_commitment_limit'");
+      doesNotContain('src/services/marketplace-eligibility.ts', "'active_commitment_limit'", 'New buyers may have one active reservation');
       contains('drizzle/0025_shallow_prima.sql', 'ADD COLUMN "meetup_location_id"', 'UPDATE "transactions"');
       read('tests/flows/trading-loop.test.ts');
     },
