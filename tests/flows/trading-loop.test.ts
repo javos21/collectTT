@@ -245,7 +245,7 @@ describe('★ atomic straight-sale claim', () => {
     expect(open).toHaveLength(1);
   });
 
-  it('allows at most one concurrent active commitment for a new buyer', async () => {
+  it('allows a new buyer to hold multiple active commitments', async () => {
     const firstListingId = await makeListing();
     const secondListingId = await makeListing();
     const results = await Promise.allSettled([
@@ -253,11 +253,11 @@ describe('★ atomic straight-sale claim', () => {
       claimListing({ listingId: secondListingId, claimantId: newBuyer, fulfillmentPath: 'cash_meetup' }),
     ]);
 
-    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(0);
     const open = await db.select({ id: transactions.id }).from(transactions)
       .where(and(eq(transactions.buyerId, newBuyer), eq(transactions.state, 'open')));
-    expect(open).toHaveLength(1);
+    expect(open).toHaveLength(2);
   });
 
   it('blocks marketplace writes when a legacy account has no phone number', async () => {

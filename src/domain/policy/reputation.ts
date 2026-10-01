@@ -73,8 +73,6 @@ export const THRESHOLDS = {
     /** Failed sales in the trailing window that pause publishing. */
     publishBlockedAt: 4,
   },
-  /** Below this many completed purchases a member counts as a new buyer. */
-  newMemberCompletedDeals: 3,
   /** Rolling window all `_90d` counters use. */
   rollingWindowDays: 90,
 } as const;
@@ -121,10 +119,6 @@ export function sellerRestrictionsWithThresholds(
   if (failures >= thresholds.meetupOnlyAt) out.push('meetup_only');
   if (failures >= thresholds.publishBlockedAt) out.push('publish_blocked');
   return out;
-}
-
-export function isNewMember(completedPurchases: number): boolean {
-  return completedPurchases < THRESHOLDS.newMemberCompletedDeals;
 }
 
 /**

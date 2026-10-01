@@ -1,14 +1,13 @@
 /**
  * The single marketplace-action gate. Callers provide a member and intent; this module
- * owns account, contact, scoped-restriction, and new-buyer commitment rules.
+ * owns account, contact, and scoped-restriction rules.
  */
 
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
 
 import type { DbOrTx, Tx } from '@/db/client';
-import { profiles, reputationCounters, restrictions } from '@/db/schema/profiles';
-import { transactions } from '@/db/schema/transactions';
-import { THRESHOLDS, type RestrictionType } from '@/domain/policy/reputation';
+import { profiles, restrictions } from '@/db/schema/profiles';
+import type { RestrictionType } from '@/domain/policy/reputation';
 
 export type MarketplaceAction =
   | 'persist_listing'
@@ -20,8 +19,7 @@ export type MarketplaceAction =
 export type EligibilityCode =
   | 'account_unavailable'
   | 'phone_required'
-  | 'action_restricted'
-  | 'active_commitment_limit';
+  | 'action_restricted';
 
 export interface MarketplaceEligibilityResult {
   eligible: boolean;
@@ -46,8 +44,8 @@ export async function evaluateMarketplaceAction(
   options: { lockMember?: boolean } = {},
 ): Promise<MarketplaceEligibilityResult> {
   if (options.lockMember === true) {
-    // Every commitment for one buyer serializes on the same durable row. The open
-    // transaction check below therefore cannot be passed concurrently twice.
+    // Keep commitment creation for one buyer serialized on the same durable row so
+    // future account-level eligibility checks cannot race each other.
     await executor.execute(sql`select user_id from profiles where user_id = ${userId} for update`);
   }
 
@@ -55,11 +53,8 @@ export async function evaluateMarketplaceAction(
     .select({
       status: profiles.status,
       phoneE164: profiles.phoneE164,
-      buyCompleted: reputationCounters.buyCompleted,
-      sellCompleted: reputationCounters.sellCompleted,
     })
     .from(profiles)
-    .leftJoin(reputationCounters, eq(reputationCounters.userId, profiles.userId))
     .where(eq(profiles.userId, userId))
     .limit(1);
   const member = memberRows[0];
@@ -82,23 +77,6 @@ export async function evaluateMarketplaceAction(
   const active = new Set<RestrictionType>(activeRestrictionRows.map((row) => row.type));
   const restrictionMessage = actionRestriction(active, action);
   if (restrictionMessage !== null) return denied('action_restricted', restrictionMessage);
-
-  if (action === 'bid' || action === 'create_commitment') {
-    const completedPurchases = member.buyCompleted ?? 0;
-    if (completedPurchases < THRESHOLDS.newMemberCompletedDeals) {
-      const openRows = await executor
-        .select({ id: transactions.id })
-        .from(transactions)
-        .where(and(eq(transactions.buyerId, userId), eq(transactions.state, 'open')))
-        .limit(1);
-      if (openRows[0] !== undefined) {
-        return denied(
-          'active_commitment_limit',
-          'New buyers may have one active reservation at a time. Complete or close your current deal first.',
-        );
-      }
-    }
-  }
 
   return { eligible: true };
 }
