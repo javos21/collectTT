@@ -55,8 +55,9 @@ function claimedAgo(claimedAt: string): string {
 }
 
 export function HomeListingTile({ row }: { row: HomeListingRow }) {
-  return (
-    <Link className="home-listing-tile" href={`/listings/${row.id}`}>
+  const isClaimed = row.claimedAt !== undefined && row.claimedAt !== null;
+  const content = (
+    <>
       <div className="home-listing-tile__image">
         {row.primaryImageId ? (
           <img src={`/api/images/${row.primaryImageId}?variant=card`} alt="" loading="lazy" decoding="async" />
@@ -78,16 +79,24 @@ export function HomeListingTile({ row }: { row: HomeListingRow }) {
           <div className="home-listing-tile__sale-meta">
             <span className="home-listing-tile__price-label">Sale Price</span>
             <strong className="num">{formatMoney(priceFor(row))}</strong>
-            {row.claimedAt !== undefined && row.claimedAt !== null ? (
-              <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Claimed {claimedAgo(row.claimedAt)}</span>
-            ) : row.acceptsOffers ? (
+            {!isClaimed && row.acceptsOffers ? (
               <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Offers accepted</span>
             ) : null}
           </div>
         )}
-        <span className="home-listing-tile__cta"><Eye aria-hidden="true" />View Listing</span>
+        {row.claimedAt !== undefined && row.claimedAt !== null ? (
+          <span className="home-listing-tile__offers"><BadgeCheck aria-hidden="true" />Claimed {claimedAgo(row.claimedAt)}</span>
+        ) : (
+          <span className="home-listing-tile__cta"><Eye aria-hidden="true" />View Listing</span>
+        )}
       </div>
-    </Link>
+    </>
+  );
+
+  return isClaimed ? (
+    <article className="home-listing-tile">{content}</article>
+  ) : (
+    <Link className="home-listing-tile" href={`/listings/${row.id}`}>{content}</Link>
   );
 }
 

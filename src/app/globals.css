@@ -801,7 +801,7 @@ header.site .brand-logo {
 .home-pagination__button svg { width: 16px; height: 16px; }
 .home-pagination__status { min-width: 90px; color: #667985; font-size: .75rem; font-weight: 750; text-align: center; }
 .home-listing-tile { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--home-line); border-radius: 15px; color: var(--home-ink); background: #fff; text-decoration: none; box-shadow: 0 5px 15px rgba(26,94,125,.05); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
-.home-listing-tile:hover { border-color: #a9dce5; box-shadow: 0 12px 24px rgba(26,94,125,.12); transform: translateY(-3px); }
+a.home-listing-tile:hover { border-color: #a9dce5; box-shadow: 0 12px 24px rgba(26,94,125,.12); transform: translateY(-3px); }
 .home-listing-tile__image { display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; background: linear-gradient(145deg, #e8f6f8, #f4efe5); color: #6e8b94; font-size: .65rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
 .home-listing-tile__image img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; object-fit: contain; object-position: center; }
 .home-listing-tile__body { min-width: 0; padding: .8rem .85rem .9rem; }
@@ -3059,7 +3059,7 @@ header.site nav a.user-nav { border-color: var(--border); background: #fff; box-
 .card, .track, .buybox, .seller-card, .filter-panel, table, .auth-panel, .create-section {
   border-color: var(--border); background: #fff; box-shadow: var(--shadow-sm);
 }
-.card:hover, .home-listing-tile:hover, .catalog-card:hover {
+.card:hover, a.home-listing-tile:hover, .catalog-card:hover {
   border-color: #c7ccff; box-shadow: var(--shadow-card); transform: translateY(-3px);
 }
 
@@ -3356,7 +3356,7 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 .home-section__heading h2 { font-size: 1.5rem; }
 .home-section__heading a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 .25rem; font-size: .875rem; }
 .home-listing-tile { border-radius: 12px; box-shadow: none; }
-.home-listing-tile:hover { border-color: #a5b4fc; transform: none; box-shadow: 0 6px 18px rgba(24, 24, 27, .06); }
+a.home-listing-tile:hover { border-color: #a5b4fc; transform: none; box-shadow: 0 6px 18px rgba(24, 24, 27, .06); }
 .home-listing-tile__body { padding: .9rem; }
 .home-listing-tile h3 { font-size: .95rem; line-height: 1.35; }
 .home-listing-tile__meta { margin-top: .65rem; }
@@ -3610,8 +3610,8 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
 }
 .home-category:hover,
 .home-category:focus-visible,
-.home-listing-tile:hover,
-.home-listing-tile:focus-visible {
+a.home-listing-tile:hover,
+a.home-listing-tile:focus-visible {
   border-color: #a5b4fc;
   box-shadow: 0 10px 24px rgba(79, 70, 229, .12);
   transform: translateY(-3px);
@@ -3726,8 +3726,8 @@ button:hover, .button:hover, .ui-button:hover { background: var(--primary-hover)
   height: 15px;
   margin-left: .25rem;
 }
-.home-listing-tile:hover .home-listing-tile__cta,
-.home-listing-tile:focus-visible .home-listing-tile__cta {
+a.home-listing-tile:hover .home-listing-tile__cta,
+a.home-listing-tile:focus-visible .home-listing-tile__cta {
   border-color: #4338ca;
   background: #4338ca;
   color: #fff;
