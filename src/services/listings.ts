@@ -532,23 +532,22 @@ export async function updateListingBasics(
   const input = listingEditSchema.parse(raw);
 
   await db.transaction(async (tx) => {
-    const currentRows = await tx.execute(sql`
-      select title, description, sale_type, status, price_cents, accepts_offers, payment_window_hours, fulfillment_paths, meetup_location_id
-      from listings
-      where id = ${listingId} and seller_id = ${sellerId}
-      for update
-    `);
-    const current = currentRows.rows[0] as {
-      title: string;
-      description: string | null;
-      sale_type: 'straight_sale' | 'auction';
-      status: 'draft' | 'active' | 'claimed' | 'ended_won' | 'ended_no_sale' | 'cancelled' | 'expired' | 'sold_outside';
-      price_cents: string | number | null;
-      accepts_offers: boolean;
-      payment_window_hours: number;
-      fulfillment_paths: FulfillmentPath[];
-      meetup_location_id: string | null;
-    } | undefined;
+    // Use schema decoding: raw SQL can return custom enum arrays as PG array text.
+    const [current] = await tx
+      .select({
+        title: listings.title,
+        description: listings.description,
+        sale_type: listings.saleType,
+        status: listings.status,
+        price_cents: listings.priceCents,
+        accepts_offers: listings.acceptsOffers,
+        payment_window_hours: listings.paymentWindowHours,
+        fulfillment_paths: listings.fulfillmentPaths,
+        meetup_location_id: listings.meetupLocationId,
+      })
+      .from(listings)
+      .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)))
+      .for('update');
     if (current === undefined) throw new Error('Listing not found');
     if (current.sale_type === 'auction' && !areAuctionsVisible()) {
       throw new AuctionUnavailableError('hidden');
